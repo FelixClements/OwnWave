@@ -1,7 +1,7 @@
 import argparse
 
 from config import MUSIC_DIR
-from db import get_conn
+from db import get_conn, wait_for_db
 from scanner import scan_path
 from station_builder import build_station
 
@@ -29,10 +29,12 @@ def main():
     args = parser.parse_args()
 
     if args.command == "scan":
+        wait_for_db()
         track_ids = scan_path(args.path, force=args.force)
         print(f"Scanned {len(track_ids)} tracks")
 
     elif args.command == "build-station":
+        wait_for_db()
         filters = {}
         if args.min_bpm is not None:
             filters["min_bpm"] = args.min_bpm

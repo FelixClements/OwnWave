@@ -5,6 +5,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
@@ -12,6 +13,25 @@ import (
 	"github.com/joho/godotenv"
 	"github.com/rs/cors"
 )
+
+func waitForDB(ctx context.Context, dsn string) (*pgxpool.Pool, error) {
+	var lastErr error
+	for i := 0; i < 30; i++ {
+		pool, err := pgxpool.New(ctx, dsn)
+		if err == nil {
+			if err := pool.Ping(ctx); err == nil {
+				return pool, nil
+			}
+			lastErr = err
+			pool.Close()
+		} else {
+			lastErr = err
+		}
+		log.Printf("waiting for db... (%d/30)", i+1)
+		time.Sleep(2 * time.Second)
+	}
+	return nil, lastErr
+}
 
 func main() {
 	_ = godotenv.Load()
@@ -21,7 +41,8 @@ func main() {
 		log.Fatal("DATABASE_URL not set")
 	}
 
-	db, err := pgxpool.New(context.Background(), dsn)
+	ctx := context.Background()
+	db, err := waitForDB(ctx, dsn)
 	if err != nil {
 		log.Fatalf("db connection: %v", err)
 	}

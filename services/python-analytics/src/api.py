@@ -13,6 +13,11 @@ from station_builder import build_station
 app = FastAPI(title="OwnWave Analytics")
 
 
+@app.on_event("startup")
+def startup():
+    db.wait_for_db()
+
+
 class ScanRequest(BaseModel):
     path: str = MUSIC_DIR
     force: bool = False

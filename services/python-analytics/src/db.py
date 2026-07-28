@@ -1,3 +1,4 @@
+import time
 from datetime import datetime
 from typing import List, Optional
 from uuid import UUID
@@ -11,6 +12,22 @@ from models import AudioFeatures
 
 def get_conn():
     return psycopg.connect(DATABASE_URL)
+
+
+def wait_for_db(max_retries: int = 30, delay: float = 2.0) -> None:
+    """Wait until the database is reachable."""
+    last_exc = None
+    for i in range(max_retries):
+        try:
+            with get_conn() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT 1")
+            return
+        except Exception as exc:
+            last_exc = exc
+            print(f"waiting for db... ({i + 1}/{max_retries})")
+            time.sleep(delay)
+    raise last_exc
 
 
 def get_or_create_artist(conn: psycopg.Connection, name: str) -> UUID:
