@@ -1,0 +1,9 @@
+node_modules
+.next
+.env
+*.log
+__pycache__
+*.pyc
+.DS_Store
+music/*
+!music/.gitkeep
