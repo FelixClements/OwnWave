@@ -55,3 +55,30 @@ The data-crunching back-end worker. Running completely asynchronously from the r
 *   **Lossless Digital Signal Processing (DSP)**: Python utilizes processing libraries like librosa and essentia to extract deep sonic data directly from the audio waveforms of your FLAC files. It calculates specific mathematical audio attributes such as rhythmic tempo (BPM), acoustic energy levels, danceability metrics, and valence (the emotional mood or brightness of a song).
 *   **Metadata Normalization**: It scans massive folder structures to read ID3/Vorbis tags, extracting artist credits, album information, release years, and original genre notes. It normalizes this data to fix inconsistent tags.
 *   **AI-Driven Radio Matrixing**: Instead of relying on static, unchanging playlists, Python processes these extracted audio attributes using unsupervised clustering algorithms (such as K-Means or Vector Embeddings). It continuously categorizes your library into interconnected "station profiles." This lets the app generate randomized, highly cohesive radio streams where every consecutive track perfectly matches the vibe, mood, and style of the selected channel.
+Here is the content rewritten with optimized markdown formatting for clear structure and easy scanning.
+## 🧠 1. The Python Analytics Engine (Preparation)
+Your Python engine must calculate the transition markers beforehand. It should not do this live during playback.
+
+* BPM & Grid Detection: Extract the precise Tempo (BPM) and beat positions using libraries like librosa or essentia.
+* Cue Points: Detect the structural "Intro" and "Outro" boundaries where a mix can safely occur.
+* Energy Levels: Identify the volume envelopes to match the gain (perceived loudness) between tracks.
+* Database Write: Store these markers (outro_start_seconds, bpm, ideal_crossfade_duration) in the Shared Database.
+
+## 🚦 2. The Go API Server (Scheduling)
+The Go backend acts as the conductor. It looks ahead in the queue to prepare the next track.
+
+* Lookahead Pipeline: When a song reaches its outro_start_seconds marker, the Go server prepares the next song buffer.
+* Metadata Injector: Pass the exact transition timestamps and BPM delta values downstream to the client inside the track payload.
+
+## 🎨 3. The T3 Web Frontend (Execution)
+The actual mixing (crossfading and audio warping) must happen on the client side using the Web Audio API to ensure zero latency.
+
+* Dual Audio Nodes: Maintain two separate AudioBufferSourceNode instances simultaneously (Track A and Track B).
+* Gain Node Automation: Use gainNode.gain.linearRampToValueAtTime() to fade Track A out while fading Track B in.
+* Playback Rate Adjustment: If the BPMs match closely, subtly alter audioNode.playbackRate.value on Track B to align the beats.
+
+* The Python code skeleton using librosa to find the outro boundary
+
+Let me know which technical layer you want to implement next.
+
+seamlessly during the crossfade.
