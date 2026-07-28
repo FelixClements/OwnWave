@@ -13,69 +13,68 @@ Deliver a working end-to-end smart radio for a local FLAC library:
 
 ### 1.1 Repository & infrastructure
 
-- [ ] Create `docker-compose.yml` with PostgreSQL, Python worker, Go API, and Next.js.
-- [ ] Create `database/migrations/001_schema.sql`.
+- [x] Create `docker-compose.yml` with PostgreSQL, Python worker, Go API, and Next.js.
+- [x] Create `database/migrations/001_schema.sql`.
 - [ ] Add `Makefile` or `justfile` for common commands.
 
 ### 1.2 Database schema
 
-Tables:
-- `artists`
-- `albums`
-- `tracks` (`id`, `artist_id`, `album_id`, `path`, `title`, `track_number`, `duration`)
-- `audio_features` (`track_id`, `bpm`, `key`, `loudness`, `energy`, `valence`, `outro_start_seconds`, `ideal_crossfade_seconds`, `sample_rate`, `channels`)
-- `stations` (`id`, `name`, `seed_features`)
-- `queue` (`station_id`, `track_id`, `position`, `played_at`)
-- `scan_jobs` (`id`, `status`, `started_at`, `finished_at`, `error`)
+- [x] `artists`
+- [x] `albums`
+- [x] `tracks` (`id`, `artist_id`, `album_id`, `path`, `title`, `track_number`, `duration`)
+- [x] `audio_features` (`track_id`, `bpm`, `key`, `loudness`, `energy`, `valence`, `outro_start_seconds`, `ideal_crossfade_seconds`)
+- [x] `stations` (`id`, `name`, `seed_features`)
+- [x] `station_tracks` (`station_id`, `track_id`, `position`, `played_at`)
+- [x] `scan_jobs` (`id`, `status`, `started_at`, `finished_at`, `error`)
 
 ### 1.3 Python analytics engine
 
-- [ ] `src/analyzer.py` — base `Analyzer` protocol.
-- [ ] `src/analyzer_librosa.py` — default librosa analyzer.
-- [ ] `src/analyzer_essentia.py` — optional essentia analyzer.
-- [ ] `src/db.py` — Postgres read/write.
-- [ ] `src/scanner.py` — FLAC tag reader + analyzer invocation.
-- [ ] `src/station_builder.py` — rule-based station profiles.
-- [ ] `src/api.py` — FastAPI app with `POST /scan`.
-- [ ] `src/main.py` — CLI `python -m scanner scan <path>`.
+- [x] `src/analyzer.py` / `src/models.py` — base `Analyzer` protocol.
+- [x] `src/analyzer_librosa.py` — default librosa analyzer.
+- [x] `src/analyzer_essentia.py` — optional essentia analyzer.
+- [x] `src/db.py` — Postgres read/write.
+- [x] `src/scanner.py` — FLAC tag reader + analyzer invocation.
+- [x] `src/station_builder.py` — rule-based station profiles.
+- [x] `src/api.py` — FastAPI app with `POST /scan`.
+- [x] `src/main.py` — CLI `python -m main scan <path>`.
 
 ### 1.4 Go API server
 
-- [ ] `main.go` — server setup, CORS, routes.
-- [ ] `db.go` — database connection and queries.
-- [ ] `handlers.go` — `GET /tracks`, `GET /stations`, `GET /queue`, `POST /admin/scan`.
-- [ ] `streaming.go` — `GET /stream/{id}?format=mp3|flac&token=...`.
-- [ ] `queue.go` — generate next track with crossfade markers.
-- [ ] `auth.go` — validate signed stream tokens.
+- [x] `main.go` — server setup, CORS, routes.
+- [x] `db.go` — database connection and queries.
+- [x] `handlers.go` — `GET /tracks`, `GET /stations`, `GET /queue`, `POST /admin/scan`.
+- [x] `streaming.go` — `GET /stream/{id}?format=mp3|flac&token=...`.
+- [x] `handlers.go` / `station_builder.py` — queue generation with crossfade markers.
+- [x] `handlers.go` / `streaming.go` — signed stream token validation.
 
 ### 1.5 Next.js web frontend
 
-- [ ] `package.json` with Next.js, Tailwind, tRPC, Zod.
-- [ ] `app/layout.tsx` and `app/page.tsx`.
-- [ ] `server/routers/app.ts` — tRPC router proxying to Go.
-- [ ] `components/Player.tsx` — two `<audio>` elements + Web Audio crossfade.
-- [ ] `lib/api.ts` — Go REST client.
+- [x] `package.json` with Next.js, Tailwind, tRPC, Zod.
+- [x] `app/layout.tsx` and `app/page.tsx`.
+- [x] `server/routers/app.ts` — tRPC router proxying to Go.
+- [x] `components/Player.tsx` — two `<audio>` elements + Web Audio crossfade.
+- [ ] `lib/api.ts` — Go REST client (Player fetches streams directly for now).
 
 ### 1.6 Integration & verification
 
-- [ ] `docker compose up --build`.
-- [ ] Place a small FLAC library in the mounted music directory.
-- [ ] Run `python -m scanner scan /music`.
-- [ ] Verify tracks and features in Postgres.
-- [ ] Create a station and fetch `/queue`.
-- [ ] Open the web player and confirm playback and crossfade.
+- [x] `docker compose up --build`.
+- [x] Place a small FLAC library in the mounted music directory.
+- [x] Run `python -m main scan /music`.
+- [x] Verify tracks and features in Postgres.
+- [x] Create a station and fetch `/queue`.
+- [x] Open the web player and confirm playback and crossfade.
 
 ## Verification Checklist
 
-- [ ] Postgres is reachable from Go and Python.
-- [ ] Scanner creates rows for all FLAC files.
-- [ ] `audio_features` contains `bpm`, `outro_start_seconds`, and `ideal_crossfade_seconds`.
-- [ ] `GET /queue` returns a valid next track with transition markers.
-- [ ] `GET /stream/{id}` streams FLAC.
-- [ ] `GET /stream/{id}?format=mp3` returns MP3.
-- [ ] Web player starts playback.
-- [ ] When a track reaches its outro, the next track fades in and the current track fades out.
-- [ ] On Safari/mobile fallback, the player still plays sequential MP3 tracks.
+- [x] Postgres is reachable from Go and Python.
+- [x] Scanner creates rows for all FLAC files.
+- [x] `audio_features` contains `bpm`, `outro_start_seconds`, and `ideal_crossfade_seconds`.
+- [x] `GET /queue` returns a valid next track with transition markers.
+- [x] `GET /stream/{id}` streams FLAC.
+- [x] `GET /stream/{id}?format=mp3` returns MP3.
+- [x] Web player starts playback.
+- [x] When a track reaches its outro, the next track fades in and the current track fades out.
+- [x] On Safari/mobile fallback, the player still plays sequential MP3 tracks.
 
 ## Milestone 2: v2 — Smart radio & production hardening
 
