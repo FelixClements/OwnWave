@@ -18,6 +18,20 @@ from scanner import SUPPORTED_EXTS, _get_duration, _parse_int
 from tags import read_tags
 
 
+def _existing_feature_paths(conn, paths: List[str]) -> set:
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            SELECT t.path
+            FROM tracks t
+            JOIN audio_features af ON t.id = af.track_id
+            WHERE t.path = ANY(%s)
+            """,
+            (paths,),
+        )
+        return {row[0] for row in cur.fetchall()}
+
+
 def import_folder(folder_path: str, analyze: bool = True, force: bool = False) -> List[UUID]:
     """Import a single music folder with batch database upserts."""
     folder = Path(folder_path).expanduser().resolve()
@@ -37,7 +51,12 @@ def import_folder(folder_path: str, analyze: bool = True, force: bool = False) -
     album_cache: Dict[tuple, UUID] = {}
 
     with get_conn() as conn:
-        conn.autocommit = False
+        existing_features = (
+            _existing_feature_paths(conn, [str(f) for f in files])
+            if not force and analyzers is not None
+            else set()
+        )
+
         try:
             for file_path in files:
                 try:
@@ -47,6 +66,7 @@ def import_folder(folder_path: str, analyze: bool = True, force: bool = False) -
                         analyzers,
                         artist_cache,
                         album_cache,
+                        existing_features,
                         force=force,
                     )
                     if track_rec:
@@ -79,6 +99,7 @@ def _build_record(
     analyzers: Optional[List[Any]],
     artist_cache: Dict[str, UUID],
     album_cache: Dict[tuple, UUID],
+    existing_features: set,
     force: bool,
 ) -> tuple:
     path_str = str(file_path)
@@ -113,7 +134,7 @@ def _build_record(
     }
 
     feature_rec = None
-    if analyzers is not None:
+    if analyzers is not None and (force or path_str not in existing_features):
         features = analyze_file(path_str, analyzers=analyzers)
         feature_rec = {
             "path": path_str,

@@ -80,10 +80,10 @@ Deliver a working end-to-end smart radio for a local FLAC library:
 
 ### 2.1 Auto-indexing & storage
 
-- [ ] File-system watcher (`watchdog` or `inotify`) on `MUSIC_DIR` for real-time reindexing.
+- [x] File-system watcher (`watchdog` or `inotify`) on `MUSIC_DIR` for real-time reindexing.
 - [ ] Incremental scanning: only process new/changed/deleted files.
 - [ ] Configurable audio format ladder: FLAC source, MP3/Opus/AAC transcoding targets.
-- [ ] Background job queue (Redis/RabbitMQ/Celery) for large library scans.
+- [x] Background job queue (Redis/RabbitMQ/Celery) for large library scans.
 
 ### 2.2 AI-driven station generation
 
@@ -127,7 +127,7 @@ Deliver a working end-to-end smart radio for a local FLAC library:
 
 ## v2 Verification Checklist
 
-- [ ] Adding a file to `music/` triggers re-analysis automatically.
+- [x] Adding a file to `music/` triggers re-analysis automatically.
 - [ ] Server-side crossfade stream works in Safari without Web Audio.
 - [ ] AI stations generate coherent queues from a seed track.
 - [ ] Similar tracks are retrievable via API/frontend.

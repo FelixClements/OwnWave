@@ -55,20 +55,28 @@ def trigger_library_scan(master_job_id: Optional[str], path: str, force: bool = 
     if not root.exists():
         raise FileNotFoundError(f"Music path does not exist: {root}")
 
-    # Find top-level folders that contain music files. If the root itself
-    # contains music files, treat the root as one job.
-    folders: List[str] = []
-    if any(
-        f.is_file() and f.suffix.lower() in SUPPORTED_EXTS for f in root.iterdir()
-    ):
-        folders.append(str(root))
+    if not root.is_dir():
+        # A single file or leaf folder was passed; process it directly.
+        folders = [str(root)]
+    else:
+        # Find all directories under root that contain music files and are not
+        # ancestors of any other music-containing directory. This avoids
+        # duplicate work when a parent and its children are both scanned.
+        music_dirs: List[Path] = []
+        for p in root.rglob("*"):
+            if p.is_file() and p.suffix.lower() in SUPPORTED_EXTS:
+                music_dirs.append(p.parent)
 
-    for child in sorted(root.iterdir()):
-        if child.is_dir() and any(
-            f.is_file() and f.suffix.lower() in SUPPORTED_EXTS
-            for f in child.rglob("*")
-        ):
-            folders.append(str(child))
+        by_depth = sorted(set(music_dirs), key=lambda d: len(d.parts), reverse=True)
+        selected: List[str] = []
+        selected_paths: set = set()
+        for d in by_depth:
+            d_str = str(d)
+            if any(sel.startswith(d_str + "/") for sel in selected_paths):
+                continue
+            selected_paths.add(d_str)
+            selected.append(d_str)
+        folders = selected
 
     if not folders:
         with db.get_conn() as conn:
