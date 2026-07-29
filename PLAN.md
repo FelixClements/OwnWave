@@ -86,6 +86,20 @@ Deliver a working end-to-end smart radio for a local FLAC library:
 - [ ] Configurable audio format ladder: FLAC source, MP3/Opus/AAC transcoding targets.
 - [ ] Background job queue (Redis/RabbitMQ/Celery) for large library scans.
 
+    Architecture for 15,000+ files:
+    1. **Producer (Trigger Script):** hands the parent music directory path to Celery and exits immediately.
+    2. **Message Broker (Redis):** FIFO queue of folder-level scan jobs.
+    3. **Manager Task (`trigger_library_scan`):** walks the root directory, identifies top-level folders (artist/album), and enqueues one job per folder.
+    4. **Gevent Workers (`process_audio_folder`):** pull folder tasks, walk internal files, parse tags with `mutagen`, and collect records.
+    5. **Database (PostgreSQL):** each worker bulk-upserts a folder's records in a single transaction using `execute_values()` with `ON CONFLICT (file_path) DO UPDATE`.
+
+    Why it scales:
+    - **Chunked manager-worker pattern:** a corrupt file in one folder only fails that folder, not the whole 15,000-file scan.
+    - **Gevent concurrency:** use `--pool=gevent --concurrency=50` so workers switch on I/O wait (tag reading) and run many files in parallel on a single core.
+    - **Database batching:** replace 15,000 single inserts with a few hundred bulk `execute_values()` calls.
+    - **Late acknowledgment:** `worker_prefetch_multiplier=1` + `task_acks_late=True` ensures Redis only removes a job after PostgreSQL commits it.
+    - **Idempotency:** `ON CONFLICT (file_path) DO UPDATE` makes re-scans safe.
+
 ### 2.2 AI-driven station generation
 
 - [ ] Compute a normalized feature vector for every track (BPM, key, loudness, spectral centroid, chroma, energy, valence, MFCCs).
