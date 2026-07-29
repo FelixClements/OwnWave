@@ -6,7 +6,8 @@ from fastapi import BackgroundTasks, FastAPI, HTTPException
 from pydantic import BaseModel
 
 import db
-from config import MUSIC_DIR
+from celery_app import celery_app
+from config import CELERY_BROKER_URL, MUSIC_DIR
 from scanner import scan_path
 from station_builder import build_station
 
@@ -46,11 +47,34 @@ async def health():
     return {"status": "ok"}
 
 
+def _celery_available() -> bool:
+    if not CELERY_BROKER_URL:
+        return False
+    try:
+        import redis
+
+        r = redis.from_url(CELERY_BROKER_URL, socket_connect_timeout=1)
+        r.ping()
+        return True
+    except Exception:
+        return False
+
+
 @app.post("/scan")
 async def scan(req: ScanRequest, background_tasks: BackgroundTasks):
     with _db_conn() as conn:
         job_id = db.create_scan_job(conn, req.path)
         conn.commit()
+
+    if _celery_available():
+        try:
+            from tasks import trigger_library_scan
+
+            trigger_library_scan.delay(str(job_id), req.path, req.force)
+            return {"job_id": str(job_id), "status": "queued"}
+        except Exception:
+            # Redis may be configured but not reachable; fall through.
+            pass
 
     background_tasks.add_task(_run_scan, job_id, req.path, req.force)
     return {"job_id": str(job_id), "status": "pending"}

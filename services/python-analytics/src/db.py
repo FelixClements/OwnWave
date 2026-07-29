@@ -237,3 +237,96 @@ def get_queue(conn: psycopg.Connection, station_id: UUID) -> List[dict]:
         )
         columns = [desc[0] for desc in cur.description]
         return [dict(zip(columns, row)) for row in cur.fetchall()]
+
+
+def get_track_ids_by_paths(conn: psycopg.Connection, paths: List[str]) -> dict:
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT id, path FROM tracks WHERE path = ANY(%s)",
+            (paths,),
+        )
+        return {row[1]: row[0] for row in cur.fetchall()}
+
+
+def upsert_tracks_batch(conn: psycopg.Connection, records: List[dict]) -> None:
+    if not records:
+        return
+    values = [
+        (
+            rec["path"],
+            rec.get("artist_id"),
+            rec.get("album_id"),
+            rec["title"],
+            rec.get("track_number"),
+            rec.get("duration"),
+            rec.get("sample_rate"),
+            rec.get("channels"),
+        )
+        for rec in records
+    ]
+    with conn.cursor() as cur:
+        cur.executemany(
+            """
+            INSERT INTO tracks
+                (path, artist_id, album_id, title, track_number, duration_seconds,
+                 sample_rate, channels, updated_at)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, NOW())
+            ON CONFLICT (path) DO UPDATE SET
+                artist_id = EXCLUDED.artist_id,
+                album_id = EXCLUDED.album_id,
+                title = EXCLUDED.title,
+                track_number = EXCLUDED.track_number,
+                duration_seconds = EXCLUDED.duration_seconds,
+                sample_rate = EXCLUDED.sample_rate,
+                channels = EXCLUDED.channels,
+                updated_at = NOW()
+            """,
+            values,
+        )
+
+
+def upsert_audio_features_batch(
+    conn: psycopg.Connection, records: List[AudioFeatures], path_to_id: dict
+) -> None:
+    if not records:
+        return
+    values = []
+    for rec in records:
+        track_id = path_to_id.get(rec["path"])
+        if not track_id:
+            continue
+        values.append(
+            (
+                track_id,
+                rec["bpm"],
+                rec["key"],
+                rec["loudness"],
+                rec["energy"],
+                rec["valence"],
+                rec["outro_start_seconds"],
+                rec["ideal_crossfade_seconds"],
+                Jsonb(rec["chroma"]) if rec.get("chroma") else None,
+            )
+        )
+    if not values:
+        return
+    with conn.cursor() as cur:
+        cur.executemany(
+            """
+            INSERT INTO audio_features
+                (track_id, bpm, key, loudness, energy, valence,
+                 outro_start_seconds, ideal_crossfade_seconds, chroma, analyzed_at)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())
+            ON CONFLICT (track_id) DO UPDATE SET
+                bpm = EXCLUDED.bpm,
+                key = EXCLUDED.key,
+                loudness = EXCLUDED.loudness,
+                energy = EXCLUDED.energy,
+                valence = EXCLUDED.valence,
+                outro_start_seconds = EXCLUDED.outro_start_seconds,
+                ideal_crossfade_seconds = EXCLUDED.ideal_crossfade_seconds,
+                chroma = EXCLUDED.chroma,
+                analyzed_at = NOW()
+            """,
+            values,
+        )
