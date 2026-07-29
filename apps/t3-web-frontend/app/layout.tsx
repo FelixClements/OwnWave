@@ -14,7 +14,7 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en">
-      <body className="antialiased">
+      <body className="h-full overflow-hidden antialiased">
         <Provider>{children}</Provider>
       </body>
     </html>

@@ -11,8 +11,35 @@ async function getStreamUrl(id: string, format = 'mp3') {
   return `${GO_API}${data.url}`;
 }
 
+function PlayIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      className={className}
+      viewBox="0 0 24 24"
+      fill="currentColor"
+      xmlns="http://www.w3.org/2000/svg"
+    >
+      <path d="M8 5v14l11-7L8 5z" />
+    </svg>
+  );
+}
+
+function PauseIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      className={className}
+      viewBox="0 0 24 24"
+      fill="currentColor"
+      xmlns="http://www.w3.org/2000/svg"
+    >
+      <path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z" />
+    </svg>
+  );
+}
+
 export function Player({ queue }: { queue: QueueTrack[] }) {
   const [started, setStarted] = useState(false);
+  const [isPlaying, setIsPlaying] = useState(false);
   const [currentTrack, setCurrentTrack] = useState<QueueTrack | null>(null);
 
   const audioARef = useRef<HTMLAudioElement | null>(null);
@@ -27,9 +54,9 @@ export function Player({ queue }: { queue: QueueTrack[] }) {
   useEffect(() => {
     if (!started || !queue.length) return;
 
-    const AudioCtx = (window as any).AudioContext || (window as any).webkitAudioContext;
+    const AudioCtx =
+      (window as any).AudioContext || (window as any).webkitAudioContext;
     if (!AudioCtx) {
-      // Fallback: just play sequential with native audio.
       playSequential();
       return;
     }
@@ -105,11 +132,11 @@ export function Player({ queue }: { queue: QueueTrack[] }) {
 
     await loadTrack(audio, index);
 
-    // Reset other audio.
     otherAudio.pause();
     otherAudio.src = '';
 
-    audio.play();
+    await audio.play();
+    setIsPlaying(true);
 
     const gain = target === 'A' ? gainARef.current : gainBRef.current;
     const otherGain = target === 'A' ? gainBRef.current : gainARef.current;
@@ -156,10 +183,14 @@ export function Player({ queue }: { queue: QueueTrack[] }) {
     crossfadingRef.current = true;
 
     const nextTarget = currentTarget === 'A' ? 'B' : 'A';
-    const currentAudio = currentTarget === 'A' ? audioARef.current : audioBRef.current;
-    const nextAudio = nextTarget === 'A' ? audioARef.current : audioBRef.current;
-    const currentGain = currentTarget === 'A' ? gainARef.current : gainBRef.current;
-    const nextGain = nextTarget === 'A' ? gainARef.current : gainBRef.current;
+    const currentAudio =
+      currentTarget === 'A' ? audioARef.current : audioBRef.current;
+    const nextAudio =
+      nextTarget === 'A' ? audioARef.current : audioBRef.current;
+    const currentGain =
+      currentTarget === 'A' ? gainARef.current : gainBRef.current;
+    const nextGain =
+      nextTarget === 'A' ? gainARef.current : gainBRef.current;
     const ctx = contextRef.current;
 
     if (!currentAudio || !nextAudio || !currentGain || !nextGain || !ctx) return;
@@ -170,7 +201,8 @@ export function Player({ queue }: { queue: QueueTrack[] }) {
     const url = await getStreamUrl(nextTrack.id);
     nextAudio.src = url;
     nextAudio.load();
-    nextAudio.play();
+    await nextAudio.play();
+    setIsPlaying(true);
 
     const crossfade = nextTrack.ideal_crossfade_seconds;
     const now = ctx.currentTime;
@@ -183,59 +215,83 @@ export function Player({ queue }: { queue: QueueTrack[] }) {
     nextGain.gain.setValueAtTime(0, now);
     nextGain.gain.linearRampToValueAtTime(1, now + crossfade);
 
-    setTimeout(
-      () => {
-        currentAudio.pause();
-        currentAudio.src = '';
-        currentAudio.ontimeupdate = null;
-        currentAudio.onended = null;
+    setTimeout(() => {
+      currentAudio.pause();
+      currentAudio.src = '';
+      currentAudio.ontimeupdate = null;
+      currentAudio.onended = null;
 
-        nextAudio.ontimeupdate = () => handleTimeUpdate(nextAudio, nextTarget);
-        nextAudio.onended = () => handleEnded(nextTarget);
+      nextAudio.ontimeupdate = () => handleTimeUpdate(nextAudio, nextTarget);
+      nextAudio.onended = () => handleEnded(nextTarget);
 
-        activeRef.current = nextTarget;
-        currentIndexRef.current = nextIndex;
-        crossfadingRef.current = false;
-      },
-      crossfade * 1000
-    );
+      activeRef.current = nextTarget;
+      currentIndexRef.current = nextIndex;
+      crossfadingRef.current = false;
+    }, crossfade * 1000);
   }
 
-  if (!started) {
-    return (
-      <div className="text-center py-12">
-        <button
-          onClick={() => setStarted(true)}
-          className="bg-blue-600 hover:bg-blue-500 text-white font-semibold py-3 px-8 rounded-full text-lg"
-        >
-          Start Radio
-        </button>
-      </div>
-    );
+  function togglePlay() {
+    if (!started) {
+      setStarted(true);
+      return;
+    }
+    const audio =
+      activeRef.current === 'A' ? audioARef.current : audioBRef.current;
+    if (!audio) return;
+    if (isPlaying) {
+      audio.pause();
+      setIsPlaying(false);
+    } else {
+      audio.play().catch(() => {});
+      setIsPlaying(true);
+    }
   }
 
   return (
-    <div className="bg-zinc-900 p-6 rounded-xl">
+    <div className="w-full h-full flex items-center justify-between px-4">
       <audio ref={audioARef} crossOrigin="anonymous" className="hidden" />
       <audio ref={audioBRef} crossOrigin="anonymous" className="hidden" />
 
-      {currentTrack && (
-        <div className="mb-4">
-          <h3 className="text-2xl font-semibold">{currentTrack.title}</h3>
-          <p className="text-zinc-400">
-            {currentTrack.artist} · {currentTrack.bpm.toFixed(0)} BPM ·{' '}
-            {currentTrack.key}
-          </p>
+      {currentTrack ? (
+        <div className="flex items-center gap-4 w-1/3 min-w-0">
+          <div className="w-14 h-14 bg-spotify-card rounded shadow flex items-center justify-center text-xs text-spotify-subdued font-bold">
+            {currentTrack.title.charAt(0).toUpperCase()}
+          </div>
+          <div className="min-w-0">
+            <div className="text-sm font-bold text-spotify-text truncate">
+              {currentTrack.title}
+            </div>
+            <div className="text-xs text-spotify-subdued truncate">
+              {currentTrack.artist || 'Unknown artist'}
+            </div>
+          </div>
         </div>
+      ) : (
+        <div className="w-1/3" />
       )}
 
-      <div className="flex gap-4 justify-center">
+      <div className="flex flex-col items-center w-1/3">
         <button
-          onClick={() => audioARef.current?.pause()}
-          className="bg-zinc-700 hover:bg-zinc-600 px-4 py-2 rounded"
+          onClick={togglePlay}
+          className="w-10 h-10 rounded-full bg-spotify-text text-spotify-bg flex items-center justify-center hover:scale-105 transition disabled:opacity-50"
+          disabled={started && !currentTrack}
+          aria-label={started ? 'Play/Pause' : 'Start radio'}
         >
-          Pause
+          {started ? (
+            isPlaying ? (
+              <PauseIcon className="w-5 h-5" />
+            ) : (
+              <PlayIcon className="w-5 h-5 ml-0.5" />
+            )
+          ) : (
+            <PlayIcon className="w-5 h-5 ml-0.5" />
+          )}
         </button>
+      </div>
+
+      <div className="w-1/3 flex justify-end text-xs text-spotify-subdued truncate">
+        {currentTrack &&
+          `${currentTrack.bpm.toFixed(0)} BPM · ${currentTrack.key}`}
       </div>
     </div>
   );
