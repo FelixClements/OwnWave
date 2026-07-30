@@ -134,12 +134,16 @@ func (h *Handler) StreamURL(w http.ResponseWriter, r *http.Request) {
 	if format == "" {
 		format = "flac"
 	}
+	bitrate := r.URL.Query().Get("bitrate")
 	token, err := h.signStreamToken(trackID, format)
 	if err != nil {
 		http.Error(w, err.Error(), 500)
 		return
 	}
 	url := fmt.Sprintf("/stream/%s?format=%s&token=%s", trackID, format, token)
+	if bitrate != "" {
+		url += "&bitrate=" + bitrate
+	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"url": url})
 }
@@ -170,16 +174,20 @@ func (h *Handler) StreamTrack(w http.ResponseWriter, r *http.Request) {
 	if !filepath.IsAbs(fullPath) {
 		fullPath = filepath.Join(h.musicDir, fullPath)
 	}
-	if _, err := exec.LookPath(h.ffmpegPath); err != nil && format == "mp3" {
-		http.Error(w, "ffmpeg not available", 500)
-		return
+	if strings.ToLower(format) != "flac" {
+		if _, err := exec.LookPath(h.ffmpegPath); err != nil {
+			http.Error(w, "ffmpeg not available", 500)
+			return
+		}
 	}
 
 	switch strings.ToLower(format) {
-	case "mp3":
-		h.serveMP3(w, r, fullPath)
-	default:
+	case "flac":
 		h.serveFLAC(w, r, fullPath)
+	case "mp3", "opus", "aac":
+		h.serveTranscoded(w, r, fullPath, format)
+	default:
+		http.Error(w, "unsupported format", 400)
 	}
 }
 
