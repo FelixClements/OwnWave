@@ -12,6 +12,9 @@ class AudioFeatures:
     outro_start_seconds: float
     ideal_crossfade_seconds: float
     chroma: Optional[list] = None
+    spectral_centroid: Optional[float] = None
+    mfcc: Optional[list] = None
+    feature_vector: Optional[list] = None
 
 
 class Analyzer(Protocol):
@@ -40,4 +43,7 @@ def merge_features(base: AudioFeatures, extra: Optional[AudioFeatures]) -> Audio
             base.ideal_crossfade_seconds, extra.ideal_crossfade_seconds
         ),
         chroma=pick(base.chroma, extra.chroma),
+        spectral_centroid=pick(base.spectral_centroid, extra.spectral_centroid),
+        mfcc=pick(base.mfcc, extra.mfcc),
+        feature_vector=pick(base.feature_vector, extra.feature_vector),
     )

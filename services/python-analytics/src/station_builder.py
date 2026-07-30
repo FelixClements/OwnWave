@@ -6,6 +6,10 @@ from uuid import UUID
 import psycopg
 
 from db import create_station, get_all_tracks_with_features, insert_station_tracks
+from similarity import get_similar_tracks
+
+
+SEED_TYPES = {"track", "artist", "album", "mood", "cluster"}
 
 
 def build_station(
@@ -14,7 +18,7 @@ def build_station(
     seed_filter: Optional[dict] = None,
     length: int = 50,
 ) -> UUID:
-    """Build a station queue by greedily walking the track feature space."""
+    """Build a smart station queue from a seed (filter, track, artist, album, mood, or cluster)."""
     tracks = get_all_tracks_with_features(conn)
     if not tracks:
         raise ValueError("No analyzed tracks found")
@@ -23,9 +27,9 @@ def build_station(
         tracks = _apply_filter(tracks, seed_filter)
 
     if len(tracks) < 2:
-        raise ValueError("Not enough tracks match the filter")
+        raise ValueError("Not enough tracks match the seed")
 
-    sequence = _greedy_queue(tracks, length)
+    sequence = _smart_queue(conn, tracks, length)
     track_ids = [t["id"] for t in sequence]
 
     station_id = create_station(conn, name, seed_features=seed_filter)
@@ -35,6 +39,32 @@ def build_station(
 
 
 def _apply_filter(tracks: List[dict], filters: dict) -> List[dict]:
+    seed_type = filters.get("type")
+    if seed_type == "track":
+        target = UUID(filters["track_id"])
+        return [t for t in tracks if t["id"] == target] or [t for t in tracks]
+    if seed_type == "artist":
+        artist_id = UUID(filters["artist_id"])
+        return [t for t in tracks if t["artist_id"] == artist_id]
+    if seed_type == "album":
+        album_id = UUID(filters["album_id"])
+        return [t for t in tracks if t["album_id"] == album_id]
+    if seed_type == "cluster":
+        cluster_id = int(filters["cluster_id"])
+        return [t for t in tracks if t.get("cluster_id") == cluster_id]
+    if seed_type == "mood":
+        min_energy = filters.get("min_energy", 0.0)
+        max_energy = filters.get("max_energy", 1.0)
+        min_valence = filters.get("min_valence", 0.0)
+        max_valence = filters.get("max_valence", 1.0)
+        return [
+            t
+            for t in tracks
+            if min_energy <= (t["energy"] or 0) <= max_energy
+            and min_valence <= (t["valence"] or 0) <= max_valence
+        ]
+
+    # Legacy numeric filters
     out = []
     for t in tracks:
         ok = True
@@ -51,20 +81,63 @@ def _apply_filter(tracks: List[dict], filters: dict) -> List[dict]:
     return out
 
 
-def _greedy_queue(tracks: List[dict], length: int) -> List[dict]:
-    # Sort by energy to get a sensible starting point, then pick closest neighbours.
-    pool = sorted(tracks, key=lambda t: (t["energy"] or 0, t["valence"] or 0))
-    current = pool[0]
+def _smart_queue(
+    conn: psycopg.Connection,
+    tracks: List[dict],
+    length: int,
+    novelty: float = 0.15,
+) -> List[dict]:
+    """Greedy k-NN walk that occasionally jumps for novelty."""
+    # Start from a random track in the seed pool
+    current = random.choice(tracks)
     queue = [current]
-    remaining = pool[1:]
+    remaining = [t for t in tracks if t["id"] != current["id"]]
+
+    # Pre-compute k-NN cache for the current track set
+    track_ids_in_pool = {t["id"] for t in tracks}
+    sim_cache = {}
+
+    if current.get("feature_vector") is not None:
+        sim_cache[current["id"]] = get_similar_tracks(conn, current["id"], limit=min(50, len(tracks)))
 
     while len(queue) < length and remaining:
-        next_track = min(remaining, key=lambda t: _distance(current, t))
+        if random.random() < novelty and remaining:
+            # Novelty jump: pick a track from a different cluster if possible
+            current_cluster = current.get("cluster_id")
+            other_clusters = [t for t in remaining if t.get("cluster_id") != current_cluster]
+            if other_clusters:
+                next_track = random.choice(other_clusters)
+            else:
+                next_track = random.choice(remaining)
+        else:
+            next_track = _nearest_remaining(current, remaining, conn, sim_cache)
+
         queue.append(next_track)
         remaining.remove(next_track)
         current = next_track
 
     return queue
+
+
+def _nearest_remaining(
+    current: dict,
+    remaining: List[dict],
+    conn: psycopg.Connection,
+    sim_cache: dict,
+) -> dict:
+    """Pick the closest track using pgvector distance when possible."""
+    current_id = current["id"]
+    current_vec = current.get("feature_vector")
+
+    if current_vec is not None:
+        if current_id not in sim_cache:
+            sim_cache[current_id] = get_similar_tracks(conn, current_id, limit=50)
+        sims = {tid: dist for tid, dist in sim_cache[current_id]}
+        best = min(remaining, key=lambda t: sims.get(t["id"], float("inf")))
+        return best
+
+    # Fallback to the old BPM/energy/valence distance
+    return min(remaining, key=lambda t: _distance(current, t))
 
 
 def _distance(a: dict, b: dict) -> float:
@@ -75,7 +148,6 @@ def _distance(a: dict, b: dict) -> float:
     valence_a = a.get("valence") or 0.5
     valence_b = b.get("valence") or 0.5
 
-    # Tempo is relative; energy/valence are 0-1.
     bpm_diff = abs(bpm_a - bpm_b) / max((bpm_a + bpm_b) / 2, 1.0)
     energy_diff = abs(energy_a - energy_b)
     valence_diff = abs(valence_a - valence_b)

@@ -13,7 +13,7 @@ from scanner import SUPPORTED_EXTS
 
 
 @celery_app.task(bind=True, max_retries=3, default_retry_delay=5)
-def process_audio_folder(self, folder_path: str, master_job_id: str) -> dict:
+def process_audio_folder(self, folder_path: str, master_job_id: str, force: bool = False) -> dict:
     """Import one music folder and update its scan job."""
     with db.get_conn() as conn:
         job_id = db.create_scan_job(conn, folder_path)
@@ -25,7 +25,7 @@ def process_audio_folder(self, folder_path: str, master_job_id: str) -> dict:
             db.update_scan_job(conn, job_id, "running")
             conn.commit()
 
-        track_ids = import_folder(folder_path, analyze=True, force=False)
+        track_ids = import_folder(folder_path, analyze=True, force=force)
 
         with db.get_conn() as conn:
             db.update_scan_job(conn, job_id, "completed")
@@ -85,7 +85,7 @@ def trigger_library_scan(master_job_id: Optional[str], path: str, force: bool = 
         return {"master_job_id": master_job_id, "dispatched": 0}
 
     subtasks = [
-        process_audio_folder.s(folder, master_job_id) for folder in folders
+        process_audio_folder.s(folder, master_job_id, force) for folder in folders
     ]
     results = [task.delay() for task in subtasks]
     task_ids = [r.id for r in results]
@@ -134,6 +134,22 @@ def finalize_scan(self, master_job_id: str, task_ids: List[str], root_path: str)
         "total": len(results),
         "failed": 0,
     }
+
+
+@celery_app.task
+def rebuild_feature_vectors() -> int:
+    """Rebuild normalized feature vectors for all tracks."""
+    from feature_vector import backfill_library_feature_vectors
+
+    return backfill_library_feature_vectors()
+
+
+@celery_app.task
+def rebuild_clusters(n_clusters: Optional[int] = None) -> dict:
+    """Rebuild track clusters."""
+    from clustering import backfill_library_clusters
+
+    return backfill_library_clusters(n_clusters=n_clusters)
 
 
 def _prune_deleted_tracks(root_path: str) -> int:

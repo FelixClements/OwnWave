@@ -11,7 +11,14 @@ from models import AudioFeatures
 
 
 def get_conn():
-    return psycopg.connect(DATABASE_URL)
+    conn = psycopg.connect(DATABASE_URL)
+    try:
+        import pgvector.psycopg
+
+        pgvector.psycopg.register_vector(conn)
+    except Exception:
+        pass
+    return conn
 
 
 def wait_for_db(max_retries: int = 30, delay: float = 2.0) -> None:
@@ -123,8 +130,9 @@ def upsert_audio_features(
             """
             INSERT INTO audio_features
                 (track_id, bpm, key, loudness, energy, valence,
-                 outro_start_seconds, ideal_crossfade_seconds, chroma, analyzed_at)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb, NOW())
+                 outro_start_seconds, ideal_crossfade_seconds, chroma,
+                 spectral_centroid, mfcc, feature_vector, analyzed_at)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s, %s, %s, NOW())
             ON CONFLICT (track_id) DO UPDATE SET
                 bpm = EXCLUDED.bpm,
                 key = EXCLUDED.key,
@@ -134,6 +142,9 @@ def upsert_audio_features(
                 outro_start_seconds = EXCLUDED.outro_start_seconds,
                 ideal_crossfade_seconds = EXCLUDED.ideal_crossfade_seconds,
                 chroma = EXCLUDED.chroma,
+                spectral_centroid = EXCLUDED.spectral_centroid,
+                mfcc = EXCLUDED.mfcc,
+                feature_vector = EXCLUDED.feature_vector,
                 analyzed_at = NOW()
             """,
             (
@@ -146,6 +157,9 @@ def upsert_audio_features(
                 features.outro_start_seconds,
                 features.ideal_crossfade_seconds,
                 Jsonb(features.chroma) if features.chroma else None,
+                features.spectral_centroid,
+                features.mfcc,
+                features.feature_vector,
             ),
         )
 
@@ -216,13 +230,23 @@ def get_all_tracks_with_features(conn: psycopg.Connection) -> List[dict]:
         cur.execute(
             """
             SELECT t.id, t.title, t.artist_id, t.album_id, t.path,
-                   af.bpm, af.energy, af.valence
+                   af.bpm, af.energy, af.valence, af.feature_vector,
+                   tc.cluster_id
             FROM tracks t
             JOIN audio_features af ON t.id = af.track_id
+            LEFT JOIN track_clusters tc ON t.id = tc.track_id
+            WHERE af.feature_vector IS NOT NULL
             """
         )
         columns = [desc[0] for desc in cur.description]
-        return [dict(zip(columns, row)) for row in cur.fetchall()]
+        rows = cur.fetchall()
+        out = []
+        for row in rows:
+            d = dict(zip(columns, row))
+            if d.get("feature_vector") is not None:
+                d["feature_vector"] = d["feature_vector"].to_list()
+            out.append(d)
+        return out
 
 
 def get_queue(conn: psycopg.Connection, station_id: UUID) -> List[dict]:
@@ -329,6 +353,9 @@ def upsert_audio_features_batch(
                 rec["outro_start_seconds"],
                 rec["ideal_crossfade_seconds"],
                 Jsonb(rec["chroma"]) if rec.get("chroma") else None,
+                rec.get("spectral_centroid"),
+                rec.get("mfcc"),
+                rec.get("feature_vector"),
             )
         )
     if not values:
@@ -338,8 +365,9 @@ def upsert_audio_features_batch(
             """
             INSERT INTO audio_features
                 (track_id, bpm, key, loudness, energy, valence,
-                 outro_start_seconds, ideal_crossfade_seconds, chroma, analyzed_at)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())
+                 outro_start_seconds, ideal_crossfade_seconds, chroma,
+                 spectral_centroid, mfcc, feature_vector, analyzed_at)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())
             ON CONFLICT (track_id) DO UPDATE SET
                 bpm = EXCLUDED.bpm,
                 key = EXCLUDED.key,
@@ -349,6 +377,9 @@ def upsert_audio_features_batch(
                 outro_start_seconds = EXCLUDED.outro_start_seconds,
                 ideal_crossfade_seconds = EXCLUDED.ideal_crossfade_seconds,
                 chroma = EXCLUDED.chroma,
+                spectral_centroid = EXCLUDED.spectral_centroid,
+                mfcc = EXCLUDED.mfcc,
+                feature_vector = EXCLUDED.feature_vector,
                 analyzed_at = NOW()
             """,
             values,

@@ -34,6 +34,13 @@ def main():
     serve_parser.add_argument("--host", default="0.0.0.0")
     serve_parser.add_argument("--port", type=int, default=8000)
 
+    vectors_parser = subparsers.add_parser("rebuild-vectors", help="Rebuild normalized feature vectors for all tracks")
+    vectors_parser.add_argument("--celery", action="store_true", help="Queue via Celery")
+
+    clusters_parser = subparsers.add_parser("rebuild-clusters", help="Rebuild track clusters")
+    clusters_parser.add_argument("--n-clusters", type=int, help="Number of K-Means clusters")
+    clusters_parser.add_argument("--celery", action="store_true", help="Queue via Celery")
+
     args = parser.parse_args()
 
     if args.command == "scan":
@@ -84,6 +91,42 @@ def main():
         from api import app
 
         uvicorn.run(app, host=args.host, port=args.port)
+
+    elif args.command == "rebuild-vectors":
+        if args.celery:
+            from celery_app import celery_app
+
+            @celery_app.task
+            def _rebuild_vectors():
+                from feature_vector import backfill_library_feature_vectors
+                return backfill_library_feature_vectors()
+
+            task = _rebuild_vectors.delay()
+            print(f"Queued rebuild: {task.id}")
+        else:
+            from feature_vector import backfill_library_feature_vectors
+
+            wait_for_db()
+            count = backfill_library_feature_vectors()
+            print(f"Rebuilt feature vectors for {count} tracks")
+
+    elif args.command == "rebuild-clusters":
+        if args.celery:
+            from celery_app import celery_app
+
+            @celery_app.task
+            def _rebuild_clusters():
+                from clustering import backfill_library_clusters
+                return backfill_library_clusters(n_clusters=args.n_clusters)
+
+            task = _rebuild_clusters.delay()
+            print(f"Queued rebuild: {task.id}")
+        else:
+            from clustering import backfill_library_clusters
+
+            wait_for_db()
+            result = backfill_library_clusters(n_clusters=args.n_clusters)
+            print(f"Rebuilt clusters: {result}")
 
 
 if __name__ == "__main__":

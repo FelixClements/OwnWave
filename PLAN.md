@@ -87,17 +87,17 @@ Deliver a working end-to-end smart radio for a local FLAC library:
 
 ### 2.2 AI-driven station generation
 
-- [ ] Compute a normalized feature vector for every track (BPM, key, loudness, spectral centroid, chroma, energy, valence, MFCCs).
-- [ ] K-means / DBSCAN clustering over feature vectors; store `track_clusters` and `cluster_centers`.
-- [ ] Similarity search with k-NN (pgvector or Faiss) for "play more like this".
-- [ ] Station seeds from track, artist, album, mood, or cluster.
-- [ ] "Smart shuffle" that balances similarity and novelty.
+- [x] Compute a normalized feature vector for every track (BPM, key, loudness, spectral centroid, chroma, energy, valence, MFCCs).
+- [x] K-means / DBSCAN clustering over feature vectors; store `track_clusters` and `cluster_centers`.
+- [x] Similarity search with k-NN (pgvector or Faiss) for "play more like this".
+- [x] Station seeds from track, artist, album, mood, or cluster.
+- [x] "Smart shuffle" that balances similarity and novelty.
 - [ ] Optional musicnn/essentia embedding-based similarity.
 
 ### 2.3 Streaming & crossfade
 
 - [ ] Server-side crossfaded MP3 stream for Safari / mobile / clients without Web Audio.
-- [ ] Format and bitrate selection per client (`format=mp3|flac|opus&bitrate=192`).
+- [x] Format and bitrate selection per client (`format=mp3|flac|opus&bitrate=192`).
 - [ ] Gapless playback and precise cue-point handling.
 - [ ] Volume normalization via ReplayGain or EBU R128 integrated loudness.
 

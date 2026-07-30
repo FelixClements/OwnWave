@@ -54,6 +54,9 @@ class LibrosaAnalyzer:
         sc_norm = min(sc_mean / (sr / 2), 1.0)
         valence = float(np.clip(0.6 * energy + 0.4 * sc_norm, 0.0, 1.0))
 
+        mfcc = librosa.feature.mfcc(y=y, sr=sr, n_mfcc=13)
+        mfcc_mean = np.mean(mfcc, axis=1)
+
         ideal_crossfade = _ideal_crossfade(tempo)
         outro_start = _detect_outro_start(y, sr, beat_frames, beat_times, duration, ideal_crossfade)
 
@@ -66,6 +69,8 @@ class LibrosaAnalyzer:
             outro_start_seconds=round(outro_start, 3),
             ideal_crossfade_seconds=round(ideal_crossfade, 3),
             chroma=chroma_mean.tolist(),
+            spectral_centroid=round(sc_mean, 2),
+            mfcc=mfcc_mean.tolist(),
         )
 
 

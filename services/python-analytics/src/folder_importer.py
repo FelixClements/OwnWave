@@ -15,6 +15,7 @@ from db import (
     upsert_audio_features_batch,
     upsert_tracks_batch,
 )
+from feature_vector import build_feature_vector
 from models import AudioFeatures
 from scanner import SUPPORTED_EXTS, _get_duration, _parse_int
 from tags import read_tags
@@ -176,12 +177,12 @@ def _build_record(
         "file_mtime": file_mtime,
     }
 
-    feature_rec = _build_feature_record(file_path, path_str, analyzers) if analyzers and (force or not _has_features(conn, path_str)) else None
+    feature_rec = _build_feature_record(conn, file_path, path_str, analyzers) if analyzers and (force or not _has_features(conn, path_str)) else None
 
     return track_rec, feature_rec
 
 
-def _build_feature_record(file_path: Path, path_str: str, analyzers: List[Any]) -> Optional[dict]:
+def _build_feature_record(conn: psycopg.Connection, file_path: Path, path_str: str, analyzers: List[Any]) -> Optional[dict]:
     try:
         features = analyze_file(path_str, analyzers=analyzers)
         return {
@@ -194,6 +195,9 @@ def _build_feature_record(file_path: Path, path_str: str, analyzers: List[Any]) 
             "outro_start_seconds": features.outro_start_seconds,
             "ideal_crossfade_seconds": features.ideal_crossfade_seconds,
             "chroma": features.chroma,
+            "spectral_centroid": features.spectral_centroid,
+            "mfcc": features.mfcc,
+            "feature_vector": build_feature_vector(features, conn),
         }
     except Exception as exc:
         print(f"Error analyzing {file_path}: {exc}")

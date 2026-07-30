@@ -14,6 +14,7 @@ from db import (
     upsert_audio_features,
     upsert_track,
 )
+from feature_vector import build_feature_vector
 from models import AudioFeatures
 from tags import read_tags
 
@@ -82,6 +83,7 @@ def _process_file(
     track_number = _parse_int(tags.get("tracknumber"))
 
     features = analyze_file(path_str, analyzers=analyzers)
+    features.feature_vector = build_feature_vector(features, conn)
     duration = _get_duration(path_str)
 
     sample_rate = None

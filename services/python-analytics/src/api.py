@@ -9,6 +9,7 @@ import db
 from celery_app import celery_app
 from config import CELERY_BROKER_URL, MUSIC_DIR
 from scanner import scan_path
+from similarity import get_similar_tracks
 from station_builder import build_station
 
 app = FastAPI(title="OwnWave Analytics")
@@ -31,6 +32,14 @@ class StationRequest(BaseModel):
     max_bpm: Optional[float] = None
     min_energy: Optional[float] = None
     max_energy: Optional[float] = None
+    # New seed options
+    seed_type: Optional[str] = None
+    track_id: Optional[UUID] = None
+    artist_id: Optional[UUID] = None
+    album_id: Optional[UUID] = None
+    cluster_id: Optional[int] = None
+    min_valence: Optional[float] = None
+    max_valence: Optional[float] = None
 
 
 @contextmanager
@@ -105,6 +114,32 @@ async def get_job(job_id: UUID):
 
 @app.post("/stations")
 async def create_station(req: StationRequest):
+    filters = _seed_filter(req)
+
+    with _db_conn() as conn:
+        station_id = build_station(conn, req.name, seed_filter=filters or None, length=req.length)
+        return {"station_id": str(station_id)}
+
+
+def _seed_filter(req: StationRequest) -> dict:
+    """Convert API request into the seed filter used by station_builder."""
+    if req.seed_type == "track" and req.track_id:
+        return {"type": "track", "track_id": str(req.track_id)}
+    if req.seed_type == "artist" and req.artist_id:
+        return {"type": "artist", "artist_id": str(req.artist_id)}
+    if req.seed_type == "album" and req.album_id:
+        return {"type": "album", "album_id": str(req.album_id)}
+    if req.seed_type == "cluster" and req.cluster_id is not None:
+        return {"type": "cluster", "cluster_id": req.cluster_id}
+    if req.seed_type == "mood":
+        return {
+            "type": "mood",
+            "min_energy": req.min_energy,
+            "max_energy": req.max_energy,
+            "min_valence": req.min_valence,
+            "max_valence": req.max_valence,
+        }
+
     filters = {}
     if req.min_bpm is not None:
         filters["min_bpm"] = req.min_bpm
@@ -114,10 +149,68 @@ async def create_station(req: StationRequest):
         filters["min_energy"] = req.min_energy
     if req.max_energy is not None:
         filters["max_energy"] = req.max_energy
+    return filters
 
+
+@app.get("/tracks/{track_id}/similar")
+async def similar_tracks(track_id: UUID, limit: int = 20):
     with _db_conn() as conn:
-        station_id = build_station(conn, req.name, seed_filter=filters or None, length=req.length)
-        return {"station_id": str(station_id)}
+        tracks = get_similar_tracks(conn, track_id, limit=limit)
+        return {
+            "track_id": str(track_id),
+            "similar": [
+                {"track_id": str(tid), "distance": round(dist, 4)} for tid, dist in tracks
+            ],
+        }
+
+
+@app.get("/stations/{station_id}/queue")
+async def station_queue(station_id: UUID):
+    with _db_conn() as conn:
+        queue = db.get_queue(conn, station_id)
+        return {
+            "station_id": str(station_id),
+            "tracks": [
+                {
+                    "position": t["position"],
+                    "track_id": str(t["id"]),
+                    "title": t["title"],
+                    "path": t["path"],
+                    "bpm": t["bpm"],
+                    "key": t["key"],
+                    "energy": t["energy"],
+                    "valence": t["valence"],
+                }
+                for t in queue
+            ],
+        }
+
+
+@app.post("/rebuild-vectors")
+async def rebuild_vectors(background_tasks: BackgroundTasks):
+    if _celery_available():
+        from tasks import rebuild_feature_vectors
+
+        task = rebuild_feature_vectors.delay()
+        return {"task_id": task.id, "status": "queued"}
+    background_tasks.add_task(_run_rebuild_vectors)
+    return {"status": "pending"}
+
+
+@app.post("/rebuild-clusters")
+async def rebuild_clusters():
+    if _celery_available():
+        from tasks import rebuild_clusters
+
+        task = rebuild_clusters.delay()
+        return {"task_id": task.id, "status": "queued"}
+    return {"status": "not implemented"}
+
+
+def _run_rebuild_vectors():
+    from feature_vector import backfill_library_feature_vectors
+
+    backfill_library_feature_vectors()
 
 
 def _run_scan(job_id: UUID, path: str, force: bool):
