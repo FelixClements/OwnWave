@@ -90,7 +90,7 @@ def trigger_library_scan(master_job_id: Optional[str], path: str, force: bool = 
     results = [task.delay() for task in subtasks]
     task_ids = [r.id for r in results]
 
-    finalize_result = finalize_scan.delay(master_job_id, task_ids)
+    finalize_result = finalize_scan.delay(master_job_id, task_ids, path)
 
     return {
         "master_job_id": master_job_id,
@@ -100,8 +100,8 @@ def trigger_library_scan(master_job_id: Optional[str], path: str, force: bool = 
 
 
 @celery_app.task(bind=True, max_retries=2000, default_retry_delay=2)
-def finalize_scan(self, master_job_id: str, task_ids: List[str]) -> dict:
-    """Poll subtask results and finalize the master scan job."""
+def finalize_scan(self, master_job_id: str, task_ids: List[str], root_path: str) -> dict:
+    """Poll subtask results, finalize the master scan job, and prune deleted tracks."""
     results = [AsyncResult(tid) for tid in task_ids]
 
     if not all(r.ready() for r in results):
@@ -117,12 +117,52 @@ def finalize_scan(self, master_job_id: str, task_ids: List[str]) -> dict:
                 "failed",
                 error=f"{len(failures)} / {len(results)} folder tasks failed",
             )
-        else:
-            db.update_scan_job(conn, UUID(master_job_id), "completed")
+            conn.commit()
+            return {
+                "master_job_id": master_job_id,
+                "total": len(results),
+                "failed": len(failures),
+            }
+
+        db.update_scan_job(conn, UUID(master_job_id), "completed")
         conn.commit()
+
+    _prune_deleted_tracks(root_path)
 
     return {
         "master_job_id": master_job_id,
         "total": len(results),
-        "failed": len(failures),
+        "failed": 0,
     }
+
+
+def _prune_deleted_tracks(root_path: str) -> int:
+    """Remove database tracks whose files no longer exist under root_path."""
+    from scanner import SUPPORTED_EXTS
+
+    root = Path(root_path).expanduser().resolve()
+    if not root.exists() or not root.is_dir():
+        return 0
+
+    disk_paths = {
+        str(p) for p in root.rglob("*")
+        if p.is_file() and p.suffix.lower() in SUPPORTED_EXTS
+    }
+    if not disk_paths:
+        return 0
+
+    with db.get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT id, path FROM tracks WHERE path LIKE %s",
+                (str(root) + "/%",),
+            )
+            rows = cur.fetchall()
+
+        to_delete = [row[0] for row in rows if row[1] not in disk_paths]
+        if to_delete:
+            db.delete_tracks(conn, to_delete)
+            conn.commit()
+            print(f"[prune] removed {len(to_delete)} deleted tracks from {root_path}")
+            return len(to_delete)
+    return 0

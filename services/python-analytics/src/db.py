@@ -74,14 +74,16 @@ def upsert_track(
     duration: Optional[float],
     sample_rate: Optional[int],
     channels: Optional[int],
+    file_size: Optional[int] = None,
+    file_mtime: Optional[datetime] = None,
 ) -> UUID:
     with conn.cursor() as cur:
         cur.execute(
             """
             INSERT INTO tracks
                 (path, artist_id, album_id, title, track_number, duration_seconds,
-                 sample_rate, channels, updated_at)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, NOW())
+                 sample_rate, channels, file_size, file_mtime, updated_at)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())
             ON CONFLICT (path) DO UPDATE SET
                 title = EXCLUDED.title,
                 artist_id = EXCLUDED.artist_id,
@@ -90,6 +92,8 @@ def upsert_track(
                 duration_seconds = EXCLUDED.duration_seconds,
                 sample_rate = EXCLUDED.sample_rate,
                 channels = EXCLUDED.channels,
+                file_size = EXCLUDED.file_size,
+                file_mtime = EXCLUDED.file_mtime,
                 updated_at = NOW()
             RETURNING id
             """,
@@ -102,6 +106,8 @@ def upsert_track(
                 duration,
                 sample_rate,
                 channels,
+                file_size,
+                file_mtime,
             ),
         )
         return cur.fetchone()[0]
@@ -239,13 +245,26 @@ def get_queue(conn: psycopg.Connection, station_id: UUID) -> List[dict]:
         return [dict(zip(columns, row)) for row in cur.fetchall()]
 
 
-def get_track_ids_by_paths(conn: psycopg.Connection, paths: List[str]) -> dict:
+def get_track_stats_by_paths(conn: psycopg.Connection, paths: List[str]) -> dict:
     with conn.cursor() as cur:
         cur.execute(
-            "SELECT id, path FROM tracks WHERE path = ANY(%s)",
+            """
+            SELECT t.id, t.path, t.file_size, t.file_mtime, af.track_id IS NOT NULL AS has_features
+            FROM tracks t
+            LEFT JOIN audio_features af ON t.id = af.track_id
+            WHERE t.path = ANY(%s)
+            """,
             (paths,),
         )
-        return {row[1]: row[0] for row in cur.fetchall()}
+        return {
+            row[1]: {
+                "id": row[0],
+                "file_size": row[2],
+                "file_mtime": row[3],
+                "has_features": row[4],
+            }
+            for row in cur.fetchall()
+        }
 
 
 def upsert_tracks_batch(conn: psycopg.Connection, records: List[dict]) -> None:
@@ -261,6 +280,8 @@ def upsert_tracks_batch(conn: psycopg.Connection, records: List[dict]) -> None:
             rec.get("duration"),
             rec.get("sample_rate"),
             rec.get("channels"),
+            rec.get("file_size"),
+            rec.get("file_mtime"),
         )
         for rec in records
     ]
@@ -269,8 +290,8 @@ def upsert_tracks_batch(conn: psycopg.Connection, records: List[dict]) -> None:
             """
             INSERT INTO tracks
                 (path, artist_id, album_id, title, track_number, duration_seconds,
-                 sample_rate, channels, updated_at)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, NOW())
+                 sample_rate, channels, file_size, file_mtime, updated_at)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())
             ON CONFLICT (path) DO UPDATE SET
                 artist_id = EXCLUDED.artist_id,
                 album_id = EXCLUDED.album_id,
@@ -279,6 +300,8 @@ def upsert_tracks_batch(conn: psycopg.Connection, records: List[dict]) -> None:
                 duration_seconds = EXCLUDED.duration_seconds,
                 sample_rate = EXCLUDED.sample_rate,
                 channels = EXCLUDED.channels,
+                file_size = EXCLUDED.file_size,
+                file_mtime = EXCLUDED.file_mtime,
                 updated_at = NOW()
             """,
             values,
@@ -329,4 +352,14 @@ def upsert_audio_features_batch(
                 analyzed_at = NOW()
             """,
             values,
+        )
+
+
+def delete_tracks(conn: psycopg.Connection, track_ids: List[UUID]) -> None:
+    if not track_ids:
+        return
+    with conn.cursor() as cur:
+        cur.execute(
+            "DELETE FROM tracks WHERE id = ANY(%s)",
+            (track_ids,),
         )

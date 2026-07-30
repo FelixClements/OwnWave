@@ -25,6 +25,8 @@ CREATE TABLE IF NOT EXISTS tracks (
     duration_seconds FLOAT,
     sample_rate INT,
     channels INT,
+    file_size BIGINT,
+    file_mtime TIMESTAMPTZ,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
@@ -69,5 +71,6 @@ CREATE TABLE IF NOT EXISTS scan_jobs (
 
 CREATE INDEX IF NOT EXISTS idx_tracks_artist ON tracks(artist_id);
 CREATE INDEX IF NOT EXISTS idx_tracks_album ON tracks(album_id);
+CREATE INDEX IF NOT EXISTS idx_tracks_file_mtime ON tracks(file_mtime);
 CREATE INDEX IF NOT EXISTS idx_audio_features_bpm ON audio_features(bpm);
 CREATE INDEX IF NOT EXISTS idx_station_tracks_station ON station_tracks(station_id);

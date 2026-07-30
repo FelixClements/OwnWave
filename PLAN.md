@@ -81,7 +81,7 @@ Deliver a working end-to-end smart radio for a local FLAC library:
 ### 2.1 Auto-indexing & storage
 
 - [x] File-system watcher (`watchdog` or `inotify`) on `MUSIC_DIR` for real-time reindexing.
-- [ ] Incremental scanning: only process new/changed/deleted files.
+- [x] Incremental scanning: only process new/changed/deleted files.
 - [ ] Configurable audio format ladder: FLAC source, MP3/Opus/AAC transcoding targets.
 - [x] Background job queue (Redis/RabbitMQ/Celery) for large library scans.
 

@@ -95,6 +95,9 @@ def _process_file(
     except Exception:
         pass
 
+    from folder_importer import _get_file_stats
+
+    file_size, file_mtime = _get_file_stats(file_path)
     track_id = upsert_track(
         conn=conn,
         path=path_str,
@@ -105,6 +108,8 @@ def _process_file(
         duration=duration,
         sample_rate=sample_rate,
         channels=channels,
+        file_size=file_size,
+        file_mtime=file_mtime,
     )
 
     upsert_audio_features(conn, track_id, features)
