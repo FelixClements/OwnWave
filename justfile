@@ -34,15 +34,6 @@ test:
     echo "Health check failed" >&2
     exit 1
 
-# Apply database migrations manually (until golang-migrate is wired in #20)
+# Apply database migrations with golang-migrate
 db-migrate:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    docker compose up -d db
-    until docker compose exec -T db pg_isready -U ownwave -d ownwave >/dev/null 2>&1; do
-        sleep 1
-    done
-    for f in database/migrations/*.sql; do
-        echo "Applying $(basename "$f")"
-        docker compose exec -T db psql -U ownwave -d ownwave -f "/docker-entrypoint-initdb.d/$(basename "$f")"
-    done
+    docker compose run --rm migrate up

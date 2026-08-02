@@ -2,19 +2,35 @@ services:
   db:
     image: pgvector/pgvector:pg15
     environment:
-      POSTGRES_USER: ownwave
-      POSTGRES_PASSWORD: ownwave
-      POSTGRES_DB: ownwave
+      POSTGRES_USER: ${POSTGRES_USER:-ownwave}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-ownwave}
+      POSTGRES_DB: ${POSTGRES_DB:-ownwave}
     volumes:
       - db_data:/var/lib/postgresql/data
       - ./database/migrations:/docker-entrypoint-initdb.d:ro
     ports:
       - "5432:5432"
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ownwave -d ownwave"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-ownwave} -d ${POSTGRES_DB:-ownwave}"]
       interval: 5s
       timeout: 5s
       retries: 5
+
+  migrate:
+    image: migrate/migrate:v4.17.1
+    entrypoint:
+      - migrate
+      - -path
+      - /migrations
+      - -database
+      - postgres://${POSTGRES_USER:-ownwave}:${POSTGRES_PASSWORD:-ownwave}@db:5432/${POSTGRES_DB:-ownwave}?sslmode=disable
+    command: ["up"]
+    volumes:
+      - ./database/migrations:/migrations:ro
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: "no"
 
   redis:
     image: redis:7-alpine
@@ -31,7 +47,7 @@ services:
   python:
     build: ./services/python-analytics
     environment:
-      DATABASE_URL: postgres://ownwave:ownwave@db:5432/ownwave
+      DATABASE_URL: postgres://${POSTGRES_USER:-ownwave}:${POSTGRES_PASSWORD:-ownwave}@db:5432/${POSTGRES_DB:-ownwave}
       REDIS_URL: redis://redis:6379/0
       CELERY_BROKER_URL: redis://redis:6379/0
       CELERY_RESULT_BACKEND: redis://redis:6379/0
@@ -50,7 +66,7 @@ services:
     build: ./services/python-analytics
     command: celery -A celery_app worker -P gevent -c 50 --loglevel=info -n worker@%h
     environment:
-      DATABASE_URL: postgres://ownwave:ownwave@db:5432/ownwave
+      DATABASE_URL: postgres://${POSTGRES_USER:-ownwave}:${POSTGRES_PASSWORD:-ownwave}@db:5432/${POSTGRES_DB:-ownwave}
       REDIS_URL: redis://redis:6379/0
       CELERY_BROKER_URL: redis://redis:6379/0
       CELERY_RESULT_BACKEND: redis://redis:6379/0
@@ -67,7 +83,7 @@ services:
     build: ./services/python-analytics
     command: python -m main watch
     environment:
-      DATABASE_URL: postgres://ownwave:ownwave@db:5432/ownwave
+      DATABASE_URL: postgres://${POSTGRES_USER:-ownwave}:${POSTGRES_PASSWORD:-ownwave}@db:5432/${POSTGRES_DB:-ownwave}
       REDIS_URL: redis://redis:6379/0
       CELERY_BROKER_URL: redis://redis:6379/0
       CELERY_RESULT_BACKEND: redis://redis:6379/0
@@ -83,7 +99,7 @@ services:
   go:
     build: ./services/go-api-server
     environment:
-      DATABASE_URL: postgres://ownwave:ownwave@db:5432/ownwave
+      DATABASE_URL: postgres://${POSTGRES_USER:-ownwave}:${POSTGRES_PASSWORD:-ownwave}@db:5432/${POSTGRES_DB:-ownwave}
       MUSIC_DIR: /music
       JWT_SECRET: ${JWT_SECRET:-change-me-in-production}
       FFMPEG_PATH: ffmpeg
@@ -99,8 +115,8 @@ services:
   web:
     build: ./apps/t3-web-frontend
     environment:
-      NEXT_PUBLIC_GO_API_URL: http://localhost:8080
-      GO_API_URL: http://go:8080
+      NEXT_PUBLIC_GO_API_URL: ${NEXT_PUBLIC_GO_API_URL:-http://localhost:8080}
+      GO_API_URL: ${GO_API_URL:-http://go:8080}
     ports:
       - "3000:3000"
     depends_on:
