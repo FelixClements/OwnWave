@@ -1,5 +1,6 @@
 import librosa
 import numpy as np
+import soundfile as sf
 from pyloudnorm import Meter
 
 from models import AudioFeatures
@@ -17,8 +18,15 @@ class LibrosaAnalyzer:
     """Default analyzer using librosa + mutagen."""
 
     def analyze(self, path: str) -> AudioFeatures:
-        # Load at 22.05kHz mono for fast feature extraction.
-        y, sr = librosa.load(path, sr=22050, mono=True, res_type="kaiser_fast")
+        # Load with soundfile, then resample/mono with librosa to avoid the
+        # deprecated audioread fallback.
+        y, sr = sf.read(path, dtype="float32")
+        if y.ndim > 1:
+            # soundfile returns (samples, channels); downmix to mono.
+            y = np.mean(y, axis=1)
+        if sr != 22050:
+            y = librosa.resample(y=y, orig_sr=sr, target_sr=22050, res_type="kaiser_fast")
+            sr = 22050
         duration = librosa.get_duration(y=y, sr=sr)
 
         tempo, beat_frames = librosa.beat.beat_track(y=y, sr=sr)
