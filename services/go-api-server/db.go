@@ -28,13 +28,15 @@ type Track struct {
 
 type TrackWithFeatures struct {
 	Track
-	BPM                    float64 `json:"bpm"`
-	Key                    string  `json:"key"`
-	Energy                 float64 `json:"energy"`
-	Valence                float64 `json:"valence"`
-	OutroStartSeconds      float64 `json:"outro_start_seconds"`
-	IdealCrossfadeSeconds  float64 `json:"ideal_crossfade_seconds"`
-	Position               int     `json:"position"`
+	BPM                   float64 `json:"bpm"`
+	Key                   string  `json:"key"`
+	Energy                float64 `json:"energy"`
+	Valence               float64 `json:"valence"`
+	OutroStartSeconds     float64 `json:"outro_start_seconds"`
+	IdealCrossfadeSeconds float64 `json:"ideal_crossfade_seconds"`
+	IntroStartSeconds     float64 `json:"intro_start_seconds"`
+	OutroEndSeconds       float64 `json:"outro_end_seconds"`
+	Position              int     `json:"position"`
 }
 
 type Station struct {
@@ -107,6 +109,7 @@ func (db *DB) GetStationQueue(ctx context.Context, stationID string) ([]TrackWit
 		       t.duration_seconds, t.sample_rate, t.channels,
 		       af.bpm, af.key, af.energy, af.valence,
 		       af.outro_start_seconds, af.ideal_crossfade_seconds,
+			       af.intro_start_seconds, af.outro_end_seconds,
 		       st.position
 		FROM station_tracks st
 		JOIN tracks t ON st.track_id = t.id
@@ -127,7 +130,9 @@ func (db *DB) GetStationQueue(ctx context.Context, stationID string) ([]TrackWit
 		if err := rows.Scan(&q.ID, &q.Title, &q.Artist, &q.Album, &q.Path,
 			&q.TrackNumber, &q.DurationSeconds, &q.SampleRate, &q.Channels,
 			&q.BPM, &q.Key, &q.Energy, &q.Valence,
-			&q.OutroStartSeconds, &q.IdealCrossfadeSeconds, &q.Position); err != nil {
+			&q.OutroStartSeconds, &q.IdealCrossfadeSeconds,
+			&q.IntroStartSeconds, &q.OutroEndSeconds,
+			&q.Position); err != nil {
 			return nil, err
 		}
 		queue = append(queue, q)

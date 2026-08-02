@@ -130,6 +130,8 @@ def rebuild_feature_vectors(conn: psycopg.Connection) -> int:
             valence=row[5],
             outro_start_seconds=0.0,
             ideal_crossfade_seconds=0.0,
+            intro_start_seconds=0.0,
+            outro_end_seconds=0.0,
             spectral_centroid=row[6],
             chroma=row[7],
             mfcc=row[8],

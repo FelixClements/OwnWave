@@ -194,6 +194,8 @@ def _build_feature_record(conn: psycopg.Connection, file_path: Path, path_str: s
             "valence": features.valence,
             "outro_start_seconds": features.outro_start_seconds,
             "ideal_crossfade_seconds": features.ideal_crossfade_seconds,
+            "intro_start_seconds": features.intro_start_seconds,
+            "outro_end_seconds": features.outro_end_seconds,
             "chroma": features.chroma,
             "spectral_centroid": features.spectral_centroid,
             "mfcc": features.mfcc,

@@ -11,6 +11,8 @@ class AudioFeatures:
     valence: float
     outro_start_seconds: float
     ideal_crossfade_seconds: float
+    intro_start_seconds: Optional[float] = None
+    outro_end_seconds: Optional[float] = None
     chroma: Optional[list] = None
     spectral_centroid: Optional[float] = None
     mfcc: Optional[list] = None
@@ -42,6 +44,8 @@ def merge_features(base: AudioFeatures, extra: Optional[AudioFeatures]) -> Audio
         ideal_crossfade_seconds=pick(
             base.ideal_crossfade_seconds, extra.ideal_crossfade_seconds
         ),
+        intro_start_seconds=pick(base.intro_start_seconds, extra.intro_start_seconds),
+        outro_end_seconds=pick(base.outro_end_seconds, extra.outro_end_seconds),
         chroma=pick(base.chroma, extra.chroma),
         spectral_centroid=pick(base.spectral_centroid, extra.spectral_centroid),
         mfcc=pick(base.mfcc, extra.mfcc),

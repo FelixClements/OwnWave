@@ -224,6 +224,7 @@ func (h *Handler) StationCrossfadeURL(w http.ResponseWriter, r *http.Request) {
 		format = "flac"
 	}
 	bitrate := r.URL.Query().Get("bitrate")
+	gapless := r.URL.Query().Get("gapless") == "true"
 	token, err := h.signStationStreamToken(stationID, format)
 	if err != nil {
 		http.Error(w, err.Error(), 500)
@@ -232,6 +233,9 @@ func (h *Handler) StationCrossfadeURL(w http.ResponseWriter, r *http.Request) {
 	url := fmt.Sprintf("/stations/%s/crossfade?format=%s&token=%s", stationID, format, token)
 	if bitrate != "" {
 		url += "&bitrate=" + bitrate
+	}
+	if gapless {
+		url += "&gapless=true"
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"url": url})
@@ -269,8 +273,9 @@ func (h *Handler) StationCrossfadeStream(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
+	gapless := r.URL.Query().Get("gapless") == "true"
 	bitrate := r.URL.Query().Get("bitrate")
-	h.serveCrossfaded(w, r, queue, format, bitrate)
+	h.serveCrossfaded(w, r, queue, format, bitrate, gapless)
 }
 
 func (h *Handler) signStationStreamToken(stationID, format string) (string, error) {

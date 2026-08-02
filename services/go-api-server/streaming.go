@@ -109,7 +109,7 @@ func normalizeBitrate(input, defaultRate string) string {
 	return fmt.Sprintf("%dk", kbps)
 }
 
-func (h *Handler) serveCrossfaded(w http.ResponseWriter, r *http.Request, queue []TrackWithFeatures, format, bitrate string) {
+func (h *Handler) serveCrossfaded(w http.ResponseWriter, r *http.Request, queue []TrackWithFeatures, format, bitrate string, gapless bool) {
 	if len(queue) == 1 {
 		fullPath := queue[0].Path
 		if !filepath.IsAbs(fullPath) {
@@ -125,45 +125,76 @@ func (h *Handler) serveCrossfaded(w http.ResponseWriter, r *http.Request, queue 
 
 	const defaultCrossfade = 5.0
 
-	outros := make([]float64, len(queue))
+	intros := make([]float64, len(queue))
+	outroStarts := make([]float64, len(queue))
+	outroEnds := make([]float64, len(queue))
 	ends := make([]float64, len(queue))
 	crossfades := make([]float64, len(queue)-1)
 
 	for i, q := range queue {
-		d := q.IdealCrossfadeSeconds
-		if d <= 0 {
-			d = defaultCrossfade
-		}
-		if i < len(queue)-1 {
-			crossfades[i] = d
+		duration := 0.0
+		if q.DurationSeconds != nil && *q.DurationSeconds > 0 {
+			duration = *q.DurationSeconds
 		}
 
-		outro := q.OutroStartSeconds
-		if outro <= 0 && q.DurationSeconds != nil && *q.DurationSeconds > 0 {
-			outro = *q.DurationSeconds - d
-			if outro < 0 {
-				outro = 0
-			}
+		intro := q.IntroStartSeconds
+		if intro < 0 {
+			intro = 0
 		}
-		if outro < 0 {
-			outro = 0
+		if intro > duration {
+			intro = 0
 		}
-		outros[i] = outro
 
-		if i == len(queue)-1 {
-			if q.DurationSeconds != nil && *q.DurationSeconds > 0 {
-				ends[i] = *q.DurationSeconds
-			}
-		} else {
-			ends[i] = outro + d
+		outroEnd := q.OutroEndSeconds
+		if outroEnd <= 0 || outroEnd > duration {
+			outroEnd = duration
 		}
+		if outroEnd < intro {
+			outroEnd = duration
+		}
+
+		outroStart := q.OutroStartSeconds
+		if outroStart <= intro || outroStart <= 0 || outroStart >= outroEnd {
+			outroStart = outroEnd - defaultCrossfade
+			if outroStart < intro {
+				outroStart = intro
+			}
+		}
+
+		intros[i] = intro
+		outroStarts[i] = outroStart
+		outroEnds[i] = outroEnd
 	}
 
-	for i := len(queue) - 2; i >= 0; i-- {
-		if ends[i+1] > 0 && crossfades[i] > ends[i+1] {
-			crossfades[i] = ends[i+1]
-			ends[i] = outros[i] + crossfades[i]
+	if gapless {
+		for i := range queue {
+			ends[i] = outroEnds[i]
 		}
+	} else {
+		for i := len(queue) - 2; i >= 0; i-- {
+			d := queue[i].IdealCrossfadeSeconds
+			if d <= 0 {
+				d = defaultCrossfade
+			}
+			thisOutro := outroEnds[i] - outroStarts[i]
+			nextLen := ends[i+1] - intros[i+1]
+			nextOutro := outroEnds[i+1] - intros[i+1]
+			if nextOutro > 0 && d > nextOutro {
+				d = nextOutro
+			}
+			if nextLen > 0 && d > nextLen {
+				d = nextLen
+			}
+			if thisOutro > 0 && d > thisOutro {
+				d = thisOutro
+			}
+			crossfades[i] = d
+			ends[i] = outroStarts[i] + d
+			if ends[i] > outroEnds[i] {
+				ends[i] = outroEnds[i]
+			}
+		}
+		ends[len(queue)-1] = outroEnds[len(queue)-1]
 	}
 
 	args := []string{"-hide_banner", "-loglevel", "error"}
@@ -172,8 +203,11 @@ func (h *Handler) serveCrossfaded(w http.ResponseWriter, r *http.Request, queue 
 		if !filepath.IsAbs(fullPath) {
 			fullPath = filepath.Join(h.musicDir, fullPath)
 		}
+		if intros[i] > 0 {
+			args = append(args, "-ss", fmt.Sprintf("%f", intros[i]))
+		}
 		if ends[i] > 0 {
-			args = append(args, "-t", fmt.Sprintf("%f", ends[i]))
+			args = append(args, "-to", fmt.Sprintf("%f", ends[i]))
 		}
 		args = append(args, "-i", fullPath)
 	}
@@ -201,17 +235,33 @@ func (h *Handler) serveCrossfaded(w http.ResponseWriter, r *http.Request, queue 
 	}
 
 	filter := &strings.Builder{}
-	for i := 0; i < len(queue)-1; i++ {
-		d := crossfades[i]
-		if i == 0 {
-			fmt.Fprintf(filter, "[%d:a][%d:a]acrossfade=d=%f:c1=tri:c2=tri", i, i+1, d)
-		} else {
-			fmt.Fprintf(filter, ";[a%d][%d:a]acrossfade=d=%f:c1=tri:c2=tri", i, i+1, d)
+	if gapless {
+		for i := range queue {
+			if i > 0 {
+				fmt.Fprint(filter, ";")
+			}
+			fmt.Fprintf(filter, "[%d:a]asetpts=PTS-STARTPTS[a%d]", i, i)
 		}
-		if i == len(queue)-2 {
-			fmt.Fprint(filter, "[out]")
-		} else {
-			fmt.Fprintf(filter, "[a%d]", i+1)
+		for i := range queue {
+			if i > 0 {
+				fmt.Fprint(filter, ";")
+			}
+			fmt.Fprintf(filter, "[a%d]", i)
+		}
+		fmt.Fprintf(filter, "concat=n=%d:v=0:a=1[out]", len(queue))
+	} else {
+		for i := 0; i < len(queue)-1; i++ {
+			d := crossfades[i]
+			if i == 0 {
+				fmt.Fprintf(filter, "[%d:a][%d:a]acrossfade=d=%f:c1=tri:c2=tri", i, i+1, d)
+			} else {
+				fmt.Fprintf(filter, ";[a%d][%d:a]acrossfade=d=%f:c1=tri:c2=tri", i, i+1, d)
+			}
+			if i == len(queue)-2 {
+				fmt.Fprint(filter, "[out]")
+			} else {
+				fmt.Fprintf(filter, "[a%d]", i+1)
+			}
 		}
 	}
 

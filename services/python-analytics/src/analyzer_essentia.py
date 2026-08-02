@@ -74,6 +74,8 @@ class EssentiaAnalyzer:
             valence=None if valence is None else round(valence, 4),
             outro_start_seconds=None if outro_start is None else round(outro_start, 3),
             ideal_crossfade_seconds=round(ideal_crossfade, 3),
+            intro_start_seconds=None,
+            outro_end_seconds=None,
             chroma=None,
         )
 

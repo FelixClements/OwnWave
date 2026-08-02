@@ -68,6 +68,12 @@ class LibrosaAnalyzer:
         ideal_crossfade = _ideal_crossfade(tempo)
         outro_start = _detect_outro_start(y, sr, beat_frames, beat_times, duration, ideal_crossfade)
 
+        _, (start, end) = librosa.effects.trim(
+            y, top_db=60, frame_length=2048, hop_length=512
+        )
+        intro_start = float(librosa.frames_to_time(start, sr=sr, hop_length=512))
+        outro_end = float(librosa.frames_to_time(end, sr=sr, hop_length=512))
+
         return AudioFeatures(
             bpm=round(tempo, 2),
             key=key,
@@ -76,6 +82,8 @@ class LibrosaAnalyzer:
             valence=round(valence, 4),
             outro_start_seconds=round(outro_start, 3),
             ideal_crossfade_seconds=round(ideal_crossfade, 3),
+            intro_start_seconds=round(intro_start, 3),
+            outro_end_seconds=round(outro_end, 3),
             chroma=chroma_mean.tolist(),
             spectral_centroid=round(sc_mean, 2),
             mfcc=mfcc_mean.tolist(),

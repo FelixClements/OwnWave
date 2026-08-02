@@ -130,9 +130,9 @@ def upsert_audio_features(
             """
             INSERT INTO audio_features
                 (track_id, bpm, key, loudness, energy, valence,
-                 outro_start_seconds, ideal_crossfade_seconds, chroma,
-                 spectral_centroid, mfcc, feature_vector, analyzed_at)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s, %s, %s, NOW())
+                 outro_start_seconds, ideal_crossfade_seconds, intro_start_seconds,
+                 outro_end_seconds, chroma, spectral_centroid, mfcc, feature_vector, analyzed_at)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s, %s, %s, NOW())
             ON CONFLICT (track_id) DO UPDATE SET
                 bpm = EXCLUDED.bpm,
                 key = EXCLUDED.key,
@@ -141,6 +141,8 @@ def upsert_audio_features(
                 valence = EXCLUDED.valence,
                 outro_start_seconds = EXCLUDED.outro_start_seconds,
                 ideal_crossfade_seconds = EXCLUDED.ideal_crossfade_seconds,
+                intro_start_seconds = EXCLUDED.intro_start_seconds,
+                outro_end_seconds = EXCLUDED.outro_end_seconds,
                 chroma = EXCLUDED.chroma,
                 spectral_centroid = EXCLUDED.spectral_centroid,
                 mfcc = EXCLUDED.mfcc,
@@ -156,6 +158,8 @@ def upsert_audio_features(
                 features.valence,
                 features.outro_start_seconds,
                 features.ideal_crossfade_seconds,
+                features.intro_start_seconds,
+                features.outro_end_seconds,
                 Jsonb(features.chroma) if features.chroma else None,
                 features.spectral_centroid,
                 features.mfcc,
@@ -256,6 +260,7 @@ def get_queue(conn: psycopg.Connection, station_id: UUID) -> List[dict]:
             SELECT t.id, t.title, t.path, t.artist_id, t.album_id,
                    af.bpm, af.key, af.energy, af.valence,
                    af.outro_start_seconds, af.ideal_crossfade_seconds,
+                   af.intro_start_seconds, af.outro_end_seconds,
                    st.position
             FROM station_tracks st
             JOIN tracks t ON st.track_id = t.id
@@ -352,6 +357,8 @@ def upsert_audio_features_batch(
                 rec["valence"],
                 rec["outro_start_seconds"],
                 rec["ideal_crossfade_seconds"],
+                rec["intro_start_seconds"],
+                rec["outro_end_seconds"],
                 Jsonb(rec["chroma"]) if rec.get("chroma") else None,
                 rec.get("spectral_centroid"),
                 rec.get("mfcc"),
@@ -376,6 +383,8 @@ def upsert_audio_features_batch(
                 valence = EXCLUDED.valence,
                 outro_start_seconds = EXCLUDED.outro_start_seconds,
                 ideal_crossfade_seconds = EXCLUDED.ideal_crossfade_seconds,
+                intro_start_seconds = EXCLUDED.intro_start_seconds,
+                outro_end_seconds = EXCLUDED.outro_end_seconds,
                 chroma = EXCLUDED.chroma,
                 spectral_centroid = EXCLUDED.spectral_centroid,
                 mfcc = EXCLUDED.mfcc,
