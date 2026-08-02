@@ -24,6 +24,7 @@ type Track struct {
 	DurationSeconds *float64 `json:"duration_seconds,omitempty"`
 	SampleRate      *int     `json:"sample_rate,omitempty"`
 	Channels        *int     `json:"channels,omitempty"`
+	Loudness        *float64 `json:"loudness,omitempty"`
 }
 
 type TrackWithFeatures struct {
@@ -48,10 +49,11 @@ type Station struct {
 func (db *DB) GetTrackByID(ctx context.Context, id string) (Track, error) {
 	var t Track
 	err := db.pool.QueryRow(ctx, `
-		SELECT t.id::text, t.title, t.path
+		SELECT t.id::text, t.title, t.path, af.loudness
 		FROM tracks t
+		LEFT JOIN audio_features af ON t.id = af.track_id
 		WHERE t.id = $1
-	`, id).Scan(&t.ID, &t.Title, &t.Path)
+	`, id).Scan(&t.ID, &t.Title, &t.Path, &t.Loudness)
 	return t, err
 }
 
@@ -107,7 +109,7 @@ func (db *DB) GetStationQueue(ctx context.Context, stationID string) ([]TrackWit
 	rows, err := db.pool.Query(ctx, `
 		SELECT t.id::text, t.title, a.name, al.title, t.path, t.track_number,
 		       t.duration_seconds, t.sample_rate, t.channels,
-		       af.bpm, af.key, af.energy, af.valence,
+		       af.bpm, af.key, af.energy, af.valence, af.loudness,
 		       af.outro_start_seconds, af.ideal_crossfade_seconds,
 			       af.intro_start_seconds, af.outro_end_seconds,
 		       st.position
@@ -130,6 +132,7 @@ func (db *DB) GetStationQueue(ctx context.Context, stationID string) ([]TrackWit
 		if err := rows.Scan(&q.ID, &q.Title, &q.Artist, &q.Album, &q.Path,
 			&q.TrackNumber, &q.DurationSeconds, &q.SampleRate, &q.Channels,
 			&q.BPM, &q.Key, &q.Energy, &q.Valence,
+			&q.Loudness,
 			&q.OutroStartSeconds, &q.IdealCrossfadeSeconds,
 			&q.IntroStartSeconds, &q.OutroEndSeconds,
 			&q.Position); err != nil {

@@ -29,7 +29,7 @@ func (h *Handler) serveFLAC(w http.ResponseWriter, r *http.Request, path string)
 	http.ServeContent(w, r, filepath.Base(path), stat.ModTime(), f)
 }
 
-func (h *Handler) serveTranscoded(w http.ResponseWriter, r *http.Request, path string, format string) {
+func (h *Handler) serveTranscoded(w http.ResponseWriter, r *http.Request, path string, format string, loudness *float64, normalize bool) {
 	format = strings.ToLower(format)
 
 	var (
@@ -70,15 +70,25 @@ func (h *Handler) serveTranscoded(w http.ResponseWriter, r *http.Request, path s
 	w.Header().Set("Content-Type", contentType)
 	w.Header().Set("Transfer-Encoding", "chunked")
 
-	cmd := exec.Command(
-		h.ffmpegPath,
+	gainDb := volumeGainDb(loudness, normalize)
+
+	args := []string{
+		"-hide_banner",
+		"-loglevel", "error",
 		"-i", path,
 		"-map_metadata", "-1",
+	}
+	if gainDb != 0 {
+		args = append(args, "-af", fmt.Sprintf("volume=%.2fdB", gainDb))
+	}
+	args = append(args,
 		"-c:a", encoder,
 		"-b:a", bitrate,
 		"-f", container,
 		"-",
 	)
+
+	cmd := exec.Command(h.ffmpegPath, args...)
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		http.Error(w, err.Error(), 500)
@@ -109,7 +119,27 @@ func normalizeBitrate(input, defaultRate string) string {
 	return fmt.Sprintf("%dk", kbps)
 }
 
-func (h *Handler) serveCrossfaded(w http.ResponseWriter, r *http.Request, queue []TrackWithFeatures, format, bitrate string, gapless bool) {
+const (
+	targetLoudness = -14.0
+	maxGainDb      = 20.0
+	minGainDb      = -20.0
+)
+
+func volumeGainDb(loudness *float64, normalize bool) float64 {
+	if !normalize || loudness == nil || *loudness == 0 {
+		return 0
+	}
+	gain := targetLoudness - *loudness
+	if gain > maxGainDb {
+		return maxGainDb
+	}
+	if gain < minGainDb {
+		return minGainDb
+	}
+	return gain
+}
+
+func (h *Handler) serveCrossfaded(w http.ResponseWriter, r *http.Request, queue []TrackWithFeatures, format, bitrate string, gapless, normalize bool) {
 	if len(queue) == 1 {
 		fullPath := queue[0].Path
 		if !filepath.IsAbs(fullPath) {
@@ -118,7 +148,7 @@ func (h *Handler) serveCrossfaded(w http.ResponseWriter, r *http.Request, queue 
 		if format == "flac" {
 			h.serveFLAC(w, r, fullPath)
 		} else {
-			h.serveTranscoded(w, r, fullPath, format)
+			h.serveTranscoded(w, r, fullPath, format, queue[0].Loudness, normalize)
 		}
 		return
 	}
@@ -130,6 +160,7 @@ func (h *Handler) serveCrossfaded(w http.ResponseWriter, r *http.Request, queue 
 	outroEnds := make([]float64, len(queue))
 	ends := make([]float64, len(queue))
 	crossfades := make([]float64, len(queue)-1)
+	gains := make([]float64, len(queue))
 
 	for i, q := range queue {
 		duration := 0.0
@@ -164,6 +195,7 @@ func (h *Handler) serveCrossfaded(w http.ResponseWriter, r *http.Request, queue 
 		intros[i] = intro
 		outroStarts[i] = outroStart
 		outroEnds[i] = outroEnd
+		gains[i] = volumeGainDb(q.Loudness, normalize)
 	}
 
 	if gapless {
@@ -235,27 +267,27 @@ func (h *Handler) serveCrossfaded(w http.ResponseWriter, r *http.Request, queue 
 	}
 
 	filter := &strings.Builder{}
+	for i := range queue {
+		if i > 0 {
+			fmt.Fprint(filter, ";")
+		}
+		fmt.Fprintf(filter, "[%d:a]volume=%.2fdB[v%d]", i, gains[i], i)
+	}
 	if gapless {
 		for i := range queue {
 			if i > 0 {
 				fmt.Fprint(filter, ";")
 			}
-			fmt.Fprintf(filter, "[%d:a]asetpts=PTS-STARTPTS[a%d]", i, i)
-		}
-		for i := range queue {
-			if i > 0 {
-				fmt.Fprint(filter, ";")
-			}
-			fmt.Fprintf(filter, "[a%d]", i)
+			fmt.Fprintf(filter, "[v%d]", i)
 		}
 		fmt.Fprintf(filter, "concat=n=%d:v=0:a=1[out]", len(queue))
 	} else {
 		for i := 0; i < len(queue)-1; i++ {
 			d := crossfades[i]
 			if i == 0 {
-				fmt.Fprintf(filter, "[%d:a][%d:a]acrossfade=d=%f:c1=tri:c2=tri", i, i+1, d)
+				fmt.Fprintf(filter, ";[v%d][v%d]acrossfade=d=%f:c1=tri:c2=tri", i, i+1, d)
 			} else {
-				fmt.Fprintf(filter, ";[a%d][%d:a]acrossfade=d=%f:c1=tri:c2=tri", i, i+1, d)
+				fmt.Fprintf(filter, ";[a%d][v%d]acrossfade=d=%f:c1=tri:c2=tri", i, i+1, d)
 			}
 			if i == len(queue)-2 {
 				fmt.Fprint(filter, "[out]")

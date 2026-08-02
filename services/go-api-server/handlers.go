@@ -135,6 +135,7 @@ func (h *Handler) StreamURL(w http.ResponseWriter, r *http.Request) {
 		format = "flac"
 	}
 	bitrate := r.URL.Query().Get("bitrate")
+	normalize := r.URL.Query().Get("normalize") != "false"
 	token, err := h.signStreamToken(trackID, format)
 	if err != nil {
 		http.Error(w, err.Error(), 500)
@@ -143,6 +144,9 @@ func (h *Handler) StreamURL(w http.ResponseWriter, r *http.Request) {
 	url := fmt.Sprintf("/stream/%s?format=%s&token=%s", trackID, format, token)
 	if bitrate != "" {
 		url += "&bitrate=" + bitrate
+	}
+	if !normalize {
+		url += "&normalize=false"
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"url": url})
@@ -181,11 +185,13 @@ func (h *Handler) StreamTrack(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	normalize := r.URL.Query().Get("normalize") != "false"
+
 	switch strings.ToLower(format) {
 	case "flac":
 		h.serveFLAC(w, r, fullPath)
 	case "mp3", "opus", "aac":
-		h.serveTranscoded(w, r, fullPath, format)
+		h.serveTranscoded(w, r, fullPath, format, track.Loudness, normalize)
 	default:
 		http.Error(w, "unsupported format", 400)
 	}
@@ -225,6 +231,7 @@ func (h *Handler) StationCrossfadeURL(w http.ResponseWriter, r *http.Request) {
 	}
 	bitrate := r.URL.Query().Get("bitrate")
 	gapless := r.URL.Query().Get("gapless") == "true"
+	normalize := r.URL.Query().Get("normalize") != "false"
 	token, err := h.signStationStreamToken(stationID, format)
 	if err != nil {
 		http.Error(w, err.Error(), 500)
@@ -236,6 +243,9 @@ func (h *Handler) StationCrossfadeURL(w http.ResponseWriter, r *http.Request) {
 	}
 	if gapless {
 		url += "&gapless=true"
+	}
+	if !normalize {
+		url += "&normalize=false"
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"url": url})
@@ -274,8 +284,9 @@ func (h *Handler) StationCrossfadeStream(w http.ResponseWriter, r *http.Request)
 	}
 
 	gapless := r.URL.Query().Get("gapless") == "true"
+	normalize := r.URL.Query().Get("normalize") != "false"
 	bitrate := r.URL.Query().Get("bitrate")
-	h.serveCrossfaded(w, r, queue, format, bitrate, gapless)
+	h.serveCrossfaded(w, r, queue, format, bitrate, gapless, normalize)
 }
 
 func (h *Handler) signStationStreamToken(stationID, format string) (string, error) {
