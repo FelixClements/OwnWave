@@ -15,8 +15,8 @@ Deliver a working end-to-end smart radio for a local FLAC library:
 
 - [x] Create `docker-compose.yml` with PostgreSQL, Python worker, Go API, and Next.js.
 - [x] Create `database/migrations/001_schema.sql`.
-- [x] Add `justfile` for common commands (`build`, `scan`, `test`, `dev`, `db-migrate`).
-- [x] Add environment/secrets handling and `golang-migrate` migration tooling.
+- [ ] Add `justfile` for common commands (`build`, `scan`, `test`, `dev`, `db-migrate`).
+- [ ] Add environment/secrets handling and `golang-migrate` migration tooling.
 
 ### 1.2 Database schema
 
@@ -54,7 +54,7 @@ Deliver a working end-to-end smart radio for a local FLAC library:
 - [x] `app/layout.tsx` and `app/page.tsx`.
 - [x] `server/routers/app.ts` — tRPC router proxying to Go.
 - [x] `components/Player.tsx` — two `<audio>` elements + Web Audio crossfade.
-- [x] `lib/api.ts` — typed Go REST client covering all Go endpoints.
+- [ ] `lib/api.ts` — typed Go REST client covering all Go endpoints.
 
 ### 1.6 Integration & verification
 
@@ -97,47 +97,47 @@ Deliver a working end-to-end smart radio for a local FLAC library:
 
 ### 2.3 Streaming & crossfade
 
-- [x] Server-side crossfaded FLAC stream (MP3 fallback) for Safari / mobile / clients without Web Audio.
+- [ ] Server-side crossfaded FLAC stream (MP3 fallback) for Safari / mobile / clients without Web Audio.
 - [x] Format and bitrate selection per client (`format=mp3|flac|opus&bitrate=192`).
-- [x] Gapless playback and precise cue-point handling.
-- [x] Volume normalization via EBU R128 integrated loudness (ReplayGain tags may be used as a fallback source).
+- [ ] Gapless playback and precise cue-point handling.
+- [ ] Volume normalization via EBU R128 integrated loudness (ReplayGain tags may be used as a fallback source).
 
 ### 2.4 Users, feedback, & personalization
 
-- [x] User accounts and sessions (local username/password to start; OAuth post-v2).
-- [x] Listening history, likes, skips, and bans.
-- [x] Feedback loop that updates station weights and queue scoring.
-- [x] Per-station controls: min/max BPM, energy, valence, preferred clusters.
+- [ ] User accounts and sessions (local username/password to start; OAuth post-v2).
+- [ ] Listening history, likes, skips, and bans.
+- [ ] Feedback loop that updates station weights and queue scoring.
+- [ ] Per-station controls: min/max BPM, energy, valence, preferred clusters.
 
 ### 2.5 Web frontend & clients
 
-- [x] Station management UI: create, edit, delete, preview stations.
-- [x] Real-time queue display with upcoming tracks.
-- [x] Full-text search for tracks, albums, and artists.
-- [x] Album art and metadata display.
-- [x] Music library page: browse/search tracks, albums, and artists; show cover art; admin rescan action.
+- [ ] Station management UI: create, edit, delete, preview stations.
+- [ ] Real-time queue display with upcoming tracks.
+- [ ] Full-text search for tracks, albums, and artists.
+- [ ] Album art and metadata display.
+- [ ] Music library page: browse/search tracks, albums, and artists; show cover art; admin rescan action.
 - [ ] PWA support, Media Session API, and offline queue cache. (post-v2)
 - [ ] Mobile-first responsive design.
 
 ### 2.6 Admin, observability, & operations
 
-- [x] Admin dashboard for scan jobs, queues, and system health.
-- [x] Prometheus/OpenTelemetry metrics and structured logging.
-- [x] Comprehensive test suites (unit, integration) started in v1.
-- [x] GitHub Actions CI/CD: build, lint, test, and Docker image publishing.
-- [x] Production deployment guide (reverse proxy, SSL, backups).
+- [ ] Admin dashboard for scan jobs, queues, and system health.
+- [ ] Prometheus/OpenTelemetry metrics and structured logging.
+- [ ] Comprehensive test suites (unit, integration, E2E).
+- [ ] GitHub Actions CI/CD: build, lint, test, and Docker image publishing.
+- [ ] Production deployment guide (reverse proxy, SSL, backups).
 
 ## v2 Verification Checklist
 
 - [x] Adding a file to `music/` triggers re-analysis automatically.
-- [x] Server-side crossfade stream works in Safari without Web Audio.
-- [x] AI stations generate coherent queues from a seed track.
-- [x] Similar tracks are retrievable via API/frontend.
-- [x] MP3/Opus/AAC transcoding selectable per client.
-- [x] Likes/skips influence station recommendations.
+- [ ] Server-side crossfade stream works in Safari without Web Audio.
+- [ ] AI stations generate coherent queues from a seed track.
+- [ ] Similar tracks are retrievable via API/frontend.
+- [ ] MP3/Opus/AAC transcoding selectable per client.
+- [ ] Likes/skips influence station recommendations.
 - [ ] Web player works as PWA and shows album art. (PWA post-v2; album art in v2)
-- [x] CI runs tests and builds on every PR.
-- [x] Deployment guide runs a production-like setup.
+- [ ] CI runs tests and builds on every PR.
+- [ ] Deployment guide runs a production-like setup.
 
 ## Future Work (v3+)
 
