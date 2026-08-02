@@ -86,6 +86,8 @@ func main() {
 	r.Get("/stations", h.ListStations)
 	r.Get("/stations/{id}", h.GetStation)
 	r.Get("/stations/{id}/queue", h.GetQueue)
+	r.Get("/stations/{id}/crossfade-url", h.StationCrossfadeURL)
+	r.Get("/stations/{id}/crossfade", h.StationCrossfadeStream)
 	r.Post("/stations", h.CreateStation)
 	r.Post("/admin/scan", h.TriggerScan)
 
