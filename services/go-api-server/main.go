@@ -85,6 +85,8 @@ func main() {
 	r.Get("/stream/{id}", h.StreamTrack)
 	r.Get("/stations", h.ListStations)
 	r.Get("/stations/{id}", h.GetStation)
+	r.Put("/stations/{id}", h.UpdateStation)
+	r.Delete("/stations/{id}", h.DeleteStation)
 	r.Get("/stations/{id}/queue", h.GetQueue)
 	r.Get("/stations/{id}/crossfade-url", h.StationCrossfadeURL)
 	r.Get("/stations/{id}/crossfade", h.StationCrossfadeStream)

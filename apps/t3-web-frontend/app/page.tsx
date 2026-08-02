@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import Link from 'next/link';
 import { trpc } from '@/lib/trpc/client';
 import { Player } from '@/components/Player';
 import { Station, QueueTrack } from '@/server/routers/app';
@@ -169,12 +170,12 @@ export default function Home() {
           </div>
 
           <nav className="flex flex-col gap-3 text-sm font-semibold text-spotify-subdued">
-            <a href="#" className="text-spotify-text transition">
+            <Link href="/" className="text-spotify-text transition">
               Home
-            </a>
-            <a href="#" className="hover:text-spotify-text transition">
-              Your Library
-            </a>
+            </Link>
+            <Link href="/stations" className="hover:text-spotify-text transition">
+              Manage Stations
+            </Link>
           </nav>
 
           <div className="flex-1 overflow-y-auto">

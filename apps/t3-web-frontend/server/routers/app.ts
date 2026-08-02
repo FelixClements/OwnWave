@@ -23,6 +23,38 @@ export const appRouter = t.router({
     .input(z.object({ id: z.string() }))
     .query(async ({ input }) => api.getQueue(input.id)),
 
+  station: t.procedure
+    .input(z.object({ id: z.string() }))
+    .query(async ({ input }) => api.getStation(input.id)),
+
+  createStation: t.procedure
+    .input(
+      z.object({
+        name: z.string(),
+        length: z.number().optional(),
+        min_bpm: z.number().optional(),
+        max_bpm: z.number().optional(),
+        min_energy: z.number().optional(),
+        max_energy: z.number().optional(),
+        min_valence: z.number().optional(),
+        max_valence: z.number().optional(),
+        seed_type: z.enum(['track', 'artist', 'album', 'cluster', 'mood']).optional(),
+        track_id: z.string().optional(),
+        artist_id: z.string().optional(),
+        album_id: z.string().optional(),
+        cluster_id: z.number().optional(),
+      })
+    )
+    .mutation(async ({ input }) => api.createStation(input)),
+
+  updateStation: t.procedure
+    .input(z.object({ id: z.string(), name: z.string() }))
+    .mutation(async ({ input }) => api.updateStation(input.id, { name: input.name })),
+
+  deleteStation: t.procedure
+    .input(z.object({ id: z.string() }))
+    .mutation(async ({ input }) => api.deleteStation(input.id)),
+
   streamUrl: t.procedure
     .input(
       z.object({

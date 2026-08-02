@@ -106,6 +106,33 @@ func (db *DB) ListStations(ctx context.Context) ([]Station, error) {
 	return stations, rows.Err()
 }
 
+func (db *DB) GetStationByID(ctx context.Context, stationID string) (Station, error) {
+	var s Station
+	err := db.pool.QueryRow(ctx, `
+		SELECT id::text, name, seed_features::text
+		FROM stations
+		WHERE id = $1
+	`, stationID).Scan(&s.ID, &s.Name, &s.SeedFeatures)
+	return s, err
+}
+
+func (db *DB) UpdateStation(ctx context.Context, stationID, name string) error {
+	_, err := db.pool.Exec(ctx, `
+		UPDATE stations
+		SET name = $2
+		WHERE id = $1
+	`, stationID, name)
+	return err
+}
+
+func (db *DB) DeleteStation(ctx context.Context, stationID string) error {
+	_, err := db.pool.Exec(ctx, `
+		DELETE FROM station_tracks WHERE station_id = $1;
+		DELETE FROM stations WHERE id = $1;
+	`, stationID)
+	return err
+}
+
 func (db *DB) GetStationQueue(ctx context.Context, stationID string) ([]TrackWithFeatures, error) {
 	rows, err := db.pool.Query(ctx, `
 		SELECT t.id::text, t.title, a.name, al.title, t.path, t.track_number,

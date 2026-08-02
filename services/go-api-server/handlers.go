@@ -77,8 +77,43 @@ func (h *Handler) ListStations(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) GetStation(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
+	station, err := h.db.GetStationByID(r.Context(), id)
+	if err != nil {
+		http.Error(w, "station not found", 404)
+		return
+	}
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"id": id, "status": "use /stations/{id}/queue"})
+	json.NewEncoder(w).Encode(station)
+}
+
+func (h *Handler) UpdateStation(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	var req struct {
+		Name string `json:"name"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, err.Error(), 400)
+		return
+	}
+	if req.Name == "" {
+		http.Error(w, "name required", 400)
+		return
+	}
+	if err := h.db.UpdateStation(r.Context(), id, req.Name); err != nil {
+		http.Error(w, err.Error(), 500)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"ok": "ok"})
+}
+
+func (h *Handler) DeleteStation(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	if err := h.db.DeleteStation(r.Context(), id); err != nil {
+		http.Error(w, err.Error(), 500)
+		return
+	}
+	w.WriteHeader(204)
 }
 
 func (h *Handler) GetQueue(w http.ResponseWriter, r *http.Request) {

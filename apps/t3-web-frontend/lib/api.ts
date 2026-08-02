@@ -65,6 +65,10 @@ export type CreateStationRequest = {
   cluster_id?: number;
 };
 
+export type UpdateStationRequest = {
+  name: string;
+};
+
 export type CreateStationResponse = { station_id: string };
 
 export class OwnWaveAPI {
@@ -74,6 +78,9 @@ export class OwnWaveAPI {
     const res = await fetch(`${this.baseURL}${path}`, opts);
     if (!res.ok) {
       throw new Error(`HTTP ${res.status}: ${await res.text()}`);
+    }
+    if (res.status === 204) {
+      return undefined as T;
     }
     return (await res.json()) as T;
   }
@@ -95,7 +102,21 @@ export class OwnWaveAPI {
   }
 
   getStation(id: string) {
-    return this.request<StationStatusResponse>(`/stations/${encodeURIComponent(id)}`);
+    return this.request<Station>(`/stations/${encodeURIComponent(id)}`);
+  }
+
+  updateStation(id: string, body: UpdateStationRequest) {
+    return this.request<void>(`/stations/${encodeURIComponent(id)}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+  }
+
+  deleteStation(id: string) {
+    return this.request<void>(`/stations/${encodeURIComponent(id)}`, {
+      method: 'DELETE',
+    });
   }
 
   getQueue(id: string) {
