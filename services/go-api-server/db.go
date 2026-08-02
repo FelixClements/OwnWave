@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -149,5 +150,67 @@ func (db *DB) MarkTrackPlayed(ctx context.Context, stationID, trackID string) er
 		SET played_at = NOW()
 		WHERE station_id = $1 AND track_id = $2
 	`, stationID, trackID)
+	return err
+}
+
+type User struct {
+	ID           string `json:"id"`
+	Username     string `json:"username"`
+	PasswordHash string `json:"-"`
+}
+
+func (db *DB) CreateUser(ctx context.Context, username, passwordHash string) (string, error) {
+	var id string
+	err := db.pool.QueryRow(ctx, `
+		INSERT INTO users (username, password_hash)
+		VALUES ($1, $2)
+		ON CONFLICT (username) DO NOTHING
+		RETURNING id::text
+	`, username, passwordHash).Scan(&id)
+	if err != nil {
+		return "", err
+	}
+	return id, nil
+}
+
+func (db *DB) GetUserByUsername(ctx context.Context, username string) (User, error) {
+	var u User
+	err := db.pool.QueryRow(ctx, `
+		SELECT id::text, username, password_hash
+		FROM users
+		WHERE username = $1
+	`, username).Scan(&u.ID, &u.Username, &u.PasswordHash)
+	return u, err
+}
+
+func (db *DB) CreateSession(ctx context.Context, userID, tokenHash string, expiresAt time.Time) (string, error) {
+	var id string
+	err := db.pool.QueryRow(ctx, `
+		INSERT INTO sessions (user_id, token_hash, expires_at)
+		VALUES ($1, $2, $3)
+		RETURNING id::text
+	`, userID, tokenHash, expiresAt).Scan(&id)
+	if err != nil {
+		return "", err
+	}
+	return id, nil
+}
+
+func (db *DB) GetUserByTokenHash(ctx context.Context, tokenHash string) (User, error) {
+	var u User
+	err := db.pool.QueryRow(ctx, `
+		SELECT u.id::text, u.username, u.password_hash
+		FROM users u
+		JOIN sessions s ON u.id = s.user_id
+		WHERE s.token_hash = $1 AND s.expires_at > NOW()
+	`, tokenHash).Scan(&u.ID, &u.Username, &u.PasswordHash)
+	return u, err
+}
+
+func (db *DB) DeleteSession(ctx context.Context, tokenHash string) error {
+	_, err := db.pool.Exec(ctx, `
+		DELETE FROM sessions
+		WHERE token_hash = $1
+	`, tokenHash)
 	return err
 }
