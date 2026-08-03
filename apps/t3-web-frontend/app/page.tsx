@@ -4,7 +4,35 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { trpc } from '@/lib/trpc/client';
 import { Player } from '@/components/Player';
+import { getCoverUrl } from '@/lib/api';
 import { Station, QueueTrack } from '@/server/routers/app';
+
+function Cover({
+  id,
+  title,
+  className,
+}: {
+  id: string;
+  title: string;
+  className?: string;
+}) {
+  const [error, setError] = useState(false);
+  if (error) {
+    return (
+      <div className={className}>
+        <span className="font-bold">{title.charAt(0).toUpperCase()}</span>
+      </div>
+    );
+  }
+  return (
+    <img
+      src={getCoverUrl(id)}
+      alt=""
+      className={className}
+      onError={() => setError(true)}
+    />
+  );
+}
 
 const DEMO_STATIONS: Station[] = [
   { id: 'demo-station-1', name: 'Focus Flow' },
@@ -328,9 +356,11 @@ export default function Home() {
                 </h2>
                 <div className="bg-spotify-card rounded-lg p-4 mb-6">
                   <div className="flex items-center gap-4 mb-4">
-                    <div className="w-16 h-16 bg-spotify-green rounded shadow flex items-center justify-center text-black text-xl font-bold">
-                      {displayQueue[0].title.charAt(0).toUpperCase()}
-                    </div>
+                    <Cover
+                      id={displayQueue[0].id}
+                      title={displayQueue[0].title}
+                      className="w-16 h-16 rounded shadow object-cover bg-spotify-green flex items-center justify-center text-black text-xl font-bold"
+                    />
                     <div className="min-w-0">
                       <div className="text-lg font-bold text-spotify-text truncate">
                         {displayQueue[0].title}
@@ -338,7 +368,23 @@ export default function Home() {
                       <div className="text-sm text-spotify-subdued truncate">
                         {displayQueue[0].artist || 'Unknown artist'}
                       </div>
+                      {displayQueue[0].album && (
+                        <div className="text-xs text-spotify-subdued truncate">
+                          {displayQueue[0].album}
+                        </div>
+                      )}
                     </div>
+                  </div>
+                  <div className="flex flex-wrap gap-3 text-xs text-spotify-subdued">
+                    {displayQueue[0].bpm && (
+                      <span>{displayQueue[0].bpm.toFixed(0)} BPM</span>
+                    )}
+                    {displayQueue[0].key && (
+                      <span>{displayQueue[0].key}</span>
+                    )}
+                    {displayQueue[0].energy !== undefined && (
+                      <span>Energy {displayQueue[0].energy.toFixed(2)}</span>
+                    )}
                   </div>
                 </div>
 
@@ -354,14 +400,15 @@ export default function Home() {
                             key={track.id}
                             className="flex items-center justify-between py-2 px-3 rounded hover:bg-spotify-elevated text-sm"
                           >
-                            <span className="text-spotify-text truncate pr-4">
+                            <span className="text-spotify-text truncate pr-4 flex-1">
                               <span className="text-spotify-subdued w-6 inline-block">
                                 {i + 1}
                               </span>
                               {track.title}
                             </span>
-                            <span className="text-spotify-subdued truncate">
+                            <span className="text-spotify-subdued truncate text-right max-w-[40%]">
                               {track.artist || 'Unknown artist'}
+                              {track.album ? ` · ${track.album}` : ''}
                             </span>
                           </li>
                         ))}

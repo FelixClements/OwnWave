@@ -82,6 +82,7 @@ func main() {
 	r.Get("/tracks", h.ListTracks)
 	r.Get("/search", h.Search)
 	r.Get("/tracks/{id}", h.GetTrack)
+	r.Get("/tracks/{id}/cover", h.GetTrackCover)
 	r.Get("/tracks/{id}/stream-url", h.StreamURL)
 	r.Get("/stream/{id}", h.StreamTrack)
 	r.Get("/stations", h.ListStations)

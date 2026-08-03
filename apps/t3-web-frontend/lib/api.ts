@@ -3,6 +3,14 @@ const DEFAULT_BASE_URL =
   process.env.NEXT_PUBLIC_GO_API_URL ||
   'http://localhost:8080';
 
+export function getCoverUrl(id: string) {
+  return `${DEFAULT_BASE_URL}/tracks/${id}/cover`;
+}
+
+export function getStreamBaseUrl() {
+  return DEFAULT_BASE_URL;
+}
+
 export type Track = {
   id: string;
   title: string;
@@ -119,6 +127,10 @@ export class OwnWaveAPI {
 
   search(q: string) {
     return this.request<SearchResults>(`/search?q=${encodeURIComponent(q)}`);
+  }
+
+  getCoverUrl(id: string) {
+    return `${this.baseURL}/tracks/${id}/cover`;
   }
 
   getStation(id: string) {

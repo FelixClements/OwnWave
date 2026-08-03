@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { QueueTrack } from '@/server/routers/app';
+import { getCoverUrl } from '@/lib/api';
 
 const GO_API = process.env.NEXT_PUBLIC_GO_API_URL || 'http://localhost:8080';
 
@@ -41,6 +42,8 @@ export function Player({ queue }: { queue: QueueTrack[] }) {
   const [started, setStarted] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTrack, setCurrentTrack] = useState<QueueTrack | null>(null);
+  const [coverUrl, setCoverUrl] = useState<string | null>(null);
+  const [coverError, setCoverError] = useState(false);
 
   const audioARef = useRef<HTMLAudioElement | null>(null);
   const audioBRef = useRef<HTMLAudioElement | null>(null);
@@ -120,6 +123,8 @@ export function Player({ queue }: { queue: QueueTrack[] }) {
     const track = queue[index];
     if (!track) return;
     setCurrentTrack(track);
+    setCoverUrl(getCoverUrl(track.id));
+    setCoverError(false);
     const url = await getStreamUrl(track.id);
     audio.src = url;
     audio.load();
@@ -254,8 +259,17 @@ export function Player({ queue }: { queue: QueueTrack[] }) {
 
       {currentTrack ? (
         <div className="flex items-center gap-2 md:gap-4 w-5/12 md:w-1/3 min-w-0">
-          <div className="w-10 h-10 md:w-14 md:h-14 shrink-0 bg-spotify-card rounded shadow flex items-center justify-center text-xs text-spotify-subdued font-bold">
-            {currentTrack.title.charAt(0).toUpperCase()}
+          <div className="w-10 h-10 md:w-14 md:h-14 shrink-0 relative rounded shadow overflow-hidden bg-spotify-card flex items-center justify-center text-xs text-spotify-subdued font-bold">
+            {coverUrl && !coverError ? (
+              <img
+                src={coverUrl}
+                alt=""
+                className="w-full h-full object-cover"
+                onError={() => setCoverError(true)}
+              />
+            ) : (
+              currentTrack.title.charAt(0).toUpperCase()
+            )}
           </div>
           <div className="min-w-0">
             <div className="text-xs md:text-sm font-bold text-spotify-text truncate">
