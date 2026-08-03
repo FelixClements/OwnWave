@@ -100,6 +100,18 @@ export type CreateStationRequest = {
 
 export type UpdateStationRequest = {
   name: string;
+  length?: number;
+  min_bpm?: number;
+  max_bpm?: number;
+  min_energy?: number;
+  max_energy?: number;
+  min_valence?: number;
+  max_valence?: number;
+  seed_type?: 'track' | 'artist' | 'album' | 'cluster' | 'mood';
+  track_id?: string;
+  artist_id?: string;
+  album_id?: string;
+  cluster_id?: number;
 };
 
 export type CreateStationResponse = { station_id: string };

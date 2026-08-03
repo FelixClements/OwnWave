@@ -216,17 +216,74 @@ func (h *Handler) GetStation(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) UpdateStation(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	var req struct {
-		Name string `json:"name"`
+		Name       *string  `json:"name"`
+		Length     *int     `json:"length"`
+		MinBPM     *float64 `json:"min_bpm"`
+		MaxBPM     *float64 `json:"max_bpm"`
+		MinEnergy  *float64 `json:"min_energy"`
+		MaxEnergy  *float64 `json:"max_energy"`
+		MinValence *float64 `json:"min_valence"`
+		MaxValence *float64 `json:"max_valence"`
+		SeedType   *string  `json:"seed_type"`
+		TrackID    *string  `json:"track_id"`
+		ArtistID   *string  `json:"artist_id"`
+		AlbumID    *string  `json:"album_id"`
+		ClusterID  *int     `json:"cluster_id"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, err.Error(), 400)
 		return
 	}
-	if req.Name == "" {
+	if req.Name == nil || *req.Name == "" {
 		http.Error(w, "name required", 400)
 		return
 	}
-	if err := h.db.UpdateStation(r.Context(), id, req.Name); err != nil {
+
+	filters := map[string]interface{}{}
+	if req.Length != nil {
+		filters["length"] = *req.Length
+	}
+	if req.MinBPM != nil {
+		filters["min_bpm"] = *req.MinBPM
+	}
+	if req.MaxBPM != nil {
+		filters["max_bpm"] = *req.MaxBPM
+	}
+	if req.MinEnergy != nil {
+		filters["min_energy"] = *req.MinEnergy
+	}
+	if req.MaxEnergy != nil {
+		filters["max_energy"] = *req.MaxEnergy
+	}
+	if req.MinValence != nil {
+		filters["min_valence"] = *req.MinValence
+	}
+	if req.MaxValence != nil {
+		filters["max_valence"] = *req.MaxValence
+	}
+	if req.SeedType != nil && *req.SeedType != "" {
+		filters["seed_type"] = *req.SeedType
+	}
+	if req.TrackID != nil && *req.TrackID != "" {
+		filters["track_id"] = *req.TrackID
+	}
+	if req.ArtistID != nil && *req.ArtistID != "" {
+		filters["artist_id"] = *req.ArtistID
+	}
+	if req.AlbumID != nil && *req.AlbumID != "" {
+		filters["album_id"] = *req.AlbumID
+	}
+	if req.ClusterID != nil {
+		filters["cluster_id"] = *req.ClusterID
+	}
+
+	var seedFeatures string
+	if len(filters) > 0 {
+		b, _ := json.Marshal(filters)
+		seedFeatures = string(b)
+	}
+
+	if err := h.db.UpdateStation(r.Context(), id, *req.Name, seedFeatures); err != nil {
 		http.Error(w, err.Error(), 500)
 		return
 	}

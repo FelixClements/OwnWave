@@ -159,12 +159,13 @@ func (db *DB) GetStationByID(ctx context.Context, stationID string) (Station, er
 	return s, err
 }
 
-func (db *DB) UpdateStation(ctx context.Context, stationID, name string) error {
+func (db *DB) UpdateStation(ctx context.Context, stationID, name, seedFeatures string) error {
 	_, err := db.pool.Exec(ctx, `
 		UPDATE stations
-		SET name = $2
+		SET name = $2,
+		    seed_features = COALESCE(NULLIF($3, '')::jsonb, seed_features)
 		WHERE id = $1
-	`, stationID, name)
+	`, stationID, name, seedFeatures)
 	return err
 }
 

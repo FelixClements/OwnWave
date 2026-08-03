@@ -9,6 +9,25 @@ export function StationManager() {
   const [editName, setEditName] = useState('');
   const [previewId, setPreviewId] = useState<string | null>(null);
 
+  const [createFilters, setCreateFilters] = useState({
+    min_bpm: '',
+    max_bpm: '',
+    min_energy: '',
+    max_energy: '',
+    min_valence: '',
+    max_valence: '',
+    seed_type: '',
+  });
+  const [editFilters, setEditFilters] = useState({
+    min_bpm: '',
+    max_bpm: '',
+    min_energy: '',
+    max_energy: '',
+    min_valence: '',
+    max_valence: '',
+    seed_type: '',
+  });
+
   const utils = trpc.useContext();
   const { data: stations } = trpc.stations.useQuery();
   const { data: queue } = trpc.queue.useQuery(
@@ -40,32 +59,133 @@ export function StationManager() {
   const handleCreate = (e: React.FormEvent) => {
     e.preventDefault();
     if (!name.trim()) return;
-    create.mutate({ name: name.trim() });
-  };
-
-  const startEdit = (id: string, currentName: string) => {
-    setEditing(id);
-    setEditName(currentName);
+    create.mutate({
+      name: name.trim(),
+      min_bpm: toNum(createFilters.min_bpm),
+      max_bpm: toNum(createFilters.max_bpm),
+      min_energy: toNum(createFilters.min_energy),
+      max_energy: toNum(createFilters.max_energy),
+      min_valence: toNum(createFilters.min_valence),
+      max_valence: toNum(createFilters.max_valence),
+      seed_type: createFilters.seed_type as any || undefined,
+    });
   };
 
   const handleUpdate = (e: React.FormEvent) => {
     e.preventDefault();
     if (!editing || !editName.trim()) return;
-    update.mutate({ id: editing, name: editName.trim() });
+    update.mutate({
+      id: editing,
+      name: editName.trim(),
+      min_bpm: toNum(editFilters.min_bpm),
+      max_bpm: toNum(editFilters.max_bpm),
+      min_energy: toNum(editFilters.min_energy),
+      max_energy: toNum(editFilters.max_energy),
+      min_valence: toNum(editFilters.min_valence),
+      max_valence: toNum(editFilters.max_valence),
+      seed_type: editFilters.seed_type as any || undefined,
+    });
   };
+
+  const startEdit = (id: string, currentName: string) => {
+    setEditing(id);
+    setEditName(currentName);
+    setEditFilters({
+      min_bpm: '',
+      max_bpm: '',
+      min_energy: '',
+      max_energy: '',
+      min_valence: '',
+      max_valence: '',
+      seed_type: '',
+    });
+  };
+
+  function toNum(value: string) {
+    const n = parseFloat(value);
+    return isNaN(n) ? undefined : n;
+  }
 
   return (
     <div className="p-4 md:p-6 space-y-6">
       <h2 className="text-2xl font-bold text-spotify-text">Manage Stations</h2>
 
-      <form onSubmit={handleCreate} className="flex flex-col sm:flex-row gap-2">
+      <form onSubmit={handleCreate} className="space-y-3 p-4 rounded bg-spotify-card">
         <input
           type="text"
           value={name}
           onChange={(e) => setName(e.target.value)}
           placeholder="New station name"
-          className="flex-1 px-3 py-2 rounded bg-spotify-elevated text-spotify-text placeholder-spotify-subdued border border-spotify-border focus:outline-none focus:border-spotify-green"
+          className="w-full px-3 py-2 rounded bg-spotify-elevated text-spotify-text placeholder-spotify-subdued border border-spotify-border focus:outline-none focus:border-spotify-green"
         />
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+          <input
+            type="number"
+            value={createFilters.min_bpm}
+            onChange={(e) => setCreateFilters({ ...createFilters, min_bpm: e.target.value })}
+            placeholder="Min BPM"
+            className="px-3 py-2 rounded bg-spotify-elevated text-spotify-text placeholder-spotify-subdued border border-spotify-border focus:outline-none focus:border-spotify-green"
+          />
+          <input
+            type="number"
+            value={createFilters.max_bpm}
+            onChange={(e) => setCreateFilters({ ...createFilters, max_bpm: e.target.value })}
+            placeholder="Max BPM"
+            className="px-3 py-2 rounded bg-spotify-elevated text-spotify-text placeholder-spotify-subdued border border-spotify-border focus:outline-none focus:border-spotify-green"
+          />
+          <input
+            type="number"
+            step="0.01"
+            min="0"
+            max="1"
+            value={createFilters.min_energy}
+            onChange={(e) => setCreateFilters({ ...createFilters, min_energy: e.target.value })}
+            placeholder="Min energy"
+            className="px-3 py-2 rounded bg-spotify-elevated text-spotify-text placeholder-spotify-subdued border border-spotify-border focus:outline-none focus:border-spotify-green"
+          />
+          <input
+            type="number"
+            step="0.01"
+            min="0"
+            max="1"
+            value={createFilters.max_energy}
+            onChange={(e) => setCreateFilters({ ...createFilters, max_energy: e.target.value })}
+            placeholder="Max energy"
+            className="px-3 py-2 rounded bg-spotify-elevated text-spotify-text placeholder-spotify-subdued border border-spotify-border focus:outline-none focus:border-spotify-green"
+          />
+          <input
+            type="number"
+            step="0.01"
+            min="0"
+            max="1"
+            value={createFilters.min_valence}
+            onChange={(e) => setCreateFilters({ ...createFilters, min_valence: e.target.value })}
+            placeholder="Min valence"
+            className="px-3 py-2 rounded bg-spotify-elevated text-spotify-text placeholder-spotify-subdued border border-spotify-border focus:outline-none focus:border-spotify-green"
+          />
+          <input
+            type="number"
+            step="0.01"
+            min="0"
+            max="1"
+            value={createFilters.max_valence}
+            onChange={(e) => setCreateFilters({ ...createFilters, max_valence: e.target.value })}
+            placeholder="Max valence"
+            className="px-3 py-2 rounded bg-spotify-elevated text-spotify-text placeholder-spotify-subdued border border-spotify-border focus:outline-none focus:border-spotify-green"
+          />
+          <select
+            value={createFilters.seed_type}
+            onChange={(e) => setCreateFilters({ ...createFilters, seed_type: e.target.value })}
+            className="px-3 py-2 rounded bg-spotify-elevated text-spotify-text border border-spotify-border focus:outline-none focus:border-spotify-green"
+          >
+            <option value="">Any seed</option>
+            <option value="track">Track</option>
+            <option value="artist">Artist</option>
+            <option value="album">Album</option>
+            <option value="cluster">Cluster</option>
+            <option value="mood">Mood</option>
+          </select>
+        </div>
         <button
           type="submit"
           disabled={create.isLoading}
@@ -82,26 +202,96 @@ export function StationManager() {
             className="flex flex-col sm:flex-row items-start sm:items-center justify-between p-3 rounded bg-spotify-card gap-2"
           >
             {editing === station.id ? (
-              <form onSubmit={handleUpdate} className="flex-1 flex flex-col sm:flex-row gap-2">
+              <form onSubmit={handleUpdate} className="flex-1 flex flex-col gap-2">
                 <input
                   type="text"
                   value={editName}
                   onChange={(e) => setEditName(e.target.value)}
-                  className="flex-1 px-2 py-1 rounded bg-spotify-elevated text-spotify-text border border-spotify-border"
+                  className="w-full px-2 py-1 rounded bg-spotify-elevated text-spotify-text border border-spotify-border"
                 />
-                <button
-                  type="submit"
-                  className="px-3 py-1 rounded bg-spotify-green text-black text-sm font-semibold w-full sm:w-auto"
-                >
-                  Save
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setEditing(null)}
-                  className="px-3 py-1 rounded bg-spotify-elevated text-spotify-text text-sm w-full sm:w-auto"
-                >
-                  Cancel
-                </button>
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                  <input
+                    type="number"
+                    value={editFilters.min_bpm}
+                    onChange={(e) => setEditFilters({ ...editFilters, min_bpm: e.target.value })}
+                    placeholder="Min BPM"
+                    className="px-2 py-1 rounded bg-spotify-elevated text-spotify-text border border-spotify-border"
+                  />
+                  <input
+                    type="number"
+                    value={editFilters.max_bpm}
+                    onChange={(e) => setEditFilters({ ...editFilters, max_bpm: e.target.value })}
+                    placeholder="Max BPM"
+                    className="px-2 py-1 rounded bg-spotify-elevated text-spotify-text border border-spotify-border"
+                  />
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    max="1"
+                    value={editFilters.min_energy}
+                    onChange={(e) => setEditFilters({ ...editFilters, min_energy: e.target.value })}
+                    placeholder="Min energy"
+                    className="px-2 py-1 rounded bg-spotify-elevated text-spotify-text border border-spotify-border"
+                  />
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    max="1"
+                    value={editFilters.max_energy}
+                    onChange={(e) => setEditFilters({ ...editFilters, max_energy: e.target.value })}
+                    placeholder="Max energy"
+                    className="px-2 py-1 rounded bg-spotify-elevated text-spotify-text border border-spotify-border"
+                  />
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    max="1"
+                    value={editFilters.min_valence}
+                    onChange={(e) => setEditFilters({ ...editFilters, min_valence: e.target.value })}
+                    placeholder="Min valence"
+                    className="px-2 py-1 rounded bg-spotify-elevated text-spotify-text border border-spotify-border"
+                  />
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    max="1"
+                    value={editFilters.max_valence}
+                    onChange={(e) => setEditFilters({ ...editFilters, max_valence: e.target.value })}
+                    placeholder="Max valence"
+                    className="px-2 py-1 rounded bg-spotify-elevated text-spotify-text border border-spotify-border"
+                  />
+                  <select
+                    value={editFilters.seed_type}
+                    onChange={(e) => setEditFilters({ ...editFilters, seed_type: e.target.value })}
+                    className="px-2 py-1 rounded bg-spotify-elevated text-spotify-text border border-spotify-border"
+                  >
+                    <option value="">Any seed</option>
+                    <option value="track">Track</option>
+                    <option value="artist">Artist</option>
+                    <option value="album">Album</option>
+                    <option value="cluster">Cluster</option>
+                    <option value="mood">Mood</option>
+                  </select>
+                </div>
+                <div className="flex gap-2">
+                  <button
+                    type="submit"
+                    className="px-3 py-1 rounded bg-spotify-green text-black text-sm font-semibold w-full sm:w-auto"
+                  >
+                    Save
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setEditing(null)}
+                    className="px-3 py-1 rounded bg-spotify-elevated text-spotify-text text-sm w-full sm:w-auto"
+                  >
+                    Cancel
+                  </button>
+                </div>
               </form>
             ) : (
               <>
