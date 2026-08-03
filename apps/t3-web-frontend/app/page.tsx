@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { trpc } from '@/lib/trpc/client';
 import { Player } from '@/components/Player';
+import { ProfileButton } from '@/components/ProfileButton';
 import { getCoverUrl } from '@/lib/api';
 import { Station, QueueTrack } from '@/server/routers/app';
 
@@ -264,6 +265,7 @@ export default function Home() {
               >
                 {isLight ? <SunIcon className="w-4 h-4" /> : <MoonIcon className="w-4 h-4" />}
               </button>
+              <ProfileButton />
             </div>
           </header>
 

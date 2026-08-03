@@ -19,6 +19,18 @@ export const appRouter = t.router({
 
   rescan: t.procedure.mutation(async () => api.rescan()),
 
+  register: t.procedure
+    .input(z.object({ username: z.string(), password: z.string() }))
+    .mutation(async ({ input }) => api.register(input.username, input.password)),
+
+  login: t.procedure
+    .input(z.object({ username: z.string(), password: z.string() }))
+    .mutation(async ({ input }) => api.login(input.username, input.password)),
+
+  me: t.procedure.query(async () => api.me()),
+
+  logout: t.procedure.mutation(async () => api.logout()),
+
   recordPlay: t.procedure
     .input(z.object({ id: z.string(), stationId: z.string().optional() }))
     .mutation(async ({ input }) => api.recordPlay(input.id, input.stationId)),

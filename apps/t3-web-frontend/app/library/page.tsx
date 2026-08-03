@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import Link from 'next/link';
 import { trpc } from '@/lib/trpc/client';
+import { ProfileButton } from '@/components/ProfileButton';
 import { getCoverUrl } from '@/lib/api';
 
 type Tab = 'tracks' | 'albums' | 'artists';
@@ -45,13 +46,16 @@ export default function LibraryPage() {
           </Link>
           <h2 className="text-sm font-bold">Library</h2>
         </div>
-        <button
-          onClick={() => rescan.mutate()}
-          disabled={rescan.isLoading}
-          className="text-xs font-semibold px-3 py-1.5 rounded-full bg-spotify-elevated text-spotify-text hover:bg-spotify-card-hover transition disabled:opacity-50"
-        >
-          {rescan.isLoading ? 'Rescanning...' : 'Rescan library'}
-        </button>
+        <div className="flex items-center gap-3">
+          <button
+            onClick={() => rescan.mutate()}
+            disabled={rescan.isLoading}
+            className="text-xs font-semibold px-3 py-1.5 rounded-full bg-spotify-elevated text-spotify-text hover:bg-spotify-card-hover transition disabled:opacity-50"
+          >
+            {rescan.isLoading ? 'Rescanning...' : 'Rescan library'}
+          </button>
+          <ProfileButton />
+        </div>
       </header>
 
       <main className="p-4 md:p-8">

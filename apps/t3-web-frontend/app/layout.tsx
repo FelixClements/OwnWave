@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from 'next';
 import './globals.css';
 import { Provider } from '@/lib/trpc/Provider';
 import { PWA } from '@/components/PWA';
+import { AuthProvider } from '@/lib/auth';
 
 export const metadata: Metadata = {
   title: 'OwnWave',
@@ -29,7 +30,9 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body className="h-full overflow-hidden antialiased">
-        <Provider>{children}</Provider>
+        <Provider>
+          <AuthProvider>{children}</AuthProvider>
+        </Provider>
         <PWA />
       </body>
     </html>

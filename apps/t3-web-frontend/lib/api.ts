@@ -3,12 +3,18 @@ const DEFAULT_BASE_URL =
   process.env.NEXT_PUBLIC_GO_API_URL ||
   'http://localhost:8080';
 
-export function getCoverUrl(id: string) {
-  return `${DEFAULT_BASE_URL}/tracks/${id}/cover`;
+let authToken: string | null = null;
+
+export function setAuthToken(token: string | null) {
+  authToken = token;
 }
 
-export function getStreamBaseUrl() {
-  return DEFAULT_BASE_URL;
+export function getAuthToken() {
+  return authToken;
+}
+
+export function getCoverUrl(id: string) {
+  return `${DEFAULT_BASE_URL}/tracks/${id}/cover`;
 }
 
 export type Track = {
@@ -55,6 +61,16 @@ export type SearchResults = {
   tracks: Track[];
   albums: Album[];
   artists: Artist[];
+};
+
+export type User = {
+  id: string;
+  username: string;
+};
+
+export type AuthResponse = {
+  token: string;
+  user: User;
 };
 
 export type HistoryEntry = {
@@ -120,7 +136,16 @@ export class OwnWaveAPI {
   constructor(private baseURL: string = DEFAULT_BASE_URL) {}
 
   private async request<T>(path: string, opts?: RequestInit): Promise<T> {
-    const res = await fetch(`${this.baseURL}${path}`, opts);
+    const headers: HeadersInit = {
+      ...(opts?.headers || {}),
+    };
+    if (authToken) {
+      (headers as Record<string, string>)['Authorization'] = `Bearer ${authToken}`;
+    }
+    const res = await fetch(`${this.baseURL}${path}`, {
+      ...opts,
+      headers,
+    });
     if (!res.ok) {
       throw new Error(`HTTP ${res.status}: ${await res.text()}`);
     }
@@ -210,6 +235,30 @@ export class OwnWaveAPI {
     return this.request<{ queue: QueueTrack[] }>(
       `/stations/${encodeURIComponent(id)}/queue`
     ).then((r) => r.queue);
+  }
+
+  register(username: string, password: string) {
+    return this.request<AuthResponse>('/register', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, password }),
+    });
+  }
+
+  login(username: string, password: string) {
+    return this.request<AuthResponse>('/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, password }),
+    });
+  }
+
+  me() {
+    return this.request<User>('/me');
+  }
+
+  logout() {
+    return this.request<void>('/logout', { method: 'POST' });
   }
 
   getStreamUrl(id: string, opts?: StreamUrlOptions) {

@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import Link from 'next/link';
 import { trpc } from '@/lib/trpc/client';
+import { ProfileButton } from '@/components/ProfileButton';
 import { getCoverUrl } from '@/lib/api';
 
 type Tab = 'history' | 'liked' | 'skipped' | 'banned';
@@ -35,6 +36,7 @@ export default function HistoryPage() {
           </Link>
           <h2 className="text-sm font-bold">History & Feedback</h2>
         </div>
+        <ProfileButton />
       </header>
 
       <main className="p-4 md:p-8">
