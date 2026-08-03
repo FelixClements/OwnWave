@@ -19,6 +19,10 @@ export const appRouter = t.router({
 
   stations: t.procedure.query(async () => api.listStations()),
 
+  search: t.procedure
+    .input(z.object({ q: z.string() }))
+    .query(async ({ input }) => api.search(input.q)),
+
   queue: t.procedure
     .input(z.object({ id: z.string() }))
     .query(async ({ input }) => api.getQueue(input.id)),

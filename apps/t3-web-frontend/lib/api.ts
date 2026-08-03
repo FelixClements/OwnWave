@@ -33,6 +33,22 @@ export type QueueTrack = Track & {
 export type HealthResponse = { status: string };
 export type StationStatusResponse = { id: string; status: string };
 
+export type Artist = {
+  id: string;
+  name: string;
+};
+
+export type Album = {
+  id: string;
+  title: string;
+};
+
+export type SearchResults = {
+  tracks: Track[];
+  albums: Album[];
+  artists: Artist[];
+};
+
 export type StreamUrlResponse = { url: string };
 export type StreamUrlOptions = {
   format?: 'flac' | 'mp3' | 'opus' | 'aac';
@@ -99,6 +115,10 @@ export class OwnWaveAPI {
 
   listStations() {
     return this.request<{ stations: Station[] }>('/stations').then((r) => r.stations);
+  }
+
+  search(q: string) {
+    return this.request<SearchResults>(`/search?q=${encodeURIComponent(q)}`);
   }
 
   getStation(id: string) {

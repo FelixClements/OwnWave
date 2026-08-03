@@ -54,6 +54,17 @@ func (h *Handler) ListTracks(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]interface{}{"tracks": tracks})
 }
 
+func (h *Handler) Search(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query().Get("q")
+	results, err := h.db.Search(r.Context(), q)
+	if err != nil {
+		http.Error(w, err.Error(), 500)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(results)
+}
+
 func (h *Handler) GetTrack(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	track, err := h.db.GetTrackByID(r.Context(), id)

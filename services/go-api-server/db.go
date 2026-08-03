@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -240,4 +241,95 @@ func (db *DB) DeleteSession(ctx context.Context, tokenHash string) error {
 		WHERE token_hash = $1
 	`, tokenHash)
 	return err
+}
+
+type Artist struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+}
+
+type Album struct {
+	ID    string `json:"id"`
+	Title string `json:"title"`
+}
+
+type SearchResults struct {
+	Tracks  []Track  `json:"tracks"`
+	Albums  []Album  `json:"albums"`
+	Artists []Artist `json:"artists"`
+}
+
+func (db *DB) Search(ctx context.Context, query string) (SearchResults, error) {
+	var results SearchResults
+	tsquery := strings.TrimSpace(query)
+	if tsquery == "" {
+		return results, nil
+	}
+
+	artistRows, err := db.pool.Query(ctx, `
+		SELECT id::text, name
+		FROM artists
+		WHERE to_tsvector('simple', name) @@ plainto_tsquery('simple', $1)
+		LIMIT 20
+	`, tsquery)
+	if err != nil {
+		return results, err
+	}
+	defer artistRows.Close()
+	for artistRows.Next() {
+		var a Artist
+		if err := artistRows.Scan(&a.ID, &a.Name); err != nil {
+			return results, err
+		}
+		results.Artists = append(results.Artists, a)
+	}
+	if err := artistRows.Err(); err != nil {
+		return results, err
+	}
+
+	albumRows, err := db.pool.Query(ctx, `
+		SELECT id::text, title
+		FROM albums
+		WHERE to_tsvector('simple', title) @@ plainto_tsquery('simple', $1)
+		LIMIT 20
+	`, tsquery)
+	if err != nil {
+		return results, err
+	}
+	defer albumRows.Close()
+	for albumRows.Next() {
+		var a Album
+		if err := albumRows.Scan(&a.ID, &a.Title); err != nil {
+			return results, err
+		}
+		results.Albums = append(results.Albums, a)
+	}
+	if err := albumRows.Err(); err != nil {
+		return results, err
+	}
+
+	trackRows, err := db.pool.Query(ctx, `
+		SELECT t.id::text, t.title, a.name, al.title
+		FROM tracks t
+		LEFT JOIN artists a ON t.artist_id = a.id
+		LEFT JOIN albums al ON t.album_id = al.id
+		WHERE to_tsvector('simple', coalesce(t.title, '') || ' ' || coalesce(a.name, '') || ' ' || coalesce(al.title, '')) @@ plainto_tsquery('simple', $1)
+		LIMIT 20
+	`, tsquery)
+	if err != nil {
+		return results, err
+	}
+	defer trackRows.Close()
+	for trackRows.Next() {
+		var t Track
+		if err := trackRows.Scan(&t.ID, &t.Title, &t.Artist, &t.Album); err != nil {
+			return results, err
+		}
+		results.Tracks = append(results.Tracks, t)
+	}
+	if err := trackRows.Err(); err != nil {
+		return results, err
+	}
+
+	return results, nil
 }
