@@ -1,0 +1,26 @@
+{
+  "name": "OwnWave",
+  "short_name": "OwnWave",
+  "description": "AI smart radio for your local FLAC library",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#121212",
+  "theme_color": "#1db954",
+  "orientation": "portrait",
+  "scope": "/",
+  "id": "/",
+  "icons": [
+    {
+      "src": "/ownwave-192.svg",
+      "sizes": "192x192",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/ownwave-512.svg",
+      "sizes": "512x512",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
