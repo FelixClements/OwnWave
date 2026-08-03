@@ -106,6 +106,48 @@ export function Player({ queue }: { queue: QueueTrack[] }) {
     };
   }, [started, queue]);
 
+  useEffect(() => {
+    if (typeof window === 'undefined' || !('mediaSession' in navigator) || !currentTrack) return;
+
+    const artwork: MediaImage[] = [];
+    if (coverUrl && !coverError) {
+      artwork.push({
+        src: coverUrl,
+        sizes: '512x512',
+        type: 'image/jpeg',
+      });
+    }
+
+    navigator.mediaSession.metadata = new MediaMetadata({
+      title: currentTrack.title,
+      artist: currentTrack.artist || undefined,
+      album: currentTrack.album || undefined,
+      artwork,
+    });
+
+    navigator.mediaSession.setActionHandler('play', () => {
+      const audio = activeRef.current === 'A' ? audioARef.current : audioBRef.current;
+      if (audio && !isPlaying) audio.play();
+      setIsPlaying(true);
+    });
+    navigator.mediaSession.setActionHandler('pause', () => {
+      const audio = activeRef.current === 'A' ? audioARef.current : audioBRef.current;
+      if (audio && isPlaying) audio.pause();
+      setIsPlaying(false);
+    });
+    navigator.mediaSession.setActionHandler('nexttrack', () => skipNext());
+    navigator.mediaSession.setActionHandler('previoustrack', () => skipPrev());
+  }, [currentTrack, coverUrl, coverError, isPlaying]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || !queue.length) return;
+    try {
+      localStorage.setItem('ownwave:offlineQueue', JSON.stringify(queue.slice(0, 20)));
+    } catch {
+      // ignore storage errors
+    }
+  }, [queue]);
+
   function playSequential() {
     const audio = audioARef.current;
     if (!audio) return;
@@ -233,6 +275,32 @@ export function Player({ queue }: { queue: QueueTrack[] }) {
       currentIndexRef.current = nextIndex;
       crossfadingRef.current = false;
     }, crossfade * 1000);
+  }
+
+  function skipNext() {
+    if (crossfadingRef.current || !currentTrack) return;
+    const next = currentIndexRef.current + 1;
+    if (next < queue.length) {
+      const audio = activeRef.current === 'A' ? audioARef.current : audioBRef.current;
+      if (audio) {
+        audio.ontimeupdate = null;
+        audio.onended = null;
+      }
+      loadAndPlay(next, activeRef.current);
+    }
+  }
+
+  function skipPrev() {
+    if (crossfadingRef.current || !currentTrack) return;
+    const prev = currentIndexRef.current - 1;
+    if (prev >= 0) {
+      const audio = activeRef.current === 'A' ? audioARef.current : audioBRef.current;
+      if (audio) {
+        audio.ontimeupdate = null;
+        audio.onended = null;
+      }
+      loadAndPlay(prev, activeRef.current);
+    }
   }
 
   function togglePlay() {
