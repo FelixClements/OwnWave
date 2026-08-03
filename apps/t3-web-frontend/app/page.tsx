@@ -142,7 +142,7 @@ export default function Home() {
   const { data: stations } = trpc.stations.useQuery();
   const { data: queue } = trpc.queue.useQuery(
     { id: selectedStation || '' },
-    { enabled: !!selectedStation && !demo }
+    { enabled: !!selectedStation && !demo, refetchInterval: 5000 }
   );
 
   const displayStations = demo ? DEMO_STATIONS : (stations || []);
@@ -254,26 +254,49 @@ export default function Home() {
                 <h2 className="text-2xl font-bold text-spotify-text mb-5">
                   Now Playing
                 </h2>
-                <div className="bg-spotify-card rounded-lg p-4">
-                  <ul className="space-y-1">
-                    {displayQueue.map((track, i) => (
-                      <li
-                        key={track.id}
-                        className="flex items-center justify-between py-2 px-3 rounded hover:bg-spotify-elevated text-sm"
-                      >
-                        <span className="text-spotify-text truncate pr-4">
-                          <span className="text-spotify-subdued w-6 inline-block">
-                            {i + 1}
-                          </span>
-                          {track.title}
-                        </span>
-                        <span className="text-spotify-subdued truncate">
-                          {track.artist || 'Unknown artist'}
-                        </span>
-                      </li>
-                    ))}
-                  </ul>
+                <div className="bg-spotify-card rounded-lg p-4 mb-6">
+                  <div className="flex items-center gap-4 mb-4">
+                    <div className="w-16 h-16 bg-spotify-green rounded shadow flex items-center justify-center text-black text-xl font-bold">
+                      {displayQueue[0].title.charAt(0).toUpperCase()}
+                    </div>
+                    <div className="min-w-0">
+                      <div className="text-lg font-bold text-spotify-text truncate">
+                        {displayQueue[0].title}
+                      </div>
+                      <div className="text-sm text-spotify-subdued truncate">
+                        {displayQueue[0].artist || 'Unknown artist'}
+                      </div>
+                    </div>
+                  </div>
                 </div>
+
+                {displayQueue.length > 1 && (
+                  <>
+                    <h3 className="text-lg font-bold text-spotify-text mb-3">
+                      Up Next
+                    </h3>
+                    <div className="bg-spotify-card rounded-lg p-4">
+                      <ul className="space-y-1">
+                        {displayQueue.slice(1).map((track, i) => (
+                          <li
+                            key={track.id}
+                            className="flex items-center justify-between py-2 px-3 rounded hover:bg-spotify-elevated text-sm"
+                          >
+                            <span className="text-spotify-text truncate pr-4">
+                              <span className="text-spotify-subdued w-6 inline-block">
+                                {i + 1}
+                              </span>
+                              {track.title}
+                            </span>
+                            <span className="text-spotify-subdued truncate">
+                              {track.artist || 'Unknown artist'}
+                            </span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  </>
+                )}
               </section>
             )}
           </div>
