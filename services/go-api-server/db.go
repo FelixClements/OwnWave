@@ -182,15 +182,20 @@ func (db *DB) GetStationQueue(ctx context.Context, stationID string) ([]TrackWit
 		       t.duration_seconds, t.sample_rate, t.channels,
 		       af.bpm, af.key, af.energy, af.valence, af.loudness,
 		       af.outro_start_seconds, af.ideal_crossfade_seconds,
-			       af.intro_start_seconds, af.outro_end_seconds,
+		       af.intro_start_seconds, af.outro_end_seconds,
 		       st.position
 		FROM station_tracks st
 		JOIN tracks t ON st.track_id = t.id
 		JOIN audio_features af ON t.id = af.track_id
 		LEFT JOIN artists a ON t.artist_id = a.id
 		LEFT JOIN albums al ON t.album_id = al.id
-		WHERE st.station_id = $1
-		ORDER BY st.position
+		LEFT JOIN track_feedback f ON t.id = f.track_id AND f.feedback = 'ban'
+		WHERE st.station_id = $1 AND f.track_id IS NULL
+		ORDER BY CASE
+			WHEN EXISTS (SELECT 1 FROM track_feedback WHERE track_id = t.id AND feedback = 'like') THEN 0
+			WHEN EXISTS (SELECT 1 FROM track_feedback WHERE track_id = t.id AND feedback = 'skip') THEN 2
+			ELSE 1
+		END, st.position
 	`, stationID)
 	if err != nil {
 		return nil, err
