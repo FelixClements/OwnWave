@@ -117,6 +117,18 @@ export class OwnWaveAPI {
     return this.request<{ tracks: Track[] }>('/tracks').then((r) => r.tracks);
   }
 
+  listAlbums() {
+    return this.request<{ albums: Album[] }>('/albums').then((r) => r.albums);
+  }
+
+  listArtists() {
+    return this.request<{ artists: Artist[] }>('/artists').then((r) => r.artists);
+  }
+
+  rescan() {
+    return this.request<{ job_id?: string }>('/rescan', { method: 'POST' });
+  }
+
   getTrack(id: string) {
     return this.request<Track>(`/tracks/${encodeURIComponent(id)}`);
   }

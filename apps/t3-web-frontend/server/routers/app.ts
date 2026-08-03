@@ -13,6 +13,12 @@ const t = initTRPC.create({
 export const appRouter = t.router({
   tracks: t.procedure.query(async () => api.listTracks()),
 
+  albums: t.procedure.query(async () => api.listAlbums()),
+
+  artists: t.procedure.query(async () => api.listArtists()),
+
+  rescan: t.procedure.mutation(async () => api.rescan()),
+
   track: t.procedure
     .input(z.object({ id: z.string() }))
     .query(async ({ input }) => api.getTrack(input.id)),

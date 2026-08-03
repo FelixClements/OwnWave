@@ -80,7 +80,10 @@ func main() {
 
 	r.Get("/health", h.Health)
 	r.Get("/tracks", h.ListTracks)
+	r.Get("/albums", h.ListAlbums)
+	r.Get("/artists", h.ListArtists)
 	r.Get("/search", h.Search)
+	r.Post("/rescan", h.Rescan)
 	r.Get("/tracks/{id}", h.GetTrack)
 	r.Get("/tracks/{id}/cover", h.GetTrackCover)
 	r.Get("/tracks/{id}/stream-url", h.StreamURL)

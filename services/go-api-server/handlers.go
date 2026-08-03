@@ -65,6 +65,42 @@ func (h *Handler) Search(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(results)
 }
 
+func (h *Handler) ListAlbums(w http.ResponseWriter, r *http.Request) {
+	albums, err := h.db.ListAlbums(r.Context())
+	if err != nil {
+		http.Error(w, err.Error(), 500)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{"albums": albums})
+}
+
+func (h *Handler) ListArtists(w http.ResponseWriter, r *http.Request) {
+	artists, err := h.db.ListArtists(r.Context())
+	if err != nil {
+		http.Error(w, err.Error(), 500)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{"artists": artists})
+}
+
+func (h *Handler) Rescan(w http.ResponseWriter, r *http.Request) {
+	payload, _ := json.Marshal(map[string]interface{}{
+		"path":  h.musicDir,
+		"force": false,
+	})
+	resp, err := http.Post(h.pythonURL+"/scan", "application/json", bytes.NewReader(payload))
+	if err != nil {
+		http.Error(w, err.Error(), 500)
+		return
+	}
+	defer resp.Body.Close()
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(resp.StatusCode)
+	io.Copy(w, resp.Body)
+}
+
 func (h *Handler) GetTrack(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	track, err := h.db.GetTrackByID(r.Context(), id)

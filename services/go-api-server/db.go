@@ -85,6 +85,48 @@ func (db *DB) ListTracks(ctx context.Context) ([]Track, error) {
 	return tracks, rows.Err()
 }
 
+func (db *DB) ListAlbums(ctx context.Context) ([]Album, error) {
+	rows, err := db.pool.Query(ctx, `
+		SELECT id::text, title
+		FROM albums
+		ORDER BY title
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var albums []Album
+	for rows.Next() {
+		var a Album
+		if err := rows.Scan(&a.ID, &a.Title); err != nil {
+			return nil, err
+		}
+		albums = append(albums, a)
+	}
+	return albums, rows.Err()
+}
+
+func (db *DB) ListArtists(ctx context.Context) ([]Artist, error) {
+	rows, err := db.pool.Query(ctx, `
+		SELECT id::text, name
+		FROM artists
+		ORDER BY name
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var artists []Artist
+	for rows.Next() {
+		var a Artist
+		if err := rows.Scan(&a.ID, &a.Name); err != nil {
+			return nil, err
+		}
+		artists = append(artists, a)
+	}
+	return artists, rows.Err()
+}
+
 func (db *DB) ListStations(ctx context.Context) ([]Station, error) {
 	rows, err := db.pool.Query(ctx, `
 		SELECT id::text, name, seed_features::text
