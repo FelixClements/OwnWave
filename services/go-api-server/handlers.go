@@ -101,6 +101,60 @@ func (h *Handler) Rescan(w http.ResponseWriter, r *http.Request) {
 	io.Copy(w, resp.Body)
 }
 
+func (h *Handler) RecordPlay(w http.ResponseWriter, r *http.Request) {
+	trackID := chi.URLParam(r, "id")
+	var req struct {
+		StationID string `json:"station_id"`
+	}
+	_ = json.NewDecoder(r.Body).Decode(&req)
+	if err := h.db.RecordPlay(r.Context(), trackID, req.StationID); err != nil {
+		http.Error(w, err.Error(), 500)
+		return
+	}
+	w.WriteHeader(204)
+}
+
+func (h *Handler) RecordFeedback(w http.ResponseWriter, r *http.Request) {
+	trackID := chi.URLParam(r, "id")
+	var req struct {
+		Feedback string `json:"feedback"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Feedback == "" {
+		http.Error(w, "feedback required", 400)
+		return
+	}
+	if err := h.db.RecordFeedback(r.Context(), trackID, req.Feedback); err != nil {
+		http.Error(w, err.Error(), 500)
+		return
+	}
+	w.WriteHeader(204)
+}
+
+func (h *Handler) ListHistory(w http.ResponseWriter, r *http.Request) {
+	entries, err := h.db.ListHistory(r.Context(), 50)
+	if err != nil {
+		http.Error(w, err.Error(), 500)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{"history": entries})
+}
+
+func (h *Handler) ListFeedback(w http.ResponseWriter, r *http.Request) {
+	feedback := r.URL.Query().Get("feedback")
+	if feedback == "" {
+		http.Error(w, "feedback param required", 400)
+		return
+	}
+	tracks, err := h.db.ListFeedback(r.Context(), feedback, 100)
+	if err != nil {
+		http.Error(w, err.Error(), 500)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{"tracks": tracks})
+}
+
 func (h *Handler) GetTrack(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	track, err := h.db.GetTrackByID(r.Context(), id)

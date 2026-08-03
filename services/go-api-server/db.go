@@ -375,3 +375,86 @@ func (db *DB) Search(ctx context.Context, query string) (SearchResults, error) {
 
 	return results, nil
 }
+
+type HistoryEntry struct {
+	TrackID   string    `json:"track_id"`
+	Title     string    `json:"title"`
+	Artist    *string   `json:"artist"`
+	Album     *string   `json:"album"`
+	StationID *string   `json:"station_id"`
+	PlayedAt  time.Time `json:"played_at"`
+}
+
+func (db *DB) RecordPlay(ctx context.Context, trackID, stationID string) error {
+	_, err := db.pool.Exec(ctx, `
+		INSERT INTO listening_history (track_id, station_id)
+		VALUES ($1, NULLIF($2, '')::uuid)
+	`, trackID, stationID)
+	return err
+}
+
+func (db *DB) RecordFeedback(ctx context.Context, trackID, feedback string) error {
+	_, err := db.pool.Exec(ctx, `
+		INSERT INTO track_feedback (track_id, feedback)
+		VALUES ($1, $2)
+		ON CONFLICT (track_id, feedback) DO UPDATE SET created_at = NOW()
+	`, trackID, feedback)
+	return err
+}
+
+func (db *DB) ListHistory(ctx context.Context, limit int) ([]HistoryEntry, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	rows, err := db.pool.Query(ctx, `
+		SELECT t.id::text, t.title, a.name, al.title, h.station_id::text, h.played_at
+		FROM listening_history h
+		JOIN tracks t ON h.track_id = t.id
+		LEFT JOIN artists a ON t.artist_id = a.id
+		LEFT JOIN albums al ON t.album_id = al.id
+		ORDER BY h.played_at DESC
+		LIMIT $1
+	`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var entries []HistoryEntry
+	for rows.Next() {
+		var e HistoryEntry
+		if err := rows.Scan(&e.TrackID, &e.Title, &e.Artist, &e.Album, &e.StationID, &e.PlayedAt); err != nil {
+			return nil, err
+		}
+		entries = append(entries, e)
+	}
+	return entries, rows.Err()
+}
+
+func (db *DB) ListFeedback(ctx context.Context, feedback string, limit int) ([]Track, error) {
+	if limit <= 0 {
+		limit = 100
+	}
+	rows, err := db.pool.Query(ctx, `
+		SELECT t.id::text, t.title, a.name, al.title
+		FROM track_feedback f
+		JOIN tracks t ON f.track_id = t.id
+		LEFT JOIN artists a ON t.artist_id = a.id
+		LEFT JOIN albums al ON t.album_id = al.id
+		WHERE f.feedback = $1
+		ORDER BY f.created_at DESC
+		LIMIT $2
+	`, feedback, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var tracks []Track
+	for rows.Next() {
+		var t Track
+		if err := rows.Scan(&t.ID, &t.Title, &t.Artist, &t.Album); err != nil {
+			return nil, err
+		}
+		tracks = append(tracks, t)
+	}
+	return tracks, rows.Err()
+}

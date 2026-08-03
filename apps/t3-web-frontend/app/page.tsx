@@ -210,6 +210,9 @@ export default function Home() {
             <Link href="/library" className="hover:text-spotify-text transition">
               Library
             </Link>
+            <Link href="/history" className="hover:text-spotify-text transition">
+              History
+            </Link>
             <Link href="/stations" className="hover:text-spotify-text transition">
               Manage Stations
             </Link>

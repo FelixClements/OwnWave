@@ -57,6 +57,15 @@ export type SearchResults = {
   artists: Artist[];
 };
 
+export type HistoryEntry = {
+  track_id: string;
+  title: string;
+  artist?: string;
+  album?: string;
+  station_id?: string;
+  played_at: string;
+};
+
 export type StreamUrlResponse = { url: string };
 export type StreamUrlOptions = {
   format?: 'flac' | 'mp3' | 'opus' | 'aac';
@@ -143,6 +152,28 @@ export class OwnWaveAPI {
 
   getCoverUrl(id: string) {
     return `${this.baseURL}/tracks/${id}/cover`;
+  }
+
+  recordPlay(id: string, stationId?: string) {
+    return this.request(`/tracks/${id}/played`, {
+      method: 'POST',
+      body: JSON.stringify({ station_id: stationId ?? '' }),
+    });
+  }
+
+  recordFeedback(id: string, feedback: 'like' | 'skip' | 'ban') {
+    return this.request(`/tracks/${id}/feedback`, {
+      method: 'POST',
+      body: JSON.stringify({ feedback }),
+    });
+  }
+
+  listHistory() {
+    return this.request<{ history: HistoryEntry[] }>('/history').then((r) => r.history);
+  }
+
+  listFeedback(feedback: 'like' | 'skip' | 'ban') {
+    return this.request<{ tracks: Track[] }>(`/feedback?feedback=${feedback}`).then((r) => r.tracks);
   }
 
   getStation(id: string) {

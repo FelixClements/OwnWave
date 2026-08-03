@@ -19,6 +19,20 @@ export const appRouter = t.router({
 
   rescan: t.procedure.mutation(async () => api.rescan()),
 
+  recordPlay: t.procedure
+    .input(z.object({ id: z.string(), stationId: z.string().optional() }))
+    .mutation(async ({ input }) => api.recordPlay(input.id, input.stationId)),
+
+  recordFeedback: t.procedure
+    .input(z.object({ id: z.string(), feedback: z.enum(['like', 'skip', 'ban']) }))
+    .mutation(async ({ input }) => api.recordFeedback(input.id, input.feedback)),
+
+  history: t.procedure.query(async () => api.listHistory()),
+
+  liked: t.procedure.query(async () => api.listFeedback('like')),
+  skipped: t.procedure.query(async () => api.listFeedback('skip')),
+  banned: t.procedure.query(async () => api.listFeedback('ban')),
+
   track: t.procedure
     .input(z.object({ id: z.string() }))
     .query(async ({ input }) => api.getTrack(input.id)),

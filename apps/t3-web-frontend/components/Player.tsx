@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { QueueTrack } from '@/server/routers/app';
 import { getCoverUrl } from '@/lib/api';
+import { trpc } from '@/lib/trpc/client';
 
 const GO_API = process.env.NEXT_PUBLIC_GO_API_URL || 'http://localhost:8080';
 
@@ -44,6 +45,9 @@ export function Player({ queue }: { queue: QueueTrack[] }) {
   const [currentTrack, setCurrentTrack] = useState<QueueTrack | null>(null);
   const [coverUrl, setCoverUrl] = useState<string | null>(null);
   const [coverError, setCoverError] = useState(false);
+
+  const recordPlay = trpc.recordPlay.useMutation();
+  const recordFeedback = trpc.recordFeedback.useMutation();
 
   const audioARef = useRef<HTMLAudioElement | null>(null);
   const audioBRef = useRef<HTMLAudioElement | null>(null);
@@ -167,6 +171,9 @@ export function Player({ queue }: { queue: QueueTrack[] }) {
     setCurrentTrack(track);
     setCoverUrl(getCoverUrl(track.id));
     setCoverError(false);
+    if (track.id) {
+      recordPlay.mutate({ id: track.id });
+    }
     const url = await getStreamUrl(track.id);
     audio.src = url;
     audio.load();
@@ -279,6 +286,7 @@ export function Player({ queue }: { queue: QueueTrack[] }) {
 
   function skipNext() {
     if (crossfadingRef.current || !currentTrack) return;
+    recordFeedback.mutate({ id: currentTrack.id, feedback: 'skip' });
     const next = currentIndexRef.current + 1;
     if (next < queue.length) {
       const audio = activeRef.current === 'A' ? audioARef.current : audioBRef.current;
@@ -326,7 +334,7 @@ export function Player({ queue }: { queue: QueueTrack[] }) {
       <audio ref={audioBRef} crossOrigin="anonymous" className="hidden" />
 
       {currentTrack ? (
-        <div className="flex items-center gap-2 md:gap-4 w-5/12 md:w-1/3 min-w-0">
+        <div className="flex items-center gap-2 md:gap-4 w-5/12 md:w-5/12 min-w-0">
           <div className="w-10 h-10 md:w-14 md:h-14 shrink-0 relative rounded shadow overflow-hidden bg-spotify-card flex items-center justify-center text-xs text-spotify-subdued font-bold">
             {coverUrl && !coverError ? (
               <img
@@ -349,10 +357,10 @@ export function Player({ queue }: { queue: QueueTrack[] }) {
           </div>
         </div>
       ) : (
-        <div className="w-5/12 md:w-1/3" />
+        <div className="w-5/12 md:w-5/12" />
       )}
 
-      <div className="flex flex-col items-center w-1/6 md:w-1/3">
+      <div className="flex flex-col items-center w-1/3 md:w-1/3 gap-1">
         <button
           onClick={togglePlay}
           className="w-8 h-8 md:w-10 md:h-10 rounded-full bg-spotify-text text-spotify-bg flex items-center justify-center hover:scale-105 transition disabled:opacity-50"
@@ -369,9 +377,34 @@ export function Player({ queue }: { queue: QueueTrack[] }) {
             <PlayIcon className="w-4 h-4 md:w-5 md:h-5 ml-0.5" />
           )}
         </button>
+        {currentTrack && (
+          <div className="flex gap-1 md:gap-2">
+            <button
+              onClick={() => recordFeedback.mutate({ id: currentTrack.id, feedback: 'like' })}
+              className="text-[10px] md:text-xs px-1.5 py-0.5 rounded bg-spotify-elevated text-spotify-text hover:bg-spotify-card-hover transition"
+              title="Like"
+            >
+              Like
+            </button>
+            <button
+              onClick={skipNext}
+              className="text-[10px] md:text-xs px-1.5 py-0.5 rounded bg-spotify-elevated text-spotify-text hover:bg-spotify-card-hover transition"
+              title="Skip"
+            >
+              Skip
+            </button>
+            <button
+              onClick={() => recordFeedback.mutate({ id: currentTrack.id, feedback: 'ban' })}
+              className="text-[10px] md:text-xs px-1.5 py-0.5 rounded bg-red-600 text-white hover:bg-red-700 transition"
+              title="Ban"
+            >
+              Ban
+            </button>
+          </div>
+        )}
       </div>
 
-      <div className="w-5/12 md:w-1/3 flex justify-end text-[10px] md:text-xs text-spotify-subdued truncate">
+      <div className="w-1/4 md:w-1/4 flex justify-end text-[10px] md:text-xs text-spotify-subdued truncate">
         {currentTrack &&
           `${currentTrack.bpm.toFixed(0)} BPM · ${currentTrack.key}`}
       </div>
