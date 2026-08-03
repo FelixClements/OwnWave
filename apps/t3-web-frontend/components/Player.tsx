@@ -248,48 +248,48 @@ export function Player({ queue }: { queue: QueueTrack[] }) {
   }
 
   return (
-    <div className="w-full h-full flex items-center justify-between px-4">
+    <div className="w-full h-full flex items-center justify-between gap-2 md:gap-4 px-2 md:px-4">
       <audio ref={audioARef} crossOrigin="anonymous" className="hidden" />
       <audio ref={audioBRef} crossOrigin="anonymous" className="hidden" />
 
       {currentTrack ? (
-        <div className="flex items-center gap-4 w-1/3 min-w-0">
-          <div className="w-14 h-14 bg-spotify-card rounded shadow flex items-center justify-center text-xs text-spotify-subdued font-bold">
+        <div className="flex items-center gap-2 md:gap-4 w-5/12 md:w-1/3 min-w-0">
+          <div className="w-10 h-10 md:w-14 md:h-14 shrink-0 bg-spotify-card rounded shadow flex items-center justify-center text-xs text-spotify-subdued font-bold">
             {currentTrack.title.charAt(0).toUpperCase()}
           </div>
           <div className="min-w-0">
-            <div className="text-sm font-bold text-spotify-text truncate">
+            <div className="text-xs md:text-sm font-bold text-spotify-text truncate">
               {currentTrack.title}
             </div>
-            <div className="text-xs text-spotify-subdued truncate">
+            <div className="text-[10px] md:text-xs text-spotify-subdued truncate">
               {currentTrack.artist || 'Unknown artist'}
             </div>
           </div>
         </div>
       ) : (
-        <div className="w-1/3" />
+        <div className="w-5/12 md:w-1/3" />
       )}
 
-      <div className="flex flex-col items-center w-1/3">
+      <div className="flex flex-col items-center w-1/6 md:w-1/3">
         <button
           onClick={togglePlay}
-          className="w-10 h-10 rounded-full bg-spotify-text text-spotify-bg flex items-center justify-center hover:scale-105 transition disabled:opacity-50"
+          className="w-8 h-8 md:w-10 md:h-10 rounded-full bg-spotify-text text-spotify-bg flex items-center justify-center hover:scale-105 transition disabled:opacity-50"
           disabled={started && !currentTrack}
           aria-label={started ? 'Play/Pause' : 'Start radio'}
         >
           {started ? (
             isPlaying ? (
-              <PauseIcon className="w-5 h-5" />
+              <PauseIcon className="w-4 h-4 md:w-5 md:h-5" />
             ) : (
-              <PlayIcon className="w-5 h-5 ml-0.5" />
+              <PlayIcon className="w-4 h-4 md:w-5 md:h-5 ml-0.5" />
             )
           ) : (
-            <PlayIcon className="w-5 h-5 ml-0.5" />
+            <PlayIcon className="w-4 h-4 md:w-5 md:h-5 ml-0.5" />
           )}
         </button>
       </div>
 
-      <div className="w-1/3 flex justify-end text-xs text-spotify-subdued truncate">
+      <div className="w-5/12 md:w-1/3 flex justify-end text-[10px] md:text-xs text-spotify-subdued truncate">
         {currentTrack &&
           `${currentTrack.bpm.toFixed(0)} BPM · ${currentTrack.key}`}
       </div>

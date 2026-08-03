@@ -55,10 +55,10 @@ export function StationManager() {
   };
 
   return (
-    <div className="p-6 space-y-6">
+    <div className="p-4 md:p-6 space-y-6">
       <h2 className="text-2xl font-bold text-spotify-text">Manage Stations</h2>
 
-      <form onSubmit={handleCreate} className="flex gap-2">
+      <form onSubmit={handleCreate} className="flex flex-col sm:flex-row gap-2">
         <input
           type="text"
           value={name}
@@ -69,7 +69,7 @@ export function StationManager() {
         <button
           type="submit"
           disabled={create.isLoading}
-          className="px-4 py-2 rounded bg-spotify-green text-black font-semibold hover:bg-spotify-green-hover transition disabled:opacity-50"
+          className="px-4 py-2 rounded bg-spotify-green text-black font-semibold hover:bg-spotify-green-hover transition disabled:opacity-50 w-full sm:w-auto"
         >
           Create
         </button>
@@ -79,10 +79,10 @@ export function StationManager() {
         {stations?.map((station) => (
           <li
             key={station.id}
-            className="flex items-center justify-between p-3 rounded bg-spotify-card"
+            className="flex flex-col sm:flex-row items-start sm:items-center justify-between p-3 rounded bg-spotify-card gap-2"
           >
             {editing === station.id ? (
-              <form onSubmit={handleUpdate} className="flex-1 flex gap-2">
+              <form onSubmit={handleUpdate} className="flex-1 flex flex-col sm:flex-row gap-2">
                 <input
                   type="text"
                   value={editName}
@@ -91,24 +91,24 @@ export function StationManager() {
                 />
                 <button
                   type="submit"
-                  className="px-3 py-1 rounded bg-spotify-green text-black text-sm font-semibold"
+                  className="px-3 py-1 rounded bg-spotify-green text-black text-sm font-semibold w-full sm:w-auto"
                 >
                   Save
                 </button>
                 <button
                   type="button"
                   onClick={() => setEditing(null)}
-                  className="px-3 py-1 rounded bg-spotify-elevated text-spotify-text text-sm"
+                  className="px-3 py-1 rounded bg-spotify-elevated text-spotify-text text-sm w-full sm:w-auto"
                 >
                   Cancel
                 </button>
               </form>
             ) : (
               <>
-                <span className="text-spotify-text font-medium flex-1">
+                <span className="text-spotify-text font-medium flex-1 break-all">
                   {station.name}
                 </span>
-                <div className="flex gap-2">
+                <div className="flex flex-wrap gap-2">
                   <button
                     onClick={() => setPreviewId(station.id)}
                     className="px-3 py-1 rounded bg-spotify-elevated text-spotify-text text-sm hover:bg-spotify-card-hover transition"

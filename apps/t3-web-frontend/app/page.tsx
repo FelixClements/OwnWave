@@ -160,8 +160,8 @@ export default function Home() {
 
   return (
     <div className="h-screen flex flex-col bg-spotify-bg text-spotify-text overflow-hidden">
-      <div className="flex-1 flex overflow-hidden">
-        <aside className="w-64 flex flex-col bg-spotify-black p-6 gap-6">
+      <div className="flex-1 flex flex-col md:flex-row overflow-hidden">
+        <aside className="w-full md:w-64 h-56 md:h-auto shrink-0 flex flex-col bg-spotify-black p-6 gap-6">
           <div className="text-2xl font-bold tracking-tight text-spotify-text flex items-center gap-3">
             <span className="w-8 h-8 rounded-full bg-spotify-green flex items-center justify-center text-black text-xs">
               OW
@@ -199,7 +199,7 @@ export default function Home() {
         </aside>
 
         <main className="flex-1 flex flex-col min-w-0 overflow-hidden">
-          <header className="h-16 flex items-center justify-between px-8 bg-spotify-bg/95 sticky top-0 z-10">
+          <header className="h-16 flex items-center justify-between px-4 md:px-8 bg-spotify-bg/95 sticky top-0 z-10">
             <h2 className="text-sm font-bold text-spotify-text">Browse</h2>
             <div className="flex items-center gap-3">
               <button
@@ -218,7 +218,7 @@ export default function Home() {
             </div>
           </header>
 
-          <div className="flex-1 overflow-y-auto p-8 bg-gradient-to-b from-spotify-elevated to-spotify-bg">
+          <div className="flex-1 overflow-y-auto p-4 md:p-8 bg-gradient-to-b from-spotify-elevated to-spotify-bg">
             {displayStations.length === 0 && (
               <p className="text-spotify-subdued">
                 No stations yet. Scan your library and build a station first.
@@ -227,7 +227,7 @@ export default function Home() {
 
             <section className="mb-10">
               <h2 className="text-2xl font-bold text-spotify-text mb-5">Stations</h2>
-              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-6">
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-6">
                 {displayStations.map((station) => (
                   <button
                     key={station.id}
