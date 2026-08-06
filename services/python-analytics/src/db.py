@@ -235,11 +235,14 @@ def get_all_tracks_with_features(conn: psycopg.Connection) -> List[dict]:
             """
             SELECT t.id, t.title, t.artist_id, t.album_id, t.path,
                    af.bpm, af.energy, af.valence, af.feature_vector,
-                   tc.cluster_id
+                   tc.cluster_id,
+                   array_agg(f.feedback) as feedback
             FROM tracks t
             JOIN audio_features af ON t.id = af.track_id
             LEFT JOIN track_clusters tc ON t.id = tc.track_id
+            LEFT JOIN track_feedback f ON t.id = f.track_id
             WHERE af.feature_vector IS NOT NULL
+            GROUP BY t.id, af.bpm, af.energy, af.valence, af.feature_vector, tc.cluster_id
             """
         )
         columns = [desc[0] for desc in cur.description]

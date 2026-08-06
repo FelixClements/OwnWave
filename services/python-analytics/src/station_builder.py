@@ -26,6 +26,8 @@ def build_station(
     if seed_filter:
         tracks = _apply_filter(tracks, seed_filter)
 
+    tracks = _exclude_banned(tracks)
+
     if len(tracks) < 2:
         raise ValueError("Not enough tracks match the seed")
 
@@ -36,6 +38,10 @@ def build_station(
     insert_station_tracks(conn, station_id, track_ids)
     conn.commit()
     return station_id
+
+
+def _exclude_banned(tracks: List[dict]) -> List[dict]:
+    return [t for t in tracks if "ban" not in (t.get("feedback") or [])]
 
 
 def _apply_filter(tracks: List[dict], filters: dict) -> List[dict]:
@@ -88,8 +94,9 @@ def _smart_queue(
     novelty: float = 0.15,
 ) -> List[dict]:
     """Greedy k-NN walk that occasionally jumps for novelty."""
-    # Start from a random track in the seed pool
-    current = random.choice(tracks)
+    # Start from a liked track if possible, then random from the seed pool
+    liked = [t for t in tracks if "like" in (t.get("feedback") or [])]
+    current = random.choice(liked) if liked else random.choice(tracks)
     queue = [current]
     remaining = [t for t in tracks if t["id"] != current["id"]]
 
@@ -133,7 +140,17 @@ def _nearest_remaining(
         if current_id not in sim_cache:
             sim_cache[current_id] = get_similar_tracks(conn, current_id, limit=50)
         sims = {tid: dist for tid, dist in sim_cache[current_id]}
-        best = min(remaining, key=lambda t: sims.get(t["id"], float("inf")))
+
+        def _score(t: dict) -> float:
+            base = sims.get(t["id"], float("inf"))
+            feedback = t.get("feedback") or []
+            if "like" in feedback:
+                return base * 0.8
+            if "skip" in feedback:
+                return base * 1.5
+            return base
+
+        best = min(remaining, key=_score)
         return best
 
     # Fallback to the old BPM/energy/valence distance
