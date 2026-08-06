@@ -3,6 +3,7 @@ import './globals.css';
 import { Provider } from '@/lib/trpc/Provider';
 import { PWA } from '@/components/PWA';
 import { AuthProvider } from '@/lib/auth';
+import { RequireAuth } from '@/components/RequireAuth';
 
 export const metadata: Metadata = {
   title: 'OwnWave',
@@ -31,7 +32,9 @@ export default function RootLayout({
     <html lang="en">
       <body className="h-full overflow-hidden antialiased">
         <Provider>
-          <AuthProvider>{children}</AuthProvider>
+          <AuthProvider>
+            <RequireAuth>{children}</RequireAuth>
+          </AuthProvider>
         </Provider>
         <PWA />
       </body>
