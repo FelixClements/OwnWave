@@ -45,7 +45,13 @@ func (h *Handler) Health(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) ListTracks(w http.ResponseWriter, r *http.Request) {
-	tracks, err := h.db.ListTracks(r.Context())
+	q := r.URL.Query().Get("q")
+	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+	offset, _ := strconv.Atoi(r.URL.Query().Get("offset"))
+	if limit <= 0 {
+		limit = 1000
+	}
+	tracks, err := h.db.ListTracks(r.Context(), limit, offset, q)
 	if err != nil {
 		http.Error(w, err.Error(), 500)
 		return

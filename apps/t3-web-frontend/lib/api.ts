@@ -170,8 +170,14 @@ export class OwnWaveAPI {
     return this.request<HealthResponse>('/health');
   }
 
-  listTracks() {
-    return this.request<{ tracks: Track[] }>('/tracks').then((r) => r.tracks);
+  listTracks(opts?: { limit?: number; offset?: number; q?: string }) {
+    const params = new URLSearchParams();
+    if (opts?.limit !== undefined) params.set('limit', String(opts.limit));
+    if (opts?.offset !== undefined) params.set('offset', String(opts.offset));
+    if (opts?.q) params.set('q', opts.q);
+    const query = params.toString();
+    const suffix = query ? `?${query}` : '';
+    return this.request<{ tracks: Track[] }>(`/tracks${suffix}`).then((r) => r.tracks);
   }
 
   listAlbums() {

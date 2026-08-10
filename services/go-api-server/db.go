@@ -60,15 +60,24 @@ func (db *DB) GetTrackByID(ctx context.Context, id string) (Track, error) {
 	return t, err
 }
 
-func (db *DB) ListTracks(ctx context.Context) ([]Track, error) {
-	rows, err := db.pool.Query(ctx, `
+func (db *DB) ListTracks(ctx context.Context, limit, offset int, q string) ([]Track, error) {
+	args := []any{limit, offset}
+	where := ""
+	if q != "" {
+		where = `WHERE t.title ILIKE $3 OR a.name ILIKE $3 OR al.title ILIKE $3`
+		args = append(args, "%"+q+"%")
+	}
+	query := `
 		SELECT t.id::text, t.title, a.name, al.title, t.path, t.track_number,
 		       t.duration_seconds, t.sample_rate, t.channels
 		FROM tracks t
 		LEFT JOIN artists a ON t.artist_id = a.id
 		LEFT JOIN albums al ON t.album_id = al.id
+		` + where + `
 		ORDER BY t.title
-	`)
+		LIMIT $1 OFFSET $2
+	`
+	rows, err := db.pool.Query(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}

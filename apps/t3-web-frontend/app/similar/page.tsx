@@ -20,7 +20,7 @@ function Cover({ id, title, className }: { id: string; title: string; className?
 export default function SimilarPage() {
   const search = useSearchParams() ?? undefined;
   const trackId = search?.get('track');
-  const { data: tracks } = trpc.tracks.useQuery();
+  const { data: tracks } = trpc.tracks.useQuery({ limit: 1000 });
   const { data: similar } = trpc.similar.useQuery(
     { id: trackId ?? '' },
     { enabled: !!trackId }

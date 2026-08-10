@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
 import { trpc } from '@/lib/trpc/client';
 import { getCoverUrl } from '@/lib/api';
@@ -26,15 +26,43 @@ function Cover({ id, title, className }: { id: string; title: string; className?
   );
 }
 
+const PAGE_LIMIT = 20;
+
 export default function LibraryPage() {
   const [tab, setTab] = useState<Tab>('tracks');
-  const { data: tracks } = trpc.tracks.useQuery();
+  const [q, setQ] = useState('');
+  const sentinelRef = useRef<HTMLDivElement | null>(null);
+
+  const tracksQuery = trpc.tracks.useInfiniteQuery(
+    { limit: PAGE_LIMIT, q },
+    {
+      getNextPageParam: (lastPage, allPages) =>
+        lastPage.length < PAGE_LIMIT ? undefined : allPages.length * PAGE_LIMIT,
+    }
+  );
+
   const { data: albums } = trpc.albums.useQuery();
   const { data: artists } = trpc.artists.useQuery();
   const rescan = trpc.rescan.useMutation({
     onSuccess: () => alert('Library rescan started.'),
     onError: () => alert('Rescan failed.'),
   });
+
+  const allTracks = tracksQuery.data?.pages.flat() ?? [];
+
+  useEffect(() => {
+    if (!sentinelRef.current || tracksQuery.isFetchingNextPage) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0].isIntersecting && tracksQuery.hasNextPage) {
+          tracksQuery.fetchNextPage();
+        }
+      },
+      { rootMargin: '200px' }
+    );
+    observer.observe(sentinelRef.current);
+    return () => observer.disconnect();
+  }, [tracksQuery.hasNextPage, tracksQuery.isFetchingNextPage, tracksQuery.fetchNextPage, q]);
 
   return (
     <div className="space-y-6">
@@ -64,29 +92,42 @@ export default function LibraryPage() {
       </div>
 
       {tab === 'tracks' && (
-        <section className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-6">
-          {tracks?.map((track) => (
-            <div
-              key={track.id}
-              className="bg-spotify-card rounded-lg p-4 text-left"
-            >
-              <Cover
-                id={track.id}
-                title={track.title}
-                className="w-full aspect-square rounded-md bg-spotify-elevated object-cover mb-4 flex items-center justify-center"
-              />
-              <h3 className="font-bold text-spotify-text truncate">{track.title}</h3>
-              <p className="text-sm text-spotify-subdued truncate">{track.artist || 'Unknown artist'}</p>
-              {track.album && <p className="text-xs text-spotify-subdued truncate">{track.album}</p>}
-              <Link
-                href={`/similar?track=${encodeURIComponent(track.id)}`}
-                className="mt-2 inline-block text-xs font-semibold text-spotify-green hover:underline"
+        <div className="space-y-4">
+          <input
+            type="text"
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            placeholder="Search tracks..."
+            className="w-full px-4 py-2 rounded-full bg-spotify-elevated text-spotify-text placeholder-spotify-subdued border border-spotify-border focus:outline-none focus:border-spotify-green"
+          />
+          <section className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-6">
+            {allTracks.map((track) => (
+              <div
+                key={track.id}
+                className="bg-spotify-card rounded-lg p-4 text-left"
               >
-                Find similar
-              </Link>
-            </div>
-          ))}
-        </section>
+                <Cover
+                  id={track.id}
+                  title={track.title}
+                  className="w-full aspect-square rounded-md bg-spotify-elevated object-cover mb-4 flex items-center justify-center"
+                />
+                <h3 className="font-bold text-spotify-text truncate">{track.title}</h3>
+                <p className="text-sm text-spotify-subdued truncate">{track.artist || 'Unknown artist'}</p>
+                {track.album && <p className="text-xs text-spotify-subdued truncate">{track.album}</p>}
+                <Link
+                  href={`/similar?track=${encodeURIComponent(track.id)}`}
+                  className="mt-2 inline-block text-xs font-semibold text-spotify-green hover:underline"
+                >
+                  Find similar
+                </Link>
+              </div>
+            ))}
+          </section>
+          {tracksQuery.isFetchingNextPage && (
+            <p className="text-center text-spotify-subdued text-sm">Loading more...</p>
+          )}
+          <div ref={sentinelRef} className="h-1" />
+        </div>
       )}
 
       {tab === 'albums' && (
