@@ -419,12 +419,6 @@ export function StationManager() {
                 </span>
                 <div className="flex flex-wrap gap-2">
                   <button
-                    onClick={() => setSelectedStation(station.id)}
-                    className="px-3 py-1 rounded bg-spotify-green text-black text-sm font-semibold hover:bg-spotify-green-hover transition"
-                  >
-                    Play
-                  </button>
-                  <button
                     onClick={() => setPreviewId(previewId === station.id ? null : station.id)}
                     className={`px-3 py-1 rounded text-sm transition ${
                       previewId === station.id

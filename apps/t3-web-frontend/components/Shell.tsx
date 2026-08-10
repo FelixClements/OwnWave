@@ -52,9 +52,11 @@ export function Shell({ children }: { children: React.ReactNode }) {
                 }`}
               >
                 <span className="flex items-center gap-2">
-                  {playingStation === station.id && (
-                    <PlayIcon className="w-3 h-3 text-spotify-green" />
-                  )}
+                  <PlayIcon
+                    className={`w-3 h-3 ${
+                      playingStation === station.id ? 'text-spotify-green' : 'text-spotify-subdued'
+                    }`}
+                  />
                   {station.name}
                 </span>
               </button>
