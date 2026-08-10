@@ -31,6 +31,10 @@ export const appRouter = t.router({
 
   logout: t.procedure.mutation(async () => api.logout()),
 
+  similar: t.procedure
+    .input(z.object({ id: z.string(), limit: z.number().optional() }))
+    .query(async ({ input }) => api.getSimilarTracks(input.id, input.limit ?? 20)),
+
   recordPlay: t.procedure
     .input(z.object({ id: z.string(), stationId: z.string().optional() }))
     .mutation(async ({ input }) => api.recordPlay(input.id, input.stationId)),

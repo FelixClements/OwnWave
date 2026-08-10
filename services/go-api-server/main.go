@@ -85,6 +85,7 @@ func main() {
 	r.Get("/search", h.Search)
 	r.Post("/rescan", h.Rescan)
 	r.Get("/tracks/{id}", h.GetTrack)
+	r.Get("/tracks/{id}/similar", h.GetSimilarTracks)
 	r.Post("/tracks/{id}/played", h.RecordPlay)
 	r.Post("/tracks/{id}/feedback", h.RecordFeedback)
 	r.Get("/history", h.ListHistory)

@@ -85,6 +85,23 @@ func (h *Handler) ListArtists(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]interface{}{"artists": artists})
 }
 
+func (h *Handler) GetSimilarTracks(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	limit := r.URL.Query().Get("limit")
+	if limit == "" {
+		limit = "20"
+	}
+	resp, err := http.Get(h.pythonURL + "/tracks/" + id + "/similar?limit=" + limit)
+	if err != nil {
+		http.Error(w, err.Error(), 500)
+		return
+	}
+	defer resp.Body.Close()
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(resp.StatusCode)
+	io.Copy(w, resp.Body)
+}
+
 func (h *Handler) Rescan(w http.ResponseWriter, r *http.Request) {
 	payload, _ := json.Marshal(map[string]interface{}{
 		"path":  h.musicDir,

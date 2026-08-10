@@ -73,6 +73,11 @@ export type AuthResponse = {
   user: User;
 };
 
+export type SimilarTrack = {
+  track_id: string;
+  distance: number;
+};
+
 export type HistoryEntry = {
   track_id: string;
   title: string;
@@ -235,6 +240,12 @@ export class OwnWaveAPI {
     return this.request<{ queue: QueueTrack[] }>(
       `/stations/${encodeURIComponent(id)}/queue`
     ).then((r) => r.queue);
+  }
+
+  getSimilarTracks(id: string, limit = 20) {
+    return this.request<{ track_id: string; similar: SimilarTrack[] }>(
+      `/tracks/${encodeURIComponent(id)}/similar?limit=${limit}`
+    ).then((r) => r.similar);
   }
 
   register(username: string, password: string) {

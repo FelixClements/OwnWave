@@ -88,6 +88,12 @@ export default function LibraryPage() {
                 <h3 className="font-bold text-spotify-text truncate">{track.title}</h3>
                 <p className="text-sm text-spotify-subdued truncate">{track.artist || 'Unknown artist'}</p>
                 {track.album && <p className="text-xs text-spotify-subdued truncate">{track.album}</p>}
+                <Link
+                  href={`/similar?track=${encodeURIComponent(track.id)}`}
+                  className="mt-2 inline-block text-xs font-semibold text-spotify-green hover:underline"
+                >
+                  Find similar
+                </Link>
               </div>
             ))}
           </section>
