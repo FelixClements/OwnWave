@@ -8,6 +8,7 @@ export function StationManager() {
   const [editing, setEditing] = useState<string | null>(null);
   const [editName, setEditName] = useState('');
   const [previewId, setPreviewId] = useState<string | null>(null);
+  const [showCreate, setShowCreate] = useState(false);
 
   const [createFilters, setCreateFilters] = useState({
     min_bpm: '',
@@ -38,6 +39,16 @@ export function StationManager() {
   const create = trpc.createStation.useMutation({
     onSuccess: () => {
       setName('');
+      setCreateFilters({
+        min_bpm: '',
+        max_bpm: '',
+        min_energy: '',
+        max_energy: '',
+        min_valence: '',
+        max_valence: '',
+        seed_type: '',
+      });
+      setShowCreate(false);
       utils.stations.invalidate();
     },
   });
@@ -108,92 +119,102 @@ export function StationManager() {
 
   return (
     <div className="p-4 md:p-6 space-y-6">
-      <h2 className="text-2xl font-bold text-spotify-text">Manage Stations</h2>
-
-      <form onSubmit={handleCreate} className="space-y-3 p-4 rounded bg-spotify-card">
-        <input
-          type="text"
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          placeholder="New station name"
-          className="w-full px-3 py-2 rounded bg-spotify-elevated text-spotify-text placeholder-spotify-subdued border border-spotify-border focus:outline-none focus:border-spotify-green"
-        />
-        <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-          <input
-            type="number"
-            value={createFilters.min_bpm}
-            onChange={(e) => setCreateFilters({ ...createFilters, min_bpm: e.target.value })}
-            placeholder="Min BPM"
-            className="px-3 py-2 rounded bg-spotify-elevated text-spotify-text placeholder-spotify-subdued border border-spotify-border focus:outline-none focus:border-spotify-green"
-          />
-          <input
-            type="number"
-            value={createFilters.max_bpm}
-            onChange={(e) => setCreateFilters({ ...createFilters, max_bpm: e.target.value })}
-            placeholder="Max BPM"
-            className="px-3 py-2 rounded bg-spotify-elevated text-spotify-text placeholder-spotify-subdued border border-spotify-border focus:outline-none focus:border-spotify-green"
-          />
-          <input
-            type="number"
-            step="0.01"
-            min="0"
-            max="1"
-            value={createFilters.min_energy}
-            onChange={(e) => setCreateFilters({ ...createFilters, min_energy: e.target.value })}
-            placeholder="Min energy"
-            className="px-3 py-2 rounded bg-spotify-elevated text-spotify-text placeholder-spotify-subdued border border-spotify-border focus:outline-none focus:border-spotify-green"
-          />
-          <input
-            type="number"
-            step="0.01"
-            min="0"
-            max="1"
-            value={createFilters.max_energy}
-            onChange={(e) => setCreateFilters({ ...createFilters, max_energy: e.target.value })}
-            placeholder="Max energy"
-            className="px-3 py-2 rounded bg-spotify-elevated text-spotify-text placeholder-spotify-subdued border border-spotify-border focus:outline-none focus:border-spotify-green"
-          />
-          <input
-            type="number"
-            step="0.01"
-            min="0"
-            max="1"
-            value={createFilters.min_valence}
-            onChange={(e) => setCreateFilters({ ...createFilters, min_valence: e.target.value })}
-            placeholder="Min valence"
-            className="px-3 py-2 rounded bg-spotify-elevated text-spotify-text placeholder-spotify-subdued border border-spotify-border focus:outline-none focus:border-spotify-green"
-          />
-          <input
-            type="number"
-            step="0.01"
-            min="0"
-            max="1"
-            value={createFilters.max_valence}
-            onChange={(e) => setCreateFilters({ ...createFilters, max_valence: e.target.value })}
-            placeholder="Max valence"
-            className="px-3 py-2 rounded bg-spotify-elevated text-spotify-text placeholder-spotify-subdued border border-spotify-border focus:outline-none focus:border-spotify-green"
-          />
-          <select
-            value={createFilters.seed_type}
-            onChange={(e) => setCreateFilters({ ...createFilters, seed_type: e.target.value })}
-            className="px-3 py-2 rounded bg-spotify-elevated text-spotify-text border border-spotify-border focus:outline-none focus:border-spotify-green"
-          >
-            <option value="">Any seed</option>
-            <option value="track">Track</option>
-            <option value="artist">Artist</option>
-            <option value="album">Album</option>
-            <option value="cluster">Cluster</option>
-            <option value="mood">Mood</option>
-          </select>
-        </div>
+      <div className="flex items-center justify-between">
+        <h2 className="text-2xl font-bold text-spotify-text">Manage Stations</h2>
         <button
-          type="submit"
-          disabled={create.isLoading}
-          className="px-4 py-2 rounded bg-spotify-green text-black font-semibold hover:bg-spotify-green-hover transition disabled:opacity-50 w-full sm:w-auto"
+          onClick={() => setShowCreate(!showCreate)}
+          className="px-4 py-2 rounded bg-spotify-green text-black font-semibold hover:bg-spotify-green-hover transition"
         >
-          Create
+          {showCreate ? 'Cancel' : 'New Station'}
         </button>
-      </form>
+      </div>
+
+      {showCreate && (
+        <form onSubmit={handleCreate} className="space-y-3 p-4 rounded bg-spotify-card">
+          <input
+            type="text"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="New station name"
+            className="w-full px-3 py-2 rounded bg-spotify-elevated text-spotify-text placeholder-spotify-subdued border border-spotify-border focus:outline-none focus:border-spotify-green"
+          />
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+            <input
+              type="number"
+              value={createFilters.min_bpm}
+              onChange={(e) => setCreateFilters({ ...createFilters, min_bpm: e.target.value })}
+              placeholder="Min BPM"
+              className="px-3 py-2 rounded bg-spotify-elevated text-spotify-text placeholder-spotify-subdued border border-spotify-border focus:outline-none focus:border-spotify-green"
+            />
+            <input
+              type="number"
+              value={createFilters.max_bpm}
+              onChange={(e) => setCreateFilters({ ...createFilters, max_bpm: e.target.value })}
+              placeholder="Max BPM"
+              className="px-3 py-2 rounded bg-spotify-elevated text-spotify-text placeholder-spotify-subdued border border-spotify-border focus:outline-none focus:border-spotify-green"
+            />
+            <input
+              type="number"
+              step="0.01"
+              min="0"
+              max="1"
+              value={createFilters.min_energy}
+              onChange={(e) => setCreateFilters({ ...createFilters, min_energy: e.target.value })}
+              placeholder="Min energy"
+              className="px-3 py-2 rounded bg-spotify-elevated text-spotify-text placeholder-spotify-subdued border border-spotify-border focus:outline-none focus:border-spotify-green"
+            />
+            <input
+              type="number"
+              step="0.01"
+              min="0"
+              max="1"
+              value={createFilters.max_energy}
+              onChange={(e) => setCreateFilters({ ...createFilters, max_energy: e.target.value })}
+              placeholder="Max energy"
+              className="px-3 py-2 rounded bg-spotify-elevated text-spotify-text placeholder-spotify-subdued border border-spotify-border focus:outline-none focus:border-spotify-green"
+            />
+            <input
+              type="number"
+              step="0.01"
+              min="0"
+              max="1"
+              value={createFilters.min_valence}
+              onChange={(e) => setCreateFilters({ ...createFilters, min_valence: e.target.value })}
+              placeholder="Min valence"
+              className="px-3 py-2 rounded bg-spotify-elevated text-spotify-text placeholder-spotify-subdued border border-spotify-border focus:outline-none focus:border-spotify-green"
+            />
+            <input
+              type="number"
+              step="0.01"
+              min="0"
+              max="1"
+              value={createFilters.max_valence}
+              onChange={(e) => setCreateFilters({ ...createFilters, max_valence: e.target.value })}
+              placeholder="Max valence"
+              className="px-3 py-2 rounded bg-spotify-elevated text-spotify-text placeholder-spotify-subdued border border-spotify-border focus:outline-none focus:border-spotify-green"
+            />
+            <select
+              value={createFilters.seed_type}
+              onChange={(e) => setCreateFilters({ ...createFilters, seed_type: e.target.value })}
+              className="px-3 py-2 rounded bg-spotify-elevated text-spotify-text border border-spotify-border focus:outline-none focus:border-spotify-green"
+            >
+              <option value="">Any seed</option>
+              <option value="track">Track</option>
+              <option value="artist">Artist</option>
+              <option value="album">Album</option>
+              <option value="cluster">Cluster</option>
+              <option value="mood">Mood</option>
+            </select>
+          </div>
+          <button
+            type="submit"
+            disabled={create.isLoading}
+            className="px-4 py-2 rounded bg-spotify-green text-black font-semibold hover:bg-spotify-green-hover transition disabled:opacity-50 w-full sm:w-auto"
+          >
+            Create
+          </button>
+        </form>
+      )}
 
       <ul className="space-y-2">
         {stations?.map((station) => (
@@ -300,10 +321,14 @@ export function StationManager() {
                 </span>
                 <div className="flex flex-wrap gap-2">
                   <button
-                    onClick={() => setPreviewId(station.id)}
-                    className="px-3 py-1 rounded bg-spotify-elevated text-spotify-text text-sm hover:bg-spotify-card-hover transition"
+                    onClick={() => setPreviewId(previewId === station.id ? null : station.id)}
+                    className={`px-3 py-1 rounded text-sm transition ${
+                      previewId === station.id
+                        ? 'bg-spotify-green text-black'
+                        : 'bg-spotify-elevated text-spotify-text hover:bg-spotify-card-hover'
+                    }`}
                   >
-                    Preview
+                    {previewId === station.id ? 'Close Preview' : 'Preview'}
                   </button>
                   <button
                     onClick={() => startEdit(station.id, station.name)}
