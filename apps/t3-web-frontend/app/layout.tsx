@@ -4,8 +4,7 @@ import { Provider } from '@/lib/trpc/Provider';
 import { PWA } from '@/components/PWA';
 import { AuthProvider } from '@/lib/auth';
 import { RequireAuth } from '@/components/RequireAuth';
-import { StationProvider } from '@/lib/station';
-import { Shell } from '@/components/Shell';
+import { RootShell } from '@/components/RootShell';
 
 export const metadata: Metadata = {
   title: 'OwnWave',
@@ -34,9 +33,7 @@ export default function RootLayout({
         <Provider>
           <AuthProvider>
             <RequireAuth>
-              <StationProvider>
-                <Shell>{children}</Shell>
-              </StationProvider>
+              <RootShell>{children}</RootShell>
             </RequireAuth>
           </AuthProvider>
         </Provider>
