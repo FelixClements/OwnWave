@@ -38,15 +38,14 @@ export function StationProvider({ children }: { children: React.ReactNode }) {
 
   const setSelectedStation = (id: string | null) => {
     setSelectedState(id);
+    const url = new URL(window.location.href);
+    url.pathname = '/';
     if (id) {
-      const url = new URL(window.location.href);
       url.searchParams.set('station', id);
-      router.replace(url.toString());
     } else {
-      const url = new URL(window.location.href);
       url.searchParams.delete('station');
-      router.replace(url.toString());
     }
+    router.replace(url.toString());
   };
 
   const setNowPlaying = (track: QueueTrack | null) => {
