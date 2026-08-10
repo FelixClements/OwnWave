@@ -16,22 +16,6 @@ services:
       timeout: 5s
       retries: 5
 
-  migrate:
-    image: migrate/migrate:v4.17.1
-    entrypoint:
-      - migrate
-      - -path
-      - /migrations
-      - -database
-      - postgres://${POSTGRES_USER:-ownwave}:${POSTGRES_PASSWORD:-ownwave}@db:5432/${POSTGRES_DB:-ownwave}?sslmode=disable
-    command: ["up"]
-    volumes:
-      - ./database/migrations:/migrations:ro
-    depends_on:
-      db:
-        condition: service_healthy
-    restart: "no"
-
   redis:
     image: redis:7-alpine
     volumes:
@@ -61,6 +45,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      go:
+        condition: service_healthy
 
   worker:
     build: ./services/python-analytics
@@ -77,6 +63,8 @@ services:
       db:
         condition: service_healthy
       redis:
+        condition: service_healthy
+      go:
         condition: service_healthy
 
   watcher:
@@ -95,6 +83,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      go:
+        condition: service_healthy
 
   go:
     build: ./services/go-api-server
@@ -106,8 +96,15 @@ services:
       PYTHON_API_URL: http://python:8000
     volumes:
       - ${MUSIC_PATH:-./music}:/music:ro
+      - ./database/migrations:/migrations:ro
     ports:
       - "8080:8080"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8080/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
     depends_on:
       db:
         condition: service_healthy

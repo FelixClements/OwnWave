@@ -41,7 +41,3 @@ test-go:
 # Run all local checks (build frontend and Go tests)
 test-all: test-go
     cd apps/t3-web-frontend && npm run build
-
-# Apply database migrations with golang-migrate
-db-migrate:
-    docker compose run --rm migrate up

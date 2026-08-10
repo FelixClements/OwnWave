@@ -50,6 +50,10 @@ func main() {
 	}
 	defer db.Close()
 
+	if err := runMigrations(dsn); err != nil {
+		log.Fatalf("migrations: %v", err)
+	}
+
 	jwtSecret := []byte(os.Getenv("JWT_SECRET"))
 	if len(jwtSecret) == 0 {
 		jwtSecret = []byte("dev-secret-change-in-production")
