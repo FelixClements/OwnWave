@@ -35,6 +35,14 @@ export const appRouter = t.router({
     .input(z.object({ id: z.string(), limit: z.number().optional() }))
     .query(async ({ input }) => api.getSimilarTracks(input.id, input.limit ?? 20)),
 
+  adminHealth: t.procedure.query(async () => api.adminHealth()),
+  adminStations: t.procedure.query(async () => api.adminStations()),
+  adminScan: t.procedure
+    .input(z.object({ path: z.string().optional(), force: z.boolean().optional() }))
+    .mutation(async ({ input }) => api.adminScan(input.path, input.force)),
+  adminRebuildVectors: t.procedure.mutation(async () => api.adminRebuildVectors()),
+  adminRebuildClusters: t.procedure.mutation(async () => api.adminRebuildClusters()),
+
   recordPlay: t.procedure
     .input(z.object({ id: z.string(), stationId: z.string().optional() }))
     .mutation(async ({ input }) => api.recordPlay(input.id, input.stationId)),

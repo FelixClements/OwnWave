@@ -217,6 +217,9 @@ export default function Home() {
             <Link href="/stations" className="hover:text-spotify-text transition">
               Manage Stations
             </Link>
+            <Link href="/admin" className="hover:text-spotify-text transition">
+              Admin
+            </Link>
           </nav>
 
           <div className="flex-1 overflow-y-auto">

@@ -106,6 +106,10 @@ func main() {
 	r.Post("/logout", h.Logout)
 	r.Post("/stations", h.CreateStation)
 	r.Post("/admin/scan", h.TriggerScan)
+	r.Get("/admin/health", h.AdminHealth)
+	r.Get("/admin/stations", h.AdminStations)
+	r.Post("/admin/rebuild-vectors", h.AdminRebuildVectors)
+	r.Post("/admin/rebuild-clusters", h.AdminRebuildClusters)
 
 	log.Println("go-api listening on :8080")
 	if err := http.ListenAndServe(":8080", r); err != nil {

@@ -369,6 +369,65 @@ func (h *Handler) TriggerScan(w http.ResponseWriter, r *http.Request) {
 	io.Copy(w, resp.Body)
 }
 
+func (h *Handler) AdminHealth(w http.ResponseWriter, r *http.Request) {
+	status := map[string]string{
+		"go":      "ok",
+		"db":      "ok",
+		"python":  "unknown",
+		"version": "ok",
+	}
+	if err := h.db.pool.Ping(r.Context()); err != nil {
+		status["db"] = "error: " + err.Error()
+	}
+	resp, err := http.Get(h.pythonURL + "/health")
+	if err != nil {
+		status["python"] = "error: " + err.Error()
+	} else {
+		defer resp.Body.Close()
+		if resp.StatusCode == 200 {
+			status["python"] = "ok"
+		} else {
+			status["python"] = "error: " + resp.Status
+		}
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(status)
+}
+
+func (h *Handler) AdminStations(w http.ResponseWriter, r *http.Request) {
+	stations, err := h.db.ListStationsWithQueueStatus(r.Context())
+	if err != nil {
+		http.Error(w, err.Error(), 500)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{"stations": stations})
+}
+
+func (h *Handler) AdminRebuildVectors(w http.ResponseWriter, r *http.Request) {
+	resp, err := http.Post(h.pythonURL+"/rebuild-vectors", "application/json", nil)
+	if err != nil {
+		http.Error(w, err.Error(), 500)
+		return
+	}
+	defer resp.Body.Close()
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(resp.StatusCode)
+	io.Copy(w, resp.Body)
+}
+
+func (h *Handler) AdminRebuildClusters(w http.ResponseWriter, r *http.Request) {
+	resp, err := http.Post(h.pythonURL+"/rebuild-clusters", "application/json", nil)
+	if err != nil {
+		http.Error(w, err.Error(), 500)
+		return
+	}
+	defer resp.Body.Close()
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(resp.StatusCode)
+	io.Copy(w, resp.Body)
+}
+
 func (h *Handler) StreamURL(w http.ResponseWriter, r *http.Request) {
 	trackID := chi.URLParam(r, "id")
 	format := r.URL.Query().Get("format")

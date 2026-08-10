@@ -276,6 +276,32 @@ export class OwnWaveAPI {
     return this.request<void>('/logout', { method: 'POST' });
   }
 
+  adminHealth() {
+    return this.request<Record<string, string>>('/admin/health');
+  }
+
+  adminStations() {
+    return this.request<{ stations: { id: string; name: string; track_count: number; played_count: number }[] }>(
+      '/admin/stations'
+    ).then((r) => r.stations);
+  }
+
+  adminScan(path?: string, force?: boolean) {
+    return this.request<{ status: string }>('/admin/scan', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path: path ?? '', force: force ?? false }),
+    });
+  }
+
+  adminRebuildVectors() {
+    return this.request<{ status: string }>('/admin/rebuild-vectors', { method: 'POST' });
+  }
+
+  adminRebuildClusters() {
+    return this.request<{ status: string }>('/admin/rebuild-clusters', { method: 'POST' });
+  }
+
   getStreamUrl(id: string, opts?: StreamUrlOptions) {
     const params = new URLSearchParams();
     if (opts?.format) params.set('format', opts.format);

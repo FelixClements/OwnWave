@@ -149,6 +149,37 @@ func (db *DB) ListStations(ctx context.Context) ([]Station, error) {
 	return stations, rows.Err()
 }
 
+type StationQueueStatus struct {
+	Station
+	TrackCount  int `json:"track_count"`
+	PlayedCount int `json:"played_count"`
+}
+
+func (db *DB) ListStationsWithQueueStatus(ctx context.Context) ([]StationQueueStatus, error) {
+	rows, err := db.pool.Query(ctx, `
+		SELECT s.id::text, s.name, s.seed_features::text,
+		       COUNT(st.track_id) FILTER (WHERE st.station_id = s.id),
+		       COUNT(st.track_id) FILTER (WHERE st.station_id = s.id AND st.played_at IS NOT NULL)
+		FROM stations s
+		LEFT JOIN station_tracks st ON s.id = st.station_id
+		GROUP BY s.id, s.name, s.seed_features
+		ORDER BY s.created_at DESC
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []StationQueueStatus
+	for rows.Next() {
+		var q StationQueueStatus
+		if err := rows.Scan(&q.ID, &q.Name, &q.SeedFeatures, &q.TrackCount, &q.PlayedCount); err != nil {
+			return nil, err
+		}
+		out = append(out, q)
+	}
+	return out, rows.Err()
+}
+
 func (db *DB) GetStationByID(ctx context.Context, stationID string) (Station, error) {
 	var s Station
 	err := db.pool.QueryRow(ctx, `
