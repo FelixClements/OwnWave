@@ -213,8 +213,8 @@ func (db *DB) GetStationQueue(ctx context.Context, stationID string) ([]TrackWit
 		SELECT t.id::text, t.title, a.name, al.title, t.path, t.track_number,
 		       t.duration_seconds, t.sample_rate, t.channels,
 		       af.bpm, af.key, af.energy, af.valence, af.loudness,
-		       af.outro_start_seconds, af.ideal_crossfade_seconds,
-		       af.intro_start_seconds, af.outro_end_seconds,
+		       COALESCE(af.outro_start_seconds, 0), COALESCE(af.ideal_crossfade_seconds, 0),
+		       COALESCE(af.intro_start_seconds, 0), COALESCE(af.outro_end_seconds, 0),
 		       st.position
 		FROM station_tracks st
 		JOIN tracks t ON st.track_id = t.id
