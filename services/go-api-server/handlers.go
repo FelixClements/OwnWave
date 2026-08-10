@@ -739,9 +739,10 @@ func (h *Handler) Me(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{
+	json.NewEncoder(w).Encode(map[string]interface{}{
 		"id":       user.ID,
 		"username": user.Username,
+		"is_admin": user.IsAdmin,
 	})
 }
 

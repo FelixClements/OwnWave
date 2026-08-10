@@ -53,6 +53,15 @@ export function ProfileButton() {
             >
               Account
             </Link>
+            {user.is_admin && (
+              <Link
+                href="/admin"
+                className="block px-4 py-2 text-sm text-spotify-text hover:bg-spotify-card-hover transition"
+                onClick={() => setOpen(false)}
+              >
+                Admin
+              </Link>
+            )}
             <button
               onClick={() => {
                 setOpen(false);

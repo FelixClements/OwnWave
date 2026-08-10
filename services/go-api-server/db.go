@@ -275,6 +275,7 @@ func (db *DB) MarkTrackPlayed(ctx context.Context, stationID, trackID string) er
 type User struct {
 	ID           string `json:"id"`
 	Username     string `json:"username"`
+	IsAdmin      bool   `json:"is_admin"`
 	PasswordHash string `json:"-"`
 }
 
@@ -295,10 +296,10 @@ func (db *DB) CreateUser(ctx context.Context, username, passwordHash string) (st
 func (db *DB) GetUserByUsername(ctx context.Context, username string) (User, error) {
 	var u User
 	err := db.pool.QueryRow(ctx, `
-		SELECT id::text, username, password_hash
+		SELECT id::text, username, is_admin, password_hash
 		FROM users
 		WHERE username = $1
-	`, username).Scan(&u.ID, &u.Username, &u.PasswordHash)
+	`, username).Scan(&u.ID, &u.Username, &u.IsAdmin, &u.PasswordHash)
 	return u, err
 }
 
@@ -318,11 +319,11 @@ func (db *DB) CreateSession(ctx context.Context, userID, tokenHash string, expir
 func (db *DB) GetUserByTokenHash(ctx context.Context, tokenHash string) (User, error) {
 	var u User
 	err := db.pool.QueryRow(ctx, `
-		SELECT u.id::text, u.username, u.password_hash
+		SELECT u.id::text, u.username, u.is_admin, u.password_hash
 		FROM users u
 		JOIN sessions s ON u.id = s.user_id
 		WHERE s.token_hash = $1 AND s.expires_at > NOW()
-	`, tokenHash).Scan(&u.ID, &u.Username, &u.PasswordHash)
+	`, tokenHash).Scan(&u.ID, &u.Username, &u.IsAdmin, &u.PasswordHash)
 	return u, err
 }
 

@@ -71,6 +71,7 @@ export type SearchResults = {
 export type User = {
   id: string;
   username: string;
+  is_admin: boolean;
 };
 
 export type AuthResponse = {
