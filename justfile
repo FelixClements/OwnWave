@@ -34,6 +34,14 @@ test:
     echo "Health check failed" >&2
     exit 1
 
+# Run Go unit tests
+test-go:
+    cd services/go-api-server && go test ./...
+
+# Run all local checks (build frontend and Go tests)
+test-all: test-go
+    cd apps/t3-web-frontend && npm run build
+
 # Apply database migrations with golang-migrate
 db-migrate:
     docker compose run --rm migrate up
