@@ -9,6 +9,7 @@ export function StationManager() {
   const [editName, setEditName] = useState('');
   const [previewId, setPreviewId] = useState<string | null>(null);
   const [showCreate, setShowCreate] = useState(false);
+  const [createError, setCreateError] = useState('');
 
   const [createFilters, setCreateFilters] = useState({
     min_bpm: '',
@@ -69,7 +70,11 @@ export function StationManager() {
 
   const handleCreate = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!name.trim()) return;
+    if (!name.trim()) {
+      setCreateError('Please enter a station name.');
+      return;
+    }
+    setCreateError('');
     create.mutate({
       name: name.trim(),
       min_bpm: toNum(createFilters.min_bpm),
@@ -134,10 +139,15 @@ export function StationManager() {
           <input
             type="text"
             value={name}
-            onChange={(e) => setName(e.target.value)}
-            placeholder="New station name"
+            onChange={(e) => {
+              setName(e.target.value);
+              if (createError) setCreateError('');
+            }}
             className="w-full px-3 py-2 rounded bg-spotify-elevated text-spotify-text placeholder-spotify-subdued border border-spotify-border focus:outline-none focus:border-spotify-green"
           />
+          {createError && (
+            <p className="text-red-500 text-sm">{createError}</p>
+          )}
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
             <input
               type="number"
