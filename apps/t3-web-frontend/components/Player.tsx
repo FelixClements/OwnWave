@@ -37,7 +37,7 @@ export function Player({ queue }: { queue: QueueTrack[] }) {
   const [currentTrack, setCurrentTrack] = useState<QueueTrack | null>(null);
   const [coverUrl, setCoverUrl] = useState<string | null>(null);
   const [coverError, setCoverError] = useState(false);
-  const [format, setFormat] = useState('mp3');
+  const [format, setFormat] = useState('flac');
   const [bitrate, setBitrate] = useState('192');
 
   const recordPlay = trpc.recordPlay.useMutation();
