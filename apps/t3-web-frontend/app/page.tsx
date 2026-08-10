@@ -173,7 +173,7 @@ export default function Home() {
             );
           })()}
           {(() => {
-            const track = playingStation === selectedStation ? (nowPlaying || (queue || [])[0]) : null;
+            const track = playingStation === selectedStation ? (nowPlaying || (queue || [])[0]) : (queue || [])[0];
             if (!track) return null;
             return (
               <div className="bg-spotify-card rounded-lg p-4 mb-6">
