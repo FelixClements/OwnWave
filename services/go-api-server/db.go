@@ -211,11 +211,20 @@ func (db *DB) UpdateStation(ctx context.Context, stationID, name, seedFeatures s
 }
 
 func (db *DB) DeleteStation(ctx context.Context, stationID string) error {
-	_, err := db.pool.Exec(ctx, `
-		DELETE FROM station_tracks WHERE station_id = $1;
-		DELETE FROM stations WHERE id = $1;
-	`, stationID)
-	return err
+	tx, err := db.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+
+	if _, err := tx.Exec(ctx, `DELETE FROM station_tracks WHERE station_id = $1`, stationID); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx, `DELETE FROM stations WHERE id = $1`, stationID); err != nil {
+		return err
+	}
+
+	return tx.Commit(ctx)
 }
 
 func (db *DB) GetStationQueue(ctx context.Context, stationID string) ([]TrackWithFeatures, error) {

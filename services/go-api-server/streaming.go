@@ -109,9 +109,7 @@ func (h *Handler) serveTranscoded(w http.ResponseWriter, r *http.Request, path s
 
 func normalizeBitrate(input, defaultRate string) string {
 	input = strings.ToLower(strings.TrimSpace(input))
-	if strings.HasSuffix(input, "k") {
-		input = strings.TrimSuffix(input, "k")
-	}
+	input = strings.TrimSuffix(input, "k")
 	kbps, err := strconv.Atoi(input)
 	if err != nil || kbps <= 0 {
 		return defaultRate

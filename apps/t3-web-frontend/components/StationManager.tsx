@@ -66,6 +66,10 @@ export function StationManager() {
     onSuccess: () => {
       utils.stations.invalidate();
     },
+    onError: (err) => {
+      console.error('delete station failed', err);
+      alert('Failed to delete station: ' + err.message);
+    },
   });
 
   const handleCreate = (e: React.FormEvent) => {
