@@ -50,10 +50,8 @@ export function Player({ queue: queueProp }: { queue: QueueTrack[] }) {
 
   const queueRef = useRef(queueProp);
   useEffect(() => {
-    if (playingStation === null || playingStation === selectedStation) {
-      queueRef.current = queueProp;
-    }
-  }, [queueProp, selectedStation, playingStation]);
+    queueRef.current = queueProp;
+  }, [queueProp]);
 
   const queue = queueRef.current;
   const [coverUrl, setCoverUrl] = useState<string | null>(null);
