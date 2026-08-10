@@ -61,14 +61,20 @@ export default function Home() {
 
   return (
     <>
-      <div className="flex-1 max-w-md hidden sm:block mb-6">
+      <div className="flex-1 max-w-md hidden sm:block mb-6 flex items-center gap-3">
         <input
           type="text"
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
           placeholder="Search stations..."
-          className="w-full px-4 py-1.5 rounded-full bg-spotify-elevated text-spotify-text placeholder-spotify-subdued text-sm border border-spotify-border focus:outline-none focus:border-spotify-green"
+          className="flex-1 px-4 py-1.5 rounded-full bg-spotify-elevated text-spotify-text placeholder-spotify-subdued text-sm border border-spotify-border focus:outline-none focus:border-spotify-green"
         />
+        <Link
+          href="/stations/manage"
+          className="px-4 py-1.5 rounded-full bg-spotify-elevated text-spotify-text text-sm border border-spotify-border hover:border-spotify-green transition"
+        >
+          Manage
+        </Link>
       </div>
 
       {(stations || []).length === 0 && !searchQuery && (

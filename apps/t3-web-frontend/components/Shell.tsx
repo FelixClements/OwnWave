@@ -36,9 +36,6 @@ export function Shell({ children }: { children: React.ReactNode }) {
             <Link href="/history" className="hover:text-spotify-text transition">
               History
             </Link>
-            <Link href="/stations" className="hover:text-spotify-text transition">
-              Stations
-            </Link>
             <Link href="/stations/manage" className="hover:text-spotify-text transition">
               Manage Stations
             </Link>
