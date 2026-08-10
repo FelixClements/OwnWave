@@ -423,18 +423,22 @@ export function Player({ queue }: { queue: QueueTrack[] }) {
             <option value="opus">Opus</option>
             <option value="aac">AAC</option>
           </select>
-          <select
-            value={bitrate}
-            onChange={(e) => setBitrate(e.target.value)}
-            className="bg-spotify-elevated text-spotify-text rounded px-1 py-0.5 border border-spotify-border w-14"
-            aria-label="Bitrate"
-          >
-            <option value="128">128</option>
-            <option value="192">192</option>
-            <option value="256">256</option>
-            <option value="320">320</option>
-          </select>
-          <span className="text-spotify-subdued">kbps</span>
+          {format !== 'flac' && (
+            <>
+              <select
+                value={bitrate}
+                onChange={(e) => setBitrate(e.target.value)}
+                className="bg-spotify-elevated text-spotify-text rounded px-1 py-0.5 border border-spotify-border w-14"
+                aria-label="Bitrate"
+              >
+                <option value="128">128</option>
+                <option value="192">192</option>
+                <option value="256">256</option>
+                <option value="320">320</option>
+              </select>
+              <span className="text-spotify-subdued">kbps</span>
+            </>
+          )}
         </div>
         {currentTrack && (
           <span className="truncate">{`${currentTrack.bpm.toFixed(0)} BPM · ${currentTrack.key}`}</span>
