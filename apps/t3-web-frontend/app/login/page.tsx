@@ -41,7 +41,7 @@ export default function LoginPage() {
     <div className="min-h-screen flex bg-black text-spotify-text">
       <div className="hidden md:flex flex-1 bg-black" />
 
-      <div className="flex-1 flex flex-col min-h-screen">
+      <div className="flex-1 flex flex-col md:flex-row min-h-screen">
         <div className="flex-1 bg-white flex items-center justify-center text-black p-8">
           <h1 className="text-6xl font-extrabold tracking-tight">OwnWave</h1>
         </div>
