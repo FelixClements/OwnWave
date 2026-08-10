@@ -66,6 +66,8 @@ export function Player({ queue }: { queue: QueueTrack[] }) {
 
   useEffect(() => {
     if (!started || !queue.length) return;
+    // Keep queue as a ref so callbacks always see the latest queue
+    // without this effect restarting on every refetch.
 
     const AudioCtx =
       (window as any).AudioContext || (window as any).webkitAudioContext;
@@ -114,7 +116,7 @@ export function Player({ queue }: { queue: QueueTrack[] }) {
       contextRef.current?.close();
       contextRef.current = null;
     };
-  }, [started, queue]);
+  }, [started]);
 
   useEffect(() => {
     if (typeof window === 'undefined' || !('mediaSession' in navigator) || !currentTrack) return;
