@@ -87,7 +87,7 @@ function Cover({
 }
 
 export default function Home() {
-  const { selectedStation, setSelectedStation, stations, queue, nowPlaying } = useStation();
+  const { selectedStation, setSelectedStation, stations, queue, nowPlaying, isPlaying, setIsPlaying, playingStation } = useStation();
   const [searchQuery, setSearchQuery] = useState('');
 
   const utils = trpc.useContext();
@@ -141,20 +141,29 @@ export default function Home() {
           <h2 className="text-2xl font-bold text-spotify-text mb-5">Stations</h2>
           <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-6">
             {filteredStations.map((station) => (
-              <button
+              <div
                 key={station.id}
                 onClick={() => setSelectedStation(station.id)}
-                className="group relative bg-spotify-card rounded-lg p-4 hover:bg-spotify-card-hover transition text-left"
+                className="group relative bg-spotify-card rounded-lg p-4 hover:bg-spotify-card-hover transition text-left cursor-pointer"
               >
                 <div className="w-full aspect-square rounded-md bg-gradient-to-br from-spotify-green to-spotify-green-hover shadow-lg mb-4 flex items-center justify-center text-black font-bold text-2xl">
                   {station.name.charAt(0).toUpperCase()}
                 </div>
                 <h3 className="font-bold text-spotify-text truncate">{station.name}</h3>
                 <p className="text-sm text-spotify-subdued">AI Radio</p>
-                <div className="absolute bottom-16 right-4 w-12 h-12 rounded-full bg-spotify-green shadow-lg opacity-0 group-hover:opacity-100 transition transform translate-y-2 group-hover:translate-y-0 flex items-center justify-center text-black">
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setSelectedStation(station.id);
+                    setIsPlaying(true);
+                  }}
+                  className="absolute bottom-16 right-4 w-12 h-12 rounded-full bg-spotify-green shadow-lg flex items-center justify-center text-black hover:scale-105 focus:outline-none focus:ring-2 focus:ring-spotify-green"
+                  aria-label={`Play ${station.name}`}
+                >
                   <PlayIcon className="w-5 h-5 ml-0.5" />
-                </div>
-              </button>
+                </button>
+              </div>
             ))}
           </div>
         </section>
@@ -162,7 +171,13 @@ export default function Home() {
 
       {selectedStation && ((queue || []).length > 0 || nowPlaying) && (
         <section>
-          <h2 className="text-2xl font-bold text-spotify-text mb-5">Now Playing</h2>
+          <h2 className="text-2xl font-bold text-spotify-text mb-5">
+            {isPlaying ? 'Now Playing' : 'Station'}
+            {(() => {
+              const station = stations.find((s) => s.id === selectedStation);
+              return station ? <span className="text-spotify-subdued text-base font-normal ml-2">from {station.name}</span> : null;
+            })()}
+          </h2>
           {(() => {
             const track = nowPlaying || (queue || [])[0];
             if (!track) return null;

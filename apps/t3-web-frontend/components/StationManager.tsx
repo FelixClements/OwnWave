@@ -32,7 +32,7 @@ export function StationManager() {
   });
 
   const utils = trpc.useContext();
-  const { selectedStation, setSelectedStation } = useStation();
+  const { selectedStation, setSelectedStation, setIsPlaying } = useStation();
   const { data: stations } = trpc.stations.useQuery();
   const { data: queue } = trpc.queue.useQuery(
     { id: previewId || '' },
@@ -69,6 +69,7 @@ export function StationManager() {
       utils.stations.invalidate();
       if (variables.id === selectedStation) {
         setSelectedStation(null);
+        setIsPlaying(false);
       }
     },
     onError: (err) => {

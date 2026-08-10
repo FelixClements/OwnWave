@@ -46,7 +46,7 @@ function PauseIcon({ className }: { className?: string }) {
 }
 
 export function Player({ queue: queueProp }: { queue: QueueTrack[] }) {
-  const { nowPlaying, setNowPlaying, selectedStation, setPlayingStation, playingStation } = useStation();
+  const { nowPlaying, setNowPlaying, selectedStation, setPlayingStation, playingStation, isPlaying, setIsPlaying } = useStation();
 
   const queueRef = useRef(queueProp);
   useEffect(() => {
@@ -56,8 +56,6 @@ export function Player({ queue: queueProp }: { queue: QueueTrack[] }) {
   }, [queueProp, selectedStation, playingStation]);
 
   const queue = queueRef.current;
-  const [started, setStarted] = useState(false);
-  const [isPlaying, setIsPlaying] = useState(false);
   const [coverUrl, setCoverUrl] = useState<string | null>(null);
   const [coverError, setCoverError] = useState(false);
   const [format, setFormat] = useState('flac');
@@ -105,18 +103,47 @@ export function Player({ queue: queueProp }: { queue: QueueTrack[] }) {
   const activeRef = useRef<'A' | 'B'>('A');
   const currentIndexRef = useRef(0);
   const crossfadingRef = useRef(false);
+  const loadingRef = useRef(false);
 
   useEffect(() => {
-    if (!started || !queue.length) return;
-    // Keep queue as a ref so callbacks always see the latest queue
-    // without this effect restarting on every refetch.
+    if (typeof window === 'undefined') return;
 
     const AudioCtx =
       (window as any).AudioContext || (window as any).webkitAudioContext;
     if (!AudioCtx) {
-      playSequential();
+      if (isPlaying && queue.length && !loadingRef.current) {
+        loadingRef.current = true;
+        const audio = audioARef.current;
+        if (audio) {
+          loadTrack(audio, 0).then(() => audio.play().catch(() => {})).finally(() => { loadingRef.current = false; });
+        } else {
+          loadingRef.current = false;
+        }
+      }
       return;
     }
+
+    if (!isPlaying) {
+      audioARef.current?.pause();
+      audioBRef.current?.pause();
+      if (playingStation && playingStation !== selectedStation) {
+        setNowPlaying(null);
+        setPlayingStation(null);
+      }
+      return;
+    }
+
+    if (loadingRef.current || !queue.length) return;
+
+    if (playingStation === selectedStation && nowPlaying) {
+      const audio = activeRef.current === 'A' ? audioARef.current : audioBRef.current;
+      if (audio && audio.paused) {
+        audio.play().catch(() => {});
+      }
+      return;
+    }
+
+    loadingRef.current = true;
 
     if (!contextRef.current) {
       const ctx = new AudioCtx();
@@ -152,13 +179,8 @@ export function Player({ queue: queueProp }: { queue: QueueTrack[] }) {
 
     currentIndexRef.current = 0;
     activeRef.current = 'A';
-    loadAndPlay(0, 'A');
-
-    return () => {
-      contextRef.current?.close();
-      contextRef.current = null;
-    };
-  }, [started]);
+    loadAndPlay(0, 'A').finally(() => { loadingRef.current = false; });
+  }, [isPlaying, selectedStation, queue]);
 
   useEffect(() => {
     if (typeof window === 'undefined' || !('mediaSession' in navigator) || !nowPlaying) return;
@@ -179,16 +201,8 @@ export function Player({ queue: queueProp }: { queue: QueueTrack[] }) {
       artwork,
     });
 
-    navigator.mediaSession.setActionHandler('play', () => {
-      const audio = activeRef.current === 'A' ? audioARef.current : audioBRef.current;
-      if (audio && !isPlaying) audio.play();
-      setIsPlaying(true);
-    });
-    navigator.mediaSession.setActionHandler('pause', () => {
-      const audio = activeRef.current === 'A' ? audioARef.current : audioBRef.current;
-      if (audio && isPlaying) audio.pause();
-      setIsPlaying(false);
-    });
+    navigator.mediaSession.setActionHandler('play', () => setIsPlaying(true));
+    navigator.mediaSession.setActionHandler('pause', () => setIsPlaying(false));
     navigator.mediaSession.setActionHandler('nexttrack', () => skipNext());
     navigator.mediaSession.setActionHandler('previoustrack', () => skipPrev());
   }, [nowPlaying, coverUrl, coverError, isPlaying]);
@@ -208,7 +222,7 @@ export function Player({ queue: queueProp }: { queue: QueueTrack[] }) {
     loadTrack(audio, 0).then(() => audio.play());
     audio.addEventListener('ended', () => {
       const next = currentIndexRef.current + 1;
-      if (next < queue.length) {
+      if (next < queueRef.current.length) {
         currentIndexRef.current = next;
         loadTrack(audio, next).then(() => audio.play());
       }
@@ -216,10 +230,8 @@ export function Player({ queue: queueProp }: { queue: QueueTrack[] }) {
   }
 
   async function loadTrack(audio: HTMLAudioElement, index: number) {
-    const track = queue[index];
+    const track = queueRef.current[index];
     if (!track) return;
-    setNowPlaying(track);
-    setPlayingStation(selectedStation);
     setCoverUrl(getCoverUrl(track.id));
     setCoverError(false);
     if (track.id) {
@@ -228,6 +240,8 @@ export function Player({ queue: queueProp }: { queue: QueueTrack[] }) {
     const { url } = await api.getStreamUrl(track.id, { format: format as any, bitrate });
     audio.src = `${getStreamBaseUrl()}${url}`;
     audio.load();
+    setNowPlaying(track);
+    setPlayingStation(selectedStation);
   }
 
   async function loadAndPlay(index: number, target: 'A' | 'B') {
@@ -241,7 +255,6 @@ export function Player({ queue: queueProp }: { queue: QueueTrack[] }) {
     otherAudio.src = '';
 
     await audio.play();
-    setIsPlaying(true);
 
     const gain = target === 'A' ? gainARef.current : gainBRef.current;
     const otherGain = target === 'A' ? gainBRef.current : gainARef.current;
@@ -265,12 +278,12 @@ export function Player({ queue: queueProp }: { queue: QueueTrack[] }) {
 
   function handleTimeUpdate(audio: HTMLAudioElement, target: 'A' | 'B') {
     if (crossfadingRef.current) return;
-    const track = queue[currentIndexRef.current];
+    const track = queueRef.current[currentIndexRef.current];
     if (!track) return;
     const outro = track.outro_start_seconds;
     if (outro > 0 && audio.currentTime >= outro - 0.1) {
       const next = currentIndexRef.current + 1;
-      if (next < queue.length) {
+      if (next < queueRef.current.length) {
         beginCrossfade(target, next);
       }
     }
@@ -279,7 +292,7 @@ export function Player({ queue: queueProp }: { queue: QueueTrack[] }) {
   function handleEnded(target: 'A' | 'B') {
     if (crossfadingRef.current) return;
     const next = currentIndexRef.current + 1;
-    if (next < queue.length) {
+    if (next < queueRef.current.length) {
       loadAndPlay(next, target);
     }
   }
@@ -301,14 +314,13 @@ export function Player({ queue: queueProp }: { queue: QueueTrack[] }) {
 
     if (!currentAudio || !nextAudio || !currentGain || !nextGain || !ctx) return;
 
-    const nextTrack = queue[nextIndex];
+    const nextTrack = queueRef.current[nextIndex];
     if (!nextTrack) return;
 
     const { url } = await api.getStreamUrl(nextTrack.id, { format: format as any, bitrate });
     nextAudio.src = `${getStreamBaseUrl()}${url}`;
     nextAudio.load();
     await nextAudio.play();
-    setIsPlaying(true);
 
     const crossfade = nextTrack.ideal_crossfade_seconds;
     const now = ctx.currentTime;
@@ -340,7 +352,7 @@ export function Player({ queue: queueProp }: { queue: QueueTrack[] }) {
     if (crossfadingRef.current || !nowPlaying) return;
     recordFeedback.mutate({ id: nowPlaying.id, feedback: 'skip' });
     const next = currentIndexRef.current + 1;
-    if (next < queue.length) {
+    if (next < queueRef.current.length) {
       const audio = activeRef.current === 'A' ? audioARef.current : audioBRef.current;
       if (audio) {
         audio.ontimeupdate = null;
@@ -364,20 +376,7 @@ export function Player({ queue: queueProp }: { queue: QueueTrack[] }) {
   }
 
   function togglePlay() {
-    if (!started) {
-      setStarted(true);
-      return;
-    }
-    const audio =
-      activeRef.current === 'A' ? audioARef.current : audioBRef.current;
-    if (!audio) return;
-    if (isPlaying) {
-      audio.pause();
-      setIsPlaying(false);
-    } else {
-      audio.play().catch(() => {});
-      setIsPlaying(true);
-    }
+    setIsPlaying(!isPlaying);
   }
 
   return (
@@ -416,15 +415,11 @@ export function Player({ queue: queueProp }: { queue: QueueTrack[] }) {
         <button
           onClick={togglePlay}
           className="w-10 h-10 md:w-12 md:h-12 rounded-full bg-spotify-text text-spotify-bg flex items-center justify-center hover:scale-105 transition disabled:opacity-50"
-          disabled={started && !nowPlaying}
-          aria-label={started ? 'Play/Pause' : 'Start radio'}
+          disabled={!selectedStation && !nowPlaying}
+          aria-label={nowPlaying ? 'Play/Pause' : 'Start radio'}
         >
-          {started ? (
-            isPlaying ? (
-              <PauseIcon className="w-5 h-5 md:w-6 md:h-6" />
-            ) : (
-              <PlayIcon className="w-5 h-5 md:w-6 md:h-6 ml-0.5" />
-            )
+          {isPlaying && nowPlaying ? (
+            <PauseIcon className="w-5 h-5 md:w-6 md:h-6" />
           ) : (
             <PlayIcon className="w-5 h-5 md:w-6 md:h-6 ml-0.5" />
           )}

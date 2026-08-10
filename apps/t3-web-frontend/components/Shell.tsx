@@ -5,10 +5,10 @@ import { useStation } from '@/lib/station';
 import { useTheme } from '@/lib/theme';
 import { Player } from '@/components/Player';
 import { ProfileButton } from '@/components/ProfileButton';
-import { SunIcon, MoonIcon, PlayIcon } from '@/components/Icons';
+import { SunIcon, MoonIcon, PlayIcon, PauseIcon } from '@/components/Icons';
 
 export function Shell({ children }: { children: React.ReactNode }) {
-  const { selectedStation, setSelectedStation, stations, queue, playingStation } = useStation();
+  const { selectedStation, setSelectedStation, stations, queue, playingStation, isPlaying, setIsPlaying } = useStation();
   const { isLight, toggleTheme } = useTheme();
 
   return (
@@ -42,24 +42,37 @@ export function Shell({ children }: { children: React.ReactNode }) {
               Stations
             </h3>
             {(stations || []).map((station) => (
-              <button
+              <div
                 key={station.id}
                 onClick={() => setSelectedStation(station.id)}
-                className={`block w-full text-left py-2 px-3 rounded-md text-sm transition ${
+                className={`flex items-center gap-2 w-full text-left py-2 px-3 rounded-md text-sm transition cursor-pointer ${
                   selectedStation === station.id
                     ? 'bg-spotify-elevated text-spotify-text'
                     : 'text-spotify-subdued hover:text-spotify-text'
                 }`}
               >
-                <span className="flex items-center gap-2">
-                  <PlayIcon
-                    className={`w-3 h-3 ${
-                      playingStation === station.id ? 'text-spotify-green' : 'text-spotify-subdued'
-                    }`}
-                  />
-                  {station.name}
-                </span>
-              </button>
+                <span className="flex-1 truncate">{station.name}</span>
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    if (isPlaying && playingStation === station.id) {
+                      setIsPlaying(false);
+                    } else {
+                      setSelectedStation(station.id);
+                      setIsPlaying(true);
+                    }
+                  }}
+                  className="p-1 rounded hover:bg-spotify-elevated focus:outline-none focus:ring-1 focus:ring-spotify-green"
+                  aria-label={isPlaying && playingStation === station.id ? `Pause ${station.name}` : `Play ${station.name}`}
+                >
+                  {isPlaying && playingStation === station.id ? (
+                    <PauseIcon className="w-3 h-3 text-spotify-green" />
+                  ) : (
+                    <PlayIcon className="w-3 h-3 text-spotify-subdued" />
+                  )}
+                </button>
+              </div>
             ))}
           </div>
         </aside>
