@@ -1,9 +1,5 @@
 import { StationManager } from '@/components/StationManager';
 
 export default function ManageStationsPage() {
-  return (
-    <div className="min-h-screen bg-spotify-bg text-spotify-text">
-      <StationManager />
-    </div>
-  );
+  return <StationManager />;
 }

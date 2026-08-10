@@ -3,7 +3,6 @@
 import { useState } from 'react';
 import Link from 'next/link';
 import { trpc } from '@/lib/trpc/client';
-import { ProfileButton } from '@/components/ProfileButton';
 import { getCoverUrl } from '@/lib/api';
 
 type Tab = 'tracks' | 'albums' | 'artists';
@@ -38,93 +37,83 @@ export default function LibraryPage() {
   });
 
   return (
-    <div className="min-h-screen bg-spotify-bg text-spotify-text">
-      <header className="h-16 flex items-center justify-between px-4 md:px-8 bg-spotify-bg/95 sticky top-0 z-10">
-        <div className="flex items-center gap-4">
-          <Link href="/" className="text-sm font-bold hover:text-spotify-green transition">
-            ← Home
-          </Link>
-          <h2 className="text-sm font-bold">Library</h2>
-        </div>
-        <div className="flex items-center gap-3">
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <h2 className="text-2xl font-bold">Library</h2>
+        <button
+          onClick={() => rescan.mutate()}
+          disabled={rescan.isLoading}
+          className="text-xs font-semibold px-3 py-1.5 rounded-full bg-spotify-elevated text-spotify-text hover:bg-spotify-card-hover transition disabled:opacity-50"
+        >
+          {rescan.isLoading ? 'Rescanning...' : 'Rescan library'}
+        </button>
+      </div>
+
+      <div className="flex gap-4 border-b border-spotify-border mb-6">
+        {(['tracks', 'albums', 'artists'] as Tab[]).map((t) => (
           <button
-            onClick={() => rescan.mutate()}
-            disabled={rescan.isLoading}
-            className="text-xs font-semibold px-3 py-1.5 rounded-full bg-spotify-elevated text-spotify-text hover:bg-spotify-card-hover transition disabled:opacity-50"
+            key={t}
+            onClick={() => setTab(t)}
+            className={`pb-2 text-sm font-semibold capitalize transition ${
+              tab === t ? 'text-spotify-green border-b-2 border-spotify-green' : 'text-spotify-subdued hover:text-spotify-text'
+            }`}
           >
-            {rescan.isLoading ? 'Rescanning...' : 'Rescan library'}
+            {t}
           </button>
-          <ProfileButton />
-        </div>
-      </header>
+        ))}
+      </div>
 
-      <main className="p-4 md:p-8">
-        <div className="flex gap-4 border-b border-spotify-border mb-6">
-          {(['tracks', 'albums', 'artists'] as Tab[]).map((t) => (
-            <button
-              key={t}
-              onClick={() => setTab(t)}
-              className={`pb-2 text-sm font-semibold capitalize transition ${
-                tab === t ? 'text-spotify-green border-b-2 border-spotify-green' : 'text-spotify-subdued hover:text-spotify-text'
-              }`}
+      {tab === 'tracks' && (
+        <section className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-6">
+          {tracks?.map((track) => (
+            <div
+              key={track.id}
+              className="bg-spotify-card rounded-lg p-4 text-left"
             >
-              {t}
-            </button>
-          ))}
-        </div>
-
-        {tab === 'tracks' && (
-          <section className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-6">
-            {tracks?.map((track) => (
-              <div
-                key={track.id}
-                className="bg-spotify-card rounded-lg p-4 text-left"
+              <Cover
+                id={track.id}
+                title={track.title}
+                className="w-full aspect-square rounded-md bg-spotify-elevated object-cover mb-4 flex items-center justify-center"
+              />
+              <h3 className="font-bold text-spotify-text truncate">{track.title}</h3>
+              <p className="text-sm text-spotify-subdued truncate">{track.artist || 'Unknown artist'}</p>
+              {track.album && <p className="text-xs text-spotify-subdued truncate">{track.album}</p>}
+              <Link
+                href={`/similar?track=${encodeURIComponent(track.id)}`}
+                className="mt-2 inline-block text-xs font-semibold text-spotify-green hover:underline"
               >
-                <Cover
-                  id={track.id}
-                  title={track.title}
-                  className="w-full aspect-square rounded-md bg-spotify-elevated object-cover mb-4 flex items-center justify-center"
-                />
-                <h3 className="font-bold text-spotify-text truncate">{track.title}</h3>
-                <p className="text-sm text-spotify-subdued truncate">{track.artist || 'Unknown artist'}</p>
-                {track.album && <p className="text-xs text-spotify-subdued truncate">{track.album}</p>}
-                <Link
-                  href={`/similar?track=${encodeURIComponent(track.id)}`}
-                  className="mt-2 inline-block text-xs font-semibold text-spotify-green hover:underline"
-                >
-                  Find similar
-                </Link>
-              </div>
-            ))}
-          </section>
-        )}
+                Find similar
+              </Link>
+            </div>
+          ))}
+        </section>
+      )}
 
-        {tab === 'albums' && (
-          <section className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-6">
-            {albums?.map((album) => (
-              <div key={album.id} className="bg-spotify-card rounded-lg p-4 text-left">
-                <div className="w-full aspect-square rounded-md bg-spotify-elevated mb-4 flex items-center justify-center text-2xl font-bold text-spotify-subdued">
-                  {album.title.charAt(0).toUpperCase()}
-                </div>
-                <h3 className="font-bold text-spotify-text truncate">{album.title}</h3>
+      {tab === 'albums' && (
+        <section className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-6">
+          {albums?.map((album) => (
+            <div key={album.id} className="bg-spotify-card rounded-lg p-4 text-left">
+              <div className="w-full aspect-square rounded-md bg-spotify-elevated mb-4 flex items-center justify-center text-2xl font-bold text-spotify-subdued">
+                {album.title.charAt(0).toUpperCase()}
               </div>
-            ))}
-          </section>
-        )}
+              <h3 className="font-bold text-spotify-text truncate">{album.title}</h3>
+            </div>
+          ))}
+        </section>
+      )}
 
-        {tab === 'artists' && (
-          <section className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-6">
-            {artists?.map((artist) => (
-              <div key={artist.id} className="bg-spotify-card rounded-lg p-4 text-left">
-                <div className="w-full aspect-square rounded-md bg-spotify-elevated mb-4 flex items-center justify-center text-2xl font-bold text-spotify-subdued">
-                  {artist.name.charAt(0).toUpperCase()}
-                </div>
-                <h3 className="font-bold text-spotify-text truncate">{artist.name}</h3>
+      {tab === 'artists' && (
+        <section className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-6">
+          {artists?.map((artist) => (
+            <div key={artist.id} className="bg-spotify-card rounded-lg p-4 text-left">
+              <div className="w-full aspect-square rounded-md bg-spotify-elevated mb-4 flex items-center justify-center text-2xl font-bold text-spotify-subdued">
+                {artist.name.charAt(0).toUpperCase()}
               </div>
-            ))}
-          </section>
-        )}
-      </main>
+              <h3 className="font-bold text-spotify-text truncate">{artist.name}</h3>
+            </div>
+          ))}
+        </section>
+      )}
     </div>
   );
 }
