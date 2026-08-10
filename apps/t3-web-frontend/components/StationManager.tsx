@@ -136,100 +136,19 @@ export function StationManager() {
 
       {showCreate && (
         <form onSubmit={handleCreate} className="space-y-3 p-4 rounded bg-spotify-card">
-          <input
-            type="text"
-            value={name}
-            onChange={(e) => {
-              setName(e.target.value);
-              if (createError) setCreateError('');
-            }}
-            className="w-full px-3 py-2 rounded bg-spotify-elevated text-spotify-text placeholder-spotify-subdued border border-spotify-border focus:outline-none focus:border-spotify-green"
-          />
-          {createError && (
-            <p className="text-red-500 text-sm">{createError}</p>
-          )}
-          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div className="space-y-1">
-              <label htmlFor="create-min-bpm" className="text-xs text-spotify-subdued">Min BPM</label>
+              <label htmlFor="create-name" className="text-xs text-spotify-subdued">Station Name</label>
               <input
-                id="create-min-bpm"
-                type="number"
+                id="create-name"
+                type="text"
                 required
-                value={createFilters.min_bpm}
-                onChange={(e) => setCreateFilters({ ...createFilters, min_bpm: e.target.value })}
-                placeholder="Min BPM"
-                className="w-full px-3 py-2 rounded bg-spotify-elevated text-spotify-text placeholder-spotify-subdued border border-spotify-border focus:outline-none focus:border-spotify-green"
-              />
-            </div>
-            <div className="space-y-1">
-              <label htmlFor="create-max-bpm" className="text-xs text-spotify-subdued">Max BPM</label>
-              <input
-                id="create-max-bpm"
-                type="number"
-                required
-                value={createFilters.max_bpm}
-                onChange={(e) => setCreateFilters({ ...createFilters, max_bpm: e.target.value })}
-                placeholder="Max BPM"
-                className="w-full px-3 py-2 rounded bg-spotify-elevated text-spotify-text placeholder-spotify-subdued border border-spotify-border focus:outline-none focus:border-spotify-green"
-              />
-            </div>
-            <div className="space-y-1">
-              <label htmlFor="create-min-energy" className="text-xs text-spotify-subdued">Min Energy</label>
-              <input
-                id="create-min-energy"
-                type="number"
-                step="0.01"
-                required
-                min="0"
-                max="1"
-                value={createFilters.min_energy}
-                onChange={(e) => setCreateFilters({ ...createFilters, min_energy: e.target.value })}
-                placeholder="Min energy"
-                className="w-full px-3 py-2 rounded bg-spotify-elevated text-spotify-text placeholder-spotify-subdued border border-spotify-border focus:outline-none focus:border-spotify-green"
-              />
-            </div>
-            <div className="space-y-1">
-              <label htmlFor="create-max-energy" className="text-xs text-spotify-subdued">Max Energy</label>
-              <input
-                id="create-max-energy"
-                type="number"
-                step="0.01"
-                required
-                min="0"
-                max="1"
-                value={createFilters.max_energy}
-                onChange={(e) => setCreateFilters({ ...createFilters, max_energy: e.target.value })}
-                placeholder="Max energy"
-                className="w-full px-3 py-2 rounded bg-spotify-elevated text-spotify-text placeholder-spotify-subdued border border-spotify-border focus:outline-none focus:border-spotify-green"
-              />
-            </div>
-            <div className="space-y-1">
-              <label htmlFor="create-min-valence" className="text-xs text-spotify-subdued">Min Valence</label>
-              <input
-                id="create-min-valence"
-                type="number"
-                step="0.01"
-                required
-                min="0"
-                max="1"
-                value={createFilters.min_valence}
-                onChange={(e) => setCreateFilters({ ...createFilters, min_valence: e.target.value })}
-                placeholder="Min valence"
-                className="w-full px-3 py-2 rounded bg-spotify-elevated text-spotify-text placeholder-spotify-subdued border border-spotify-border focus:outline-none focus:border-spotify-green"
-              />
-            </div>
-            <div className="space-y-1">
-              <label htmlFor="create-max-valence" className="text-xs text-spotify-subdued">Max Valence</label>
-              <input
-                id="create-max-valence"
-                type="number"
-                step="0.01"
-                required
-                min="0"
-                max="1"
-                value={createFilters.max_valence}
-                onChange={(e) => setCreateFilters({ ...createFilters, max_valence: e.target.value })}
-                placeholder="Max valence"
+                value={name}
+                onChange={(e) => {
+                  setName(e.target.value);
+                  if (createError) setCreateError('');
+                }}
+                placeholder="Name"
                 className="w-full px-3 py-2 rounded bg-spotify-elevated text-spotify-text placeholder-spotify-subdued border border-spotify-border focus:outline-none focus:border-spotify-green"
               />
             </div>
@@ -249,6 +168,101 @@ export function StationManager() {
                 <option value="cluster">Cluster</option>
                 <option value="mood">Mood</option>
               </select>
+            </div>
+          </div>
+          {createError && (
+            <p className="text-red-500 text-sm">{createError}</p>
+          )}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <div className="space-y-2">
+              <div className="space-y-1">
+                <label htmlFor="create-min-bpm" className="text-xs text-spotify-subdued">Min BPM</label>
+                <input
+                  id="create-min-bpm"
+                  type="number"
+                  required
+                  value={createFilters.min_bpm}
+                  onChange={(e) => setCreateFilters({ ...createFilters, min_bpm: e.target.value })}
+                  placeholder="0"
+                  className="w-full px-3 py-2 rounded bg-spotify-elevated text-spotify-text placeholder-spotify-subdued border border-spotify-border focus:outline-none focus:border-spotify-green"
+                />
+              </div>
+              <div className="space-y-1">
+                <label htmlFor="create-max-bpm" className="text-xs text-spotify-subdued">Max BPM</label>
+                <input
+                  id="create-max-bpm"
+                  type="number"
+                  required
+                  value={createFilters.max_bpm}
+                  onChange={(e) => setCreateFilters({ ...createFilters, max_bpm: e.target.value })}
+                  placeholder="300"
+                  className="w-full px-3 py-2 rounded bg-spotify-elevated text-spotify-text placeholder-spotify-subdued border border-spotify-border focus:outline-none focus:border-spotify-green"
+                />
+              </div>
+            </div>
+            <div className="space-y-2">
+              <div className="space-y-1">
+                <label htmlFor="create-min-energy" className="text-xs text-spotify-subdued">Min Energy</label>
+                <input
+                  id="create-min-energy"
+                  type="number"
+                  step="0.01"
+                  required
+                  min="0"
+                  max="1"
+                  value={createFilters.min_energy}
+                  onChange={(e) => setCreateFilters({ ...createFilters, min_energy: e.target.value })}
+                  placeholder="0"
+                  className="w-full px-3 py-2 rounded bg-spotify-elevated text-spotify-text placeholder-spotify-subdued border border-spotify-border focus:outline-none focus:border-spotify-green"
+                />
+              </div>
+              <div className="space-y-1">
+                <label htmlFor="create-max-energy" className="text-xs text-spotify-subdued">Max Energy</label>
+                <input
+                  id="create-max-energy"
+                  type="number"
+                  step="0.01"
+                  required
+                  min="0"
+                  max="1"
+                  value={createFilters.max_energy}
+                  onChange={(e) => setCreateFilters({ ...createFilters, max_energy: e.target.value })}
+                  placeholder="1"
+                  className="w-full px-3 py-2 rounded bg-spotify-elevated text-spotify-text placeholder-spotify-subdued border border-spotify-border focus:outline-none focus:border-spotify-green"
+                />
+              </div>
+            </div>
+            <div className="space-y-2">
+              <div className="space-y-1">
+                <label htmlFor="create-min-valence" className="text-xs text-spotify-subdued">Min Valence</label>
+                <input
+                  id="create-min-valence"
+                  type="number"
+                  step="0.01"
+                  required
+                  min="0"
+                  max="1"
+                  value={createFilters.min_valence}
+                  onChange={(e) => setCreateFilters({ ...createFilters, min_valence: e.target.value })}
+                  placeholder="0"
+                  className="w-full px-3 py-2 rounded bg-spotify-elevated text-spotify-text placeholder-spotify-subdued border border-spotify-border focus:outline-none focus:border-spotify-green"
+                />
+              </div>
+              <div className="space-y-1">
+                <label htmlFor="create-max-valence" className="text-xs text-spotify-subdued">Max Valence</label>
+                <input
+                  id="create-max-valence"
+                  type="number"
+                  step="0.01"
+                  required
+                  min="0"
+                  max="1"
+                  value={createFilters.max_valence}
+                  onChange={(e) => setCreateFilters({ ...createFilters, max_valence: e.target.value })}
+                  placeholder="1"
+                  className="w-full px-3 py-2 rounded bg-spotify-elevated text-spotify-text placeholder-spotify-subdued border border-spotify-border focus:outline-none focus:border-spotify-green"
+                />
+              </div>
             </div>
           </div>
           <div className="flex justify-end">
