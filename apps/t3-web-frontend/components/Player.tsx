@@ -45,8 +45,17 @@ function PauseIcon({ className }: { className?: string }) {
   );
 }
 
-export function Player({ queue }: { queue: QueueTrack[] }) {
-  const { nowPlaying, setNowPlaying, selectedStation, setPlayingStation } = useStation();
+export function Player({ queue: queueProp }: { queue: QueueTrack[] }) {
+  const { nowPlaying, setNowPlaying, selectedStation, setPlayingStation, playingStation } = useStation();
+
+  const queueRef = useRef(queueProp);
+  useEffect(() => {
+    if (playingStation === selectedStation) {
+      queueRef.current = queueProp;
+    }
+  }, [queueProp, selectedStation, playingStation]);
+
+  const queue = queueRef.current;
   const [started, setStarted] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
   const [coverUrl, setCoverUrl] = useState<string | null>(null);
