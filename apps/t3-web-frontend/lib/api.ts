@@ -1,6 +1,6 @@
 const DEFAULT_BASE_URL =
-  process.env.GO_API_URL ||
   process.env.NEXT_PUBLIC_GO_API_URL ||
+  process.env.GO_API_URL ||
   'http://localhost:8080';
 
 let authToken: string | null = null;

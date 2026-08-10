@@ -20,7 +20,7 @@ const nextConfig = {
   basePath,
   assetPrefix,
   env: {
-    GO_API_URL: process.env.GO_API_URL || 'http://go:8080',
+    NEXT_PUBLIC_GO_API_URL: process.env.NEXT_PUBLIC_GO_API_URL || 'http://localhost:8080',
   },
 };
 
