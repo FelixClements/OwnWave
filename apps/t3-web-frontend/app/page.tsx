@@ -1,8 +1,7 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import Link from 'next/link';
-import { trpc } from '@/lib/trpc/client';
 import { useStation } from '@/lib/station';
 import { getCoverUrl } from '@/lib/api';
 
@@ -54,10 +53,11 @@ export default function Home() {
   const { selectedStation, setSelectedStation, stations, queue, nowPlaying } = useStation();
   const [searchQuery, setSearchQuery] = useState('');
 
-  const { data: search } = trpc.search.useQuery(
-    { q: searchQuery },
-    { enabled: searchQuery.length > 0 }
-  );
+  const filteredStations = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    if (!q) return stations || [];
+    return (stations || []).filter((s) => s.name.toLowerCase().includes(q));
+  }, [stations, searchQuery]);
 
   return (
     <>
@@ -66,79 +66,26 @@ export default function Home() {
           type="text"
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
-          placeholder="Search tracks, albums, artists..."
+          placeholder="Search stations..."
           className="w-full px-4 py-1.5 rounded-full bg-spotify-elevated text-spotify-text placeholder-spotify-subdued text-sm border border-spotify-border focus:outline-none focus:border-spotify-green"
         />
       </div>
 
-      {(stations || []).length === 0 && (
+      {(stations || []).length === 0 && !searchQuery && (
         <p className="text-spotify-subdued">
           No stations yet. <Link href="/stations/manage" className="text-spotify-green hover:underline">Create one</Link> to start listening.
         </p>
       )}
 
-      {searchQuery && (
-        <section className="mb-10">
-          <h2 className="text-2xl font-bold text-spotify-text mb-5">Search Results</h2>
-          {search ? (
-            <div className="space-y-6">
-              {search.tracks?.length > 0 && (
-                <div>
-                  <h3 className="text-sm font-bold text-spotify-subdued uppercase tracking-widest mb-3">Tracks</h3>
-                  <ul className="space-y-1 bg-spotify-card rounded-lg p-4">
-                    {search.tracks.map((track) => (
-                      <li
-                        key={track.id}
-                        className="flex items-center justify-between text-sm text-spotify-text py-1"
-                      >
-                        <span className="truncate pr-4">{track.title}</span>
-                        <span className="text-spotify-subdued truncate">
-                          {track.artist || 'Unknown artist'}
-                        </span>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              )}
-              {search.albums?.length > 0 && (
-                <div>
-                  <h3 className="text-sm font-bold text-spotify-subdued uppercase tracking-widest mb-3">Albums</h3>
-                  <ul className="space-y-1 bg-spotify-card rounded-lg p-4">
-                    {search.albums.map((album) => (
-                      <li key={album.id} className="text-sm text-spotify-text py-1">
-                        {album.title}
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              )}
-              {search.artists?.length > 0 && (
-                <div>
-                  <h3 className="text-sm font-bold text-spotify-subdued uppercase tracking-widest mb-3">Artists</h3>
-                  <ul className="space-y-1 bg-spotify-card rounded-lg p-4">
-                    {search.artists.map((artist) => (
-                      <li key={artist.id} className="text-sm text-spotify-text py-1">
-                        {artist.name}
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              )}
-              {search.tracks?.length === 0 && search.albums?.length === 0 && search.artists?.length === 0 && (
-                <p className="text-spotify-subdued">No results found.</p>
-              )}
-            </div>
-          ) : (
-            <p className="text-spotify-subdued">Searching...</p>
-          )}
-        </section>
+      {searchQuery && filteredStations.length === 0 && (
+        <p className="text-spotify-subdued mb-6">No stations found.</p>
       )}
 
-      {!selectedStation && (stations || []).length > 0 && (
-        <section>
+      {filteredStations.length > 0 && (
+        <section className="mb-10">
           <h2 className="text-2xl font-bold text-spotify-text mb-5">Stations</h2>
           <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-6">
-            {(stations || []).map((station) => (
+            {filteredStations.map((station) => (
               <button
                 key={station.id}
                 onClick={() => setSelectedStation(station.id)}
