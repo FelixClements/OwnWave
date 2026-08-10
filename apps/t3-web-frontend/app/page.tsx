@@ -74,7 +74,7 @@ function Cover({
 }
 
 export default function Home() {
-  const { selectedStation, setSelectedStation, stations, queue, nowPlaying, isPlaying, setIsPlaying, playingStation } = useStation();
+  const { selectedStation, setSelectedStation, stations, queue, nowPlaying, isPlaying, setIsPlaying, setPlayingStation, playingStation } = useStation();
   const [searchQuery, setSearchQuery] = useState('');
 
   const utils = trpc.useContext();
@@ -157,7 +157,14 @@ export default function Home() {
                 <h2 className="text-2xl font-bold text-spotify-text">{station.name}</h2>
                 <button
                   type="button"
-                  onClick={() => setIsPlaying(!active)}
+                  onClick={() => {
+                    if (active) {
+                      setIsPlaying(false);
+                    } else {
+                      setPlayingStation(selectedStation);
+                      setIsPlaying(true);
+                    }
+                  }}
                   className="px-4 py-1.5 rounded-full bg-spotify-green text-black text-sm font-semibold hover:bg-spotify-green-hover focus:outline-none focus:ring-2 focus:ring-spotify-green"
                 >
                   {active ? 'Pause' : 'Play'}
@@ -166,7 +173,7 @@ export default function Home() {
             );
           })()}
           {(() => {
-            const track = nowPlaying || (queue || [])[0];
+            const track = playingStation === selectedStation ? (nowPlaying || (queue || [])[0]) : null;
             if (!track) return null;
             return (
               <div className="bg-spotify-card rounded-lg p-4 mb-6">
@@ -205,7 +212,7 @@ export default function Home() {
             );
           })()}
 
-          {(queue || []).length > 1 && (
+          {playingStation === selectedStation && (queue || []).length > 1 && (
             <>
               <h3 className="text-lg font-bold text-spotify-text mb-3">
                 Up Next

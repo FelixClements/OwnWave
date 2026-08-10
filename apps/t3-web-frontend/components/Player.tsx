@@ -50,8 +50,10 @@ export function Player({ queue: queueProp }: { queue: QueueTrack[] }) {
 
   const queueRef = useRef(queueProp);
   useEffect(() => {
-    queueRef.current = queueProp;
-  }, [queueProp]);
+    if (playingStation === null || playingStation === selectedStation) {
+      queueRef.current = queueProp;
+    }
+  }, [queueProp, selectedStation, playingStation]);
 
   const queue = queueRef.current;
   const [coverUrl, setCoverUrl] = useState<string | null>(null);
@@ -63,15 +65,15 @@ export function Player({ queue: queueProp }: { queue: QueueTrack[] }) {
   const utils = trpc.useContext();
   const recordFeedback = trpc.recordFeedback.useMutation({
     onSuccess: () => {
-      if (selectedStation) {
-        utils.queue.invalidate({ id: selectedStation });
+      if (playingStation) {
+        utils.queue.invalidate({ id: playingStation });
       }
     },
   });
   const removeFeedback = trpc.removeFeedback.useMutation({
     onSuccess: () => {
-      if (selectedStation) {
-        utils.queue.invalidate({ id: selectedStation });
+      if (playingStation) {
+        utils.queue.invalidate({ id: playingStation });
       }
     },
   });
@@ -102,6 +104,7 @@ export function Player({ queue: queueProp }: { queue: QueueTrack[] }) {
   const currentIndexRef = useRef(0);
   const crossfadingRef = useRef(false);
   const loadingRef = useRef(false);
+  const loadedStationRef = useRef<string | null>(null);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -124,16 +127,12 @@ export function Player({ queue: queueProp }: { queue: QueueTrack[] }) {
     if (!isPlaying) {
       audioARef.current?.pause();
       audioBRef.current?.pause();
-      if (playingStation && playingStation !== selectedStation) {
-        setNowPlaying(null);
-        setPlayingStation(null);
-      }
       return;
     }
 
-    if (loadingRef.current || !queue.length) return;
+    if (loadingRef.current || !queue.length || !playingStation) return;
 
-    if (playingStation === selectedStation && nowPlaying) {
+    if (playingStation === loadedStationRef.current && nowPlaying) {
       const audio = activeRef.current === 'A' ? audioARef.current : audioBRef.current;
       if (audio && audio.paused) {
         audio.play().catch(() => {});
@@ -178,7 +177,7 @@ export function Player({ queue: queueProp }: { queue: QueueTrack[] }) {
     currentIndexRef.current = 0;
     activeRef.current = 'A';
     loadAndPlay(0, 'A').finally(() => { loadingRef.current = false; });
-  }, [isPlaying, selectedStation, queue]);
+  }, [isPlaying, playingStation, queue]);
 
   useEffect(() => {
     if (typeof window === 'undefined' || !('mediaSession' in navigator) || !nowPlaying) return;
@@ -238,6 +237,7 @@ export function Player({ queue: queueProp }: { queue: QueueTrack[] }) {
     const { url } = await api.getStreamUrl(track.id, { format: format as any, bitrate });
     audio.src = `${getStreamBaseUrl()}${url}`;
     audio.load();
+    loadedStationRef.current = selectedStation;
     setNowPlaying(track);
     setPlayingStation(selectedStation);
   }
@@ -318,6 +318,7 @@ export function Player({ queue: queueProp }: { queue: QueueTrack[] }) {
     const { url } = await api.getStreamUrl(nextTrack.id, { format: format as any, bitrate });
     nextAudio.src = `${getStreamBaseUrl()}${url}`;
     nextAudio.load();
+    loadedStationRef.current = selectedStation;
     await nextAudio.play();
 
     const crossfade = nextTrack.ideal_crossfade_seconds;
