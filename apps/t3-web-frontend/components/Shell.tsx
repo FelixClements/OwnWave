@@ -5,10 +5,10 @@ import { useState, useEffect } from 'react';
 import { useStation } from '@/lib/station';
 import { Player } from '@/components/Player';
 import { ProfileButton } from '@/components/ProfileButton';
-import { SunIcon, MoonIcon } from '@/components/Icons';
+import { SunIcon, MoonIcon, PlayIcon } from '@/components/Icons';
 
 export function Shell({ children }: { children: React.ReactNode }) {
-  const { selectedStation, setSelectedStation, stations, queue } = useStation();
+  const { selectedStation, setSelectedStation, stations, queue, nowPlaying } = useStation();
   const [isLight, setIsLight] = useState(false);
 
   useEffect(() => {
@@ -61,7 +61,12 @@ export function Shell({ children }: { children: React.ReactNode }) {
                     : 'text-spotify-subdued hover:text-spotify-text'
                 }`}
               >
-                {station.name}
+                <span className="flex items-center gap-2">
+                  {selectedStation === station.id && nowPlaying && (
+                    <PlayIcon className="w-3 h-3 text-spotify-green" />
+                  )}
+                  {station.name}
+                </span>
               </button>
             ))}
           </div>
