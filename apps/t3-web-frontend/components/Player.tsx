@@ -46,7 +46,7 @@ function PauseIcon({ className }: { className?: string }) {
 }
 
 export function Player({ queue }: { queue: QueueTrack[] }) {
-  const { nowPlaying, setNowPlaying, selectedStation } = useStation();
+  const { nowPlaying, setNowPlaying, selectedStation, setPlayingStation } = useStation();
   const [started, setStarted] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
   const [coverUrl, setCoverUrl] = useState<string | null>(null);
@@ -210,6 +210,7 @@ export function Player({ queue }: { queue: QueueTrack[] }) {
     const track = queue[index];
     if (!track) return;
     setNowPlaying(track);
+    setPlayingStation(selectedStation);
     setCoverUrl(getCoverUrl(track.id));
     setCoverError(false);
     if (track.id) {

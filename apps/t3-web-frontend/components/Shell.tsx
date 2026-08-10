@@ -8,7 +8,7 @@ import { ProfileButton } from '@/components/ProfileButton';
 import { SunIcon, MoonIcon, PlayIcon } from '@/components/Icons';
 
 export function Shell({ children }: { children: React.ReactNode }) {
-  const { selectedStation, setSelectedStation, stations, queue, nowPlaying } = useStation();
+  const { selectedStation, setSelectedStation, stations, queue, playingStation } = useStation();
   const [isLight, setIsLight] = useState(false);
 
   useEffect(() => {
@@ -62,7 +62,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
                 }`}
               >
                 <span className="flex items-center gap-2">
-                  {selectedStation === station.id && nowPlaying && (
+                  {playingStation === station.id && (
                     <PlayIcon className="w-3 h-3 text-spotify-green" />
                   )}
                   {station.name}

@@ -12,6 +12,8 @@ interface StationContextValue {
   queue: QueueTrack[];
   nowPlaying: QueueTrack | null;
   setNowPlaying: (track: QueueTrack | null) => void;
+  playingStation: string | null;
+  setPlayingStation: (id: string | null) => void;
 }
 
 const StationContext = createContext<StationContextValue | null>(null);
@@ -23,6 +25,7 @@ export function StationProvider({ children }: { children: React.ReactNode }) {
 
   const [selectedStation, setSelectedState] = useState<string | null>(stationParam);
   const [nowPlaying, setNowPlayingState] = useState<QueueTrack | null>(null);
+  const [playingStation, setPlayingStationState] = useState<string | null>(null);
   const { data: stations } = trpc.stations.useQuery();
   const { data: queue } = trpc.queue.useQuery(
     { id: selectedStation || '' },
@@ -52,6 +55,10 @@ export function StationProvider({ children }: { children: React.ReactNode }) {
     setNowPlayingState(track);
   };
 
+  const setPlayingStation = (id: string | null) => {
+    setPlayingStationState(id);
+  };
+
   const value = useMemo(
     () => ({
       selectedStation,
@@ -60,8 +67,10 @@ export function StationProvider({ children }: { children: React.ReactNode }) {
       queue: queue || [],
       nowPlaying,
       setNowPlaying,
+      playingStation,
+      setPlayingStation,
     }),
-    [selectedStation, stations, queue, nowPlaying]
+    [selectedStation, stations, queue, nowPlaying, playingStation]
   );
 
   return <StationContext.Provider value={value}>{children}</StationContext.Provider>;
