@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { trpc } from '@/lib/trpc/client';
 import { useStation } from '@/lib/station';
@@ -29,6 +29,9 @@ function Cover({
   className?: string;
 }) {
   const [error, setError] = useState(false);
+  useEffect(() => {
+    setError(false);
+  }, [id]);
   return (
     <div className={`${className} overflow-hidden`}>
       {error ? (
