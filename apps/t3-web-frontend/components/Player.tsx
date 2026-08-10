@@ -50,7 +50,7 @@ export function Player({ queue: queueProp }: { queue: QueueTrack[] }) {
 
   const queueRef = useRef(queueProp);
   useEffect(() => {
-    if (playingStation === selectedStation) {
+    if (playingStation === null || playingStation === selectedStation) {
       queueRef.current = queueProp;
     }
   }, [queueProp, selectedStation, playingStation]);
