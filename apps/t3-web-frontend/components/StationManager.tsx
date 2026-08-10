@@ -206,13 +206,15 @@ export function StationManager() {
               <option value="mood">Mood</option>
             </select>
           </div>
-          <button
-            type="submit"
-            disabled={create.isLoading}
-            className="px-4 py-2 rounded bg-spotify-green text-black font-semibold hover:bg-spotify-green-hover transition disabled:opacity-50 w-full sm:w-auto"
-          >
-            Create
-          </button>
+          <div className="flex justify-end">
+            <button
+              type="submit"
+              disabled={create.isLoading}
+              className="px-4 py-2 rounded bg-spotify-green text-black font-semibold hover:bg-spotify-green-hover transition disabled:opacity-50"
+            >
+              Create
+            </button>
+          </div>
         </form>
       )}
 
