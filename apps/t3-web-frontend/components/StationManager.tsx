@@ -298,10 +298,10 @@ export function StationManager() {
                     <option value="mood">Mood</option>
                   </select>
                 </div>
-                <div className="flex gap-2">
+                <div className="flex gap-2 justify-end">
                   <button
                     type="submit"
-                    className="px-3 py-1 rounded bg-spotify-green text-black text-sm font-semibold w-full sm:w-auto"
+                    className="px-3 py-1 rounded bg-spotify-green text-black text-sm font-semibold"
                   >
                     Save
                   </button>
