@@ -212,10 +212,10 @@ export default function Home() {
             );
           })()}
 
-          {playingStation === selectedStation && (queue || []).length > 1 && (
+          {(queue || []).length > 1 && (
             <>
               <h3 className="text-lg font-bold text-spotify-text mb-3">
-                Up Next
+                Queue
               </h3>
               <div className="bg-spotify-card rounded-lg p-4">
                 <ul className="space-y-1">
