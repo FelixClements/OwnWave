@@ -451,6 +451,14 @@ func (db *DB) RecordFeedback(ctx context.Context, trackID, feedback string) erro
 	return err
 }
 
+func (db *DB) DeleteFeedback(ctx context.Context, trackID, feedback string) error {
+	_, err := db.pool.Exec(ctx, `
+		DELETE FROM track_feedback
+		WHERE track_id = $1 AND feedback = $2
+	`, trackID, feedback)
+	return err
+}
+
 func (db *DB) ListHistory(ctx context.Context, limit int) ([]HistoryEntry, error) {
 	if limit <= 0 {
 		limit = 50

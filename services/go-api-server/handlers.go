@@ -147,6 +147,22 @@ func (h *Handler) RecordFeedback(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(204)
 }
 
+func (h *Handler) DeleteFeedback(w http.ResponseWriter, r *http.Request) {
+	trackID := chi.URLParam(r, "id")
+	var req struct {
+		Feedback string `json:"feedback"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Feedback == "" {
+		http.Error(w, "feedback required", 400)
+		return
+	}
+	if err := h.db.DeleteFeedback(r.Context(), trackID, req.Feedback); err != nil {
+		http.Error(w, err.Error(), 500)
+		return
+	}
+	w.WriteHeader(204)
+}
+
 func (h *Handler) ListHistory(w http.ResponseWriter, r *http.Request) {
 	entries, err := h.db.ListHistory(r.Context(), 50)
 	if err != nil {

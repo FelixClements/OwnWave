@@ -51,6 +51,10 @@ export const appRouter = t.router({
     .input(z.object({ id: z.string(), feedback: z.enum(['like', 'skip', 'ban']) }))
     .mutation(async ({ input }) => api.recordFeedback(input.id, input.feedback)),
 
+  removeFeedback: t.procedure
+    .input(z.object({ id: z.string(), feedback: z.enum(['like', 'skip', 'ban']) }))
+    .mutation(async ({ input }) => api.deleteFeedback(input.id, input.feedback)),
+
   history: t.procedure.query(async () => api.listHistory()),
 
   liked: t.procedure.query(async () => api.listFeedback('like')),

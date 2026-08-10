@@ -63,6 +63,13 @@ export function Player({ queue }: { queue: QueueTrack[] }) {
       }
     },
   });
+  const removeFeedback = trpc.removeFeedback.useMutation({
+    onSuccess: () => {
+      if (selectedStation) {
+        utils.queue.invalidate({ id: selectedStation });
+      }
+    },
+  });
 
   const isLiked = useMemo(
     () => queue.find((q) => q.id === nowPlaying?.id)?.liked,
@@ -416,18 +423,19 @@ export function Player({ queue }: { queue: QueueTrack[] }) {
           <div className="flex items-center gap-1 md:gap-2">
             <button
               onClick={() =>
-                !isLiked && recordFeedback.mutate({ id: nowPlaying.id, feedback: 'like' })
+                isLiked
+                  ? removeFeedback.mutate({ id: nowPlaying.id, feedback: 'like' })
+                  : recordFeedback.mutate({ id: nowPlaying.id, feedback: 'like' })
               }
               className={`px-2.5 py-1.5 rounded transition text-xs flex items-center gap-1 ${
                 isLiked
                   ? 'bg-spotify-green text-black'
                   : 'bg-spotify-elevated text-spotify-text hover:bg-spotify-card-hover'
               }`}
-              title="Like"
-              disabled={isLiked}
+              title={isLiked ? 'Remove like' : 'Like'}
             >
               <ThumbUpIcon className="w-3.5 h-3.5" />
-              Like
+              {isLiked ? 'Liked' : 'Like'}
             </button>
             <button
               onClick={skipNext}

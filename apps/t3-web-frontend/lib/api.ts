@@ -215,6 +215,13 @@ export class OwnWaveAPI {
     });
   }
 
+  deleteFeedback(id: string, feedback: 'like' | 'skip' | 'ban') {
+    return this.request(`/tracks/${id}/feedback`, {
+      method: 'DELETE',
+      body: JSON.stringify({ feedback }),
+    });
+  }
+
   listHistory() {
     return this.request<{ history: HistoryEntry[] }>('/history').then((r) => r.history);
   }

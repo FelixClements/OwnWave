@@ -95,6 +95,7 @@ func main() {
 	r.Get("/tracks/{id}/similar", h.GetSimilarTracks)
 	r.Post("/tracks/{id}/played", h.RecordPlay)
 	r.Post("/tracks/{id}/feedback", h.RecordFeedback)
+	r.Delete("/tracks/{id}/feedback", h.DeleteFeedback)
 	r.Get("/history", h.ListHistory)
 	r.Get("/feedback", h.ListFeedback)
 	r.Get("/tracks/{id}/cover", h.GetTrackCover)

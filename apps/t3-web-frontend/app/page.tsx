@@ -211,21 +211,25 @@ export default function Home() {
                   {(queue || []).slice(1).map((track, i) => (
                     <li
                       key={track.id}
-                      className="flex items-center justify-between py-2 px-3 rounded hover:bg-spotify-elevated text-sm"
+                      className="grid grid-cols-[1fr,auto] items-center gap-4 py-2 px-3 rounded hover:bg-spotify-elevated text-sm"
                     >
-                      <span className="text-spotify-text truncate pr-4 flex-1">
-                        <span className="text-spotify-subdued w-6 inline-block">
-                          {i + 1}
+                      <div className="min-w-0">
+                        <span className="text-spotify-text truncate">
+                          <span className="text-spotify-subdued w-6 inline-block">
+                            {i + 1}
+                          </span>
+                          {track.title}
                         </span>
-                        {track.title}
+                        <span className="block text-spotify-subdued truncate text-xs">
+                          {track.artist || 'Unknown artist'}
+                          {track.album ? ` · ${track.album}` : ''}
+                        </span>
+                      </div>
+                      <div className="w-6 flex justify-center shrink-0">
                         {track.liked && (
-                          <span className="ml-2 text-spotify-green" title="Liked">👍</span>
+                          <span className="text-spotify-green" title="Liked">👍</span>
                         )}
-                      </span>
-                      <span className="text-spotify-subdued truncate text-right max-w-[40%]">
-                        {track.artist || 'Unknown artist'}
-                        {track.album ? ` · ${track.album}` : ''}
-                      </span>
+                      </div>
                     </li>
                   ))}
                 </ul>
