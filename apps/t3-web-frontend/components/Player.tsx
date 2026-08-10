@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useMemo } from 'react';
 import { QueueTrack } from '@/server/routers/app';
 import { getCoverUrl, getStreamBaseUrl, api } from '@/lib/api';
 import { useStation } from '@/lib/station';
@@ -19,6 +19,19 @@ function PlayIcon({ className }: { className?: string }) {
   );
 }
 
+function ThumbUpIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      className={className}
+      viewBox="0 0 24 24"
+      fill="currentColor"
+      xmlns="http://www.w3.org/2000/svg"
+    >
+      <path d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3H14zM7 22H4a2 2 0 0 1-2-2v-9a2 2 0 0 1 2-2h3v13z" />
+    </svg>
+  );
+}
+
 function PauseIcon({ className }: { className?: string }) {
   return (
     <svg
@@ -33,7 +46,7 @@ function PauseIcon({ className }: { className?: string }) {
 }
 
 export function Player({ queue }: { queue: QueueTrack[] }) {
-  const { nowPlaying, setNowPlaying } = useStation();
+  const { nowPlaying, setNowPlaying, selectedStation } = useStation();
   const [started, setStarted] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
   const [coverUrl, setCoverUrl] = useState<string | null>(null);
@@ -42,7 +55,19 @@ export function Player({ queue }: { queue: QueueTrack[] }) {
   const [bitrate, setBitrate] = useState('320');
 
   const recordPlay = trpc.recordPlay.useMutation();
-  const recordFeedback = trpc.recordFeedback.useMutation();
+  const utils = trpc.useContext();
+  const recordFeedback = trpc.recordFeedback.useMutation({
+    onSuccess: () => {
+      if (selectedStation) {
+        utils.queue.invalidate({ id: selectedStation });
+      }
+    },
+  });
+
+  const isLiked = useMemo(
+    () => queue.find((q) => q.id === nowPlaying?.id)?.liked,
+    [queue, nowPlaying]
+  );
 
   useEffect(() => {
     const savedFormat = localStorage.getItem('ownwave:format');
@@ -390,10 +415,18 @@ export function Player({ queue }: { queue: QueueTrack[] }) {
         {nowPlaying && (
           <div className="flex items-center gap-1 md:gap-2">
             <button
-              onClick={() => recordFeedback.mutate({ id: nowPlaying.id, feedback: 'like' })}
-              className="px-2.5 py-1.5 rounded bg-spotify-elevated text-spotify-text hover:bg-spotify-card-hover transition text-xs"
+              onClick={() =>
+                !isLiked && recordFeedback.mutate({ id: nowPlaying.id, feedback: 'like' })
+              }
+              className={`px-2.5 py-1.5 rounded transition text-xs flex items-center gap-1 ${
+                isLiked
+                  ? 'bg-spotify-green text-black'
+                  : 'bg-spotify-elevated text-spotify-text hover:bg-spotify-card-hover'
+              }`}
               title="Like"
+              disabled={isLiked}
             >
+              <ThumbUpIcon className="w-3.5 h-3.5" />
               Like
             </button>
             <button

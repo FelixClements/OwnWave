@@ -40,6 +40,7 @@ type TrackWithFeatures struct {
 	IntroStartSeconds     float64 `json:"intro_start_seconds"`
 	OutroEndSeconds       float64 `json:"outro_end_seconds"`
 	Position              int     `json:"position"`
+	Liked                 bool    `json:"liked"`
 }
 
 type Station struct {
@@ -215,7 +216,8 @@ func (db *DB) GetStationQueue(ctx context.Context, stationID string) ([]TrackWit
 		       af.bpm, af.key, af.energy, af.valence, af.loudness,
 		       COALESCE(af.outro_start_seconds, 0), COALESCE(af.ideal_crossfade_seconds, 0),
 		       COALESCE(af.intro_start_seconds, 0), COALESCE(af.outro_end_seconds, 0),
-		       st.position
+		       st.position,
+		       EXISTS (SELECT 1 FROM track_feedback WHERE track_id = t.id AND feedback = 'like') AS liked
 		FROM station_tracks st
 		JOIN tracks t ON st.track_id = t.id
 		JOIN audio_features af ON t.id = af.track_id
@@ -244,7 +246,7 @@ func (db *DB) GetStationQueue(ctx context.Context, stationID string) ([]TrackWit
 			&q.Loudness,
 			&q.OutroStartSeconds, &q.IdealCrossfadeSeconds,
 			&q.IntroStartSeconds, &q.OutroEndSeconds,
-			&q.Position); err != nil {
+			&q.Position, &q.Liked); err != nil {
 			return nil, err
 		}
 		artist := ""

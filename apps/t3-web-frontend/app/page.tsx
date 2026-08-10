@@ -218,6 +218,9 @@ export default function Home() {
                           {i + 1}
                         </span>
                         {track.title}
+                        {track.liked && (
+                          <span className="ml-2 text-spotify-green" title="Liked">👍</span>
+                        )}
                       </span>
                       <span className="text-spotify-subdued truncate text-right max-w-[40%]">
                         {track.artist || 'Unknown artist'}

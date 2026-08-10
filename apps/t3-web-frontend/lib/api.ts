@@ -46,6 +46,7 @@ export type QueueTrack = Track & {
   outro_start_seconds: number;
   ideal_crossfade_seconds: number;
   position: number;
+  liked?: boolean;
 };
 
 export type HealthResponse = { status: string };
