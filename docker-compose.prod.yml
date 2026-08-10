@@ -1,0 +1,43 @@
+services:
+  web:
+    environment:
+      NEXT_PUBLIC_GO_API_URL: ${NEXT_PUBLIC_GO_API_URL:-https://${OWNWAVE_DOMAIN:-localhost}/api}
+      GO_API_URL: ${GO_API_URL:-http://go:8080}
+    ports: []
+
+  go:
+    environment:
+      PYTHON_API_URL: http://python:8000
+    ports: []
+
+  python:
+    ports: []
+
+  db:
+    ports: []
+
+  redis:
+    ports: []
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    cap_add:
+      - NET_ADMIN
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    environment:
+      OWNWAVE_DOMAIN: ${OWNWAVE_DOMAIN:-localhost}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - web
+      - go
+
+volumes:
+  caddy_data:
+  caddy_config:
