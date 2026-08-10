@@ -4,6 +4,43 @@ import { useState, useEffect, useMemo } from 'react';
 import Link from 'next/link';
 import { useStation } from '@/lib/station';
 import { getCoverUrl } from '@/lib/api';
+import { trpc } from '@/lib/trpc/client';
+
+function formatTime(seconds?: number) {
+  if (!seconds || seconds <= 0) return '--:--';
+  const m = Math.floor(seconds / 60);
+  const s = Math.floor(seconds % 60);
+  return `${m}:${s.toString().padStart(2, '0')}`;
+}
+
+function LikeButton({
+  liked,
+  onClick,
+}: {
+  liked: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className={`w-8 h-8 flex items-center justify-center rounded-full transition ${
+        liked
+          ? 'text-spotify-green'
+          : 'text-spotify-subdued hover:text-spotify-text'
+      }`}
+      title={liked ? 'Remove like' : 'Like'}
+    >
+      <svg
+        className="w-4 h-4"
+        viewBox="0 0 24 24"
+        fill="currentColor"
+        xmlns="http://www.w3.org/2000/svg"
+      >
+        <path d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3H14zM7 22H4a2 2 0 0 1-2-2v-9a2 2 0 0 1 2-2h3v13z" />
+      </svg>
+    </button>
+  );
+}
 
 function PlayIcon({ className }: { className?: string }) {
   return (
@@ -52,6 +89,18 @@ function Cover({
 export default function Home() {
   const { selectedStation, setSelectedStation, stations, queue, nowPlaying } = useStation();
   const [searchQuery, setSearchQuery] = useState('');
+
+  const utils = trpc.useContext();
+  const recordFeedback = trpc.recordFeedback.useMutation({
+    onSuccess: () => {
+      if (selectedStation) utils.queue.invalidate({ id: selectedStation });
+    },
+  });
+  const removeFeedback = trpc.removeFeedback.useMutation({
+    onSuccess: () => {
+      if (selectedStation) utils.queue.invalidate({ id: selectedStation });
+    },
+  });
 
   const filteredStations = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
@@ -164,7 +213,7 @@ export default function Home() {
                   {(queue || []).slice(1).map((track, i) => (
                     <li
                       key={track.id}
-                      className="grid grid-cols-[1fr,auto] items-center gap-4 py-2 px-3 rounded hover:bg-spotify-elevated text-sm"
+                      className="grid grid-cols-[1fr,auto,auto] items-center gap-4 py-2 px-3 rounded hover:bg-spotify-elevated text-sm"
                     >
                       <div className="min-w-0">
                         <span className="text-spotify-text truncate">
@@ -178,10 +227,18 @@ export default function Home() {
                           {track.album ? ` · ${track.album}` : ''}
                         </span>
                       </div>
-                      <div className="w-6 flex justify-center shrink-0">
-                        {track.liked && (
-                          <span className="text-spotify-green" title="Liked">👍</span>
-                        )}
+                      <div className="w-8 flex justify-center shrink-0">
+                        <LikeButton
+                          liked={!!track.liked}
+                          onClick={() =>
+                            track.liked
+                              ? removeFeedback.mutate({ id: track.id, feedback: 'like' })
+                              : recordFeedback.mutate({ id: track.id, feedback: 'like' })
+                          }
+                        />
+                      </div>
+                      <div className="w-12 text-right text-spotify-subdued text-xs shrink-0">
+                        {formatTime(track.duration_seconds)}
                       </div>
                     </li>
                   ))}
