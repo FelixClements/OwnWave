@@ -39,9 +39,6 @@ export function Shell({ children }: { children: React.ReactNode }) {
             <Link href="/stations/manage" className="hover:text-spotify-text transition">
               Manage Stations
             </Link>
-            <Link href="/admin" className="hover:text-spotify-text transition">
-              Admin
-            </Link>
           </nav>
 
           <div className="flex-1 overflow-y-auto">
