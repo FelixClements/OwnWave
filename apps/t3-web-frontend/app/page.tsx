@@ -2,11 +2,11 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
+import { useSearchParams, useRouter } from 'next/navigation';
 import { trpc } from '@/lib/trpc/client';
 import { Player } from '@/components/Player';
 import { ProfileButton } from '@/components/ProfileButton';
 import { getCoverUrl } from '@/lib/api';
-import { Station } from '@/server/routers/app';
 
 function Cover({
   id,
@@ -32,19 +32,6 @@ function Cover({
       className={className}
       onError={() => setError(true)}
     />
-  );
-}
-
-function PlayIcon({ className }: { className?: string }) {
-  return (
-    <svg
-      className={className}
-      viewBox="0 0 24 24"
-      fill="currentColor"
-      xmlns="http://www.w3.org/2000/svg"
-    >
-      <path d="M8 5v14l11-7L8 5z" />
-    </svg>
   );
 }
 
@@ -82,8 +69,12 @@ function MoonIcon({ className }: { className?: string }) {
 }
 
 export default function Home() {
+  const searchParams = useSearchParams();
+  const router = useRouter();
+  const stationParam = searchParams?.get('station') ?? null;
+
   const [isLight, setIsLight] = useState(false);
-  const [selectedStation, setSelectedStation] = useState<string | null>(null);
+  const [selectedStation, setSelectedStation] = useState<string | null>(stationParam);
   const [searchQuery, setSearchQuery] = useState('');
 
   const { data: search } = trpc.search.useQuery(
@@ -102,10 +93,18 @@ export default function Home() {
   }, [isLight]);
 
   useEffect(() => {
-    if (!selectedStation || !(stations || []).some((s) => s.id === selectedStation)) {
-      setSelectedStation((stations || [])[0]?.id ?? null);
+    const id = searchParams?.get('station') ?? null;
+    if (id !== selectedStation) {
+      setSelectedStation(id);
     }
-  }, [stations, selectedStation]);
+  }, [searchParams, selectedStation]);
+
+  const handleSelectStation = (id: string) => {
+    setSelectedStation(id);
+    const url = new URL(window.location.href);
+    url.searchParams.set('station', id);
+    router.replace(url.toString());
+  }
 
   return (
     <div className="h-screen flex flex-col bg-spotify-bg text-spotify-text overflow-hidden">
@@ -129,6 +128,9 @@ export default function Home() {
               History
             </Link>
             <Link href="/stations" className="hover:text-spotify-text transition">
+              Stations
+            </Link>
+            <Link href="/stations/manage" className="hover:text-spotify-text transition">
               Manage Stations
             </Link>
             <Link href="/admin" className="hover:text-spotify-text transition">
@@ -143,7 +145,7 @@ export default function Home() {
             {(stations || []).map((station) => (
               <button
                 key={station.id}
-                onClick={() => setSelectedStation(station.id)}
+                onClick={() => handleSelectStation(station.id)}
                 className={`block w-full text-left py-2 px-3 rounded-md text-sm transition ${
                   selectedStation === station.id
                     ? 'bg-spotify-elevated text-spotify-text'
@@ -183,8 +185,20 @@ export default function Home() {
           <div className="flex-1 overflow-y-auto p-4 md:p-8 bg-gradient-to-b from-spotify-elevated to-spotify-bg">
             {(stations || []).length === 0 && (
               <p className="text-spotify-subdued">
-                No stations yet. Scan your library and build a station first.
+                No stations yet. <Link href="/stations/manage" className="text-spotify-green hover:underline">Create one</Link> to start listening.
               </p>
+            )}
+
+            {!selectedStation && (stations || []).length > 0 && (
+              <div className="text-center py-20">
+                <h2 className="text-2xl font-bold text-spotify-text mb-4">Select a station to start listening</h2>
+                <Link
+                  href="/stations"
+                  className="inline-block px-6 py-3 rounded-full bg-spotify-green text-black font-semibold hover:bg-spotify-green-hover transition"
+                >
+                  Browse stations
+                </Link>
+              </div>
             )}
 
             {searchQuery && (
@@ -244,31 +258,7 @@ export default function Home() {
               </section>
             )}
 
-            <section className="mb-10">
-              <h2 className="text-2xl font-bold text-spotify-text mb-5">Stations</h2>
-              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-6">
-                {(stations || []).map((station) => (
-                  <button
-                    key={station.id}
-                    onClick={() => setSelectedStation(station.id)}
-                    className="group relative bg-spotify-card rounded-lg p-4 hover:bg-spotify-card-hover transition text-left"
-                  >
-                    <div className="w-full aspect-square rounded-md bg-gradient-to-br from-spotify-green to-spotify-green-hover shadow-lg mb-4 flex items-center justify-center text-black font-bold text-2xl">
-                      {station.name.charAt(0).toUpperCase()}
-                    </div>
-                    <h3 className="font-bold text-spotify-text truncate">
-                      {station.name}
-                    </h3>
-                    <p className="text-sm text-spotify-subdued">AI Radio</p>
-                    <div className="absolute bottom-16 right-4 w-12 h-12 rounded-full bg-spotify-green shadow-lg opacity-0 group-hover:opacity-100 transition transform translate-y-2 group-hover:translate-y-0 flex items-center justify-center text-black">
-                      <PlayIcon className="w-5 h-5 ml-0.5" />
-                    </div>
-                  </button>
-                ))}
-              </div>
-            </section>
-
-            {(queue || []).length > 0 && (
+            {selectedStation && (queue || []).length > 0 && (
               <section>
                 <h2 className="text-2xl font-bold text-spotify-text mb-5">
                   Now Playing

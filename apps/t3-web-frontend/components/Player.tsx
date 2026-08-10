@@ -222,7 +222,8 @@ export function Player({ queue }: { queue: QueueTrack[] }) {
     if (crossfadingRef.current) return;
     const track = queue[currentIndexRef.current];
     if (!track) return;
-    if (audio.currentTime >= track.outro_start_seconds - 0.1) {
+    const outro = track.outro_start_seconds;
+    if (outro > 0 && audio.currentTime >= outro - 0.1) {
       const next = currentIndexRef.current + 1;
       if (next < queue.length) {
         beginCrossfade(target, next);
@@ -335,7 +336,7 @@ export function Player({ queue }: { queue: QueueTrack[] }) {
   }
 
   return (
-    <div className="w-full h-full flex items-center justify-between gap-2 md:gap-4 px-2 md:px-4">
+    <div className="w-full h-full relative flex items-center justify-between gap-2 md:gap-4 px-2 md:px-4">
       <audio ref={audioARef} crossOrigin="anonymous" className="hidden" />
       <audio ref={audioBRef} crossOrigin="anonymous" className="hidden" />
 
@@ -366,42 +367,42 @@ export function Player({ queue }: { queue: QueueTrack[] }) {
         <div className="w-5/12 md:w-5/12" />
       )}
 
-      <div className="flex flex-col items-center w-1/3 md:w-1/3 gap-1">
+      <div className="absolute left-1/2 -translate-x-1/2 flex items-center gap-2 md:gap-4">
         <button
           onClick={togglePlay}
-          className="w-8 h-8 md:w-10 md:h-10 rounded-full bg-spotify-text text-spotify-bg flex items-center justify-center hover:scale-105 transition disabled:opacity-50"
+          className="w-10 h-10 md:w-12 md:h-12 rounded-full bg-spotify-text text-spotify-bg flex items-center justify-center hover:scale-105 transition disabled:opacity-50"
           disabled={started && !currentTrack}
           aria-label={started ? 'Play/Pause' : 'Start radio'}
         >
           {started ? (
             isPlaying ? (
-              <PauseIcon className="w-4 h-4 md:w-5 md:h-5" />
+              <PauseIcon className="w-5 h-5 md:w-6 md:h-6" />
             ) : (
-              <PlayIcon className="w-4 h-4 md:w-5 md:h-5 ml-0.5" />
+              <PlayIcon className="w-5 h-5 md:w-6 md:h-6 ml-0.5" />
             )
           ) : (
-            <PlayIcon className="w-4 h-4 md:w-5 md:h-5 ml-0.5" />
+            <PlayIcon className="w-5 h-5 md:w-6 md:h-6 ml-0.5" />
           )}
         </button>
         {currentTrack && (
-          <div className="flex gap-1 md:gap-2">
+          <div className="flex items-center gap-1 md:gap-2">
             <button
               onClick={() => recordFeedback.mutate({ id: currentTrack.id, feedback: 'like' })}
-              className="text-[10px] md:text-xs px-1.5 py-0.5 rounded bg-spotify-elevated text-spotify-text hover:bg-spotify-card-hover transition"
+              className="px-2.5 py-1.5 rounded bg-spotify-elevated text-spotify-text hover:bg-spotify-card-hover transition text-xs"
               title="Like"
             >
               Like
             </button>
             <button
               onClick={skipNext}
-              className="text-[10px] md:text-xs px-1.5 py-0.5 rounded bg-spotify-elevated text-spotify-text hover:bg-spotify-card-hover transition"
+              className="px-2.5 py-1.5 rounded bg-spotify-elevated text-spotify-text hover:bg-spotify-card-hover transition text-xs"
               title="Skip"
             >
               Skip
             </button>
             <button
               onClick={() => recordFeedback.mutate({ id: currentTrack.id, feedback: 'ban' })}
-              className="text-[10px] md:text-xs px-1.5 py-0.5 rounded bg-red-600 text-white hover:bg-red-700 transition"
+              className="px-2.5 py-1.5 rounded bg-red-600 text-white hover:bg-red-700 transition text-xs"
               title="Ban"
             >
               Ban
