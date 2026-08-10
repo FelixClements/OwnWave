@@ -5,6 +5,7 @@ import { PWA } from '@/components/PWA';
 import { AuthProvider } from '@/lib/auth';
 import { RequireAuth } from '@/components/RequireAuth';
 import { RootShell } from '@/components/RootShell';
+import { ThemeProvider } from '@/lib/theme';
 
 export const metadata: Metadata = {
   title: 'OwnWave',
@@ -30,14 +31,16 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body className="min-h-screen overflow-hidden antialiased">
-        <Provider>
-          <AuthProvider>
-            <RequireAuth>
-              <RootShell>{children}</RootShell>
-            </RequireAuth>
-          </AuthProvider>
-        </Provider>
-        <PWA />
+        <ThemeProvider>
+          <Provider>
+            <AuthProvider>
+              <RequireAuth>
+                <RootShell>{children}</RootShell>
+              </RequireAuth>
+            </AuthProvider>
+          </Provider>
+          <PWA />
+        </ThemeProvider>
       </body>
     </html>
   );

@@ -18,47 +18,42 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
 
-  const loginMutation = trpc.login.useMutation({
-    onSuccess: (data) => {
-      setAuthToken(data.token);
-      setUser(data.user);
-      localStorage.setItem('ownwave:token', data.token);
-    },
-  });
-  const registerMutation = trpc.register.useMutation({
-    onSuccess: (data) => {
-      setAuthToken(data.token);
-      setUser(data.user);
-      localStorage.setItem('ownwave:token', data.token);
-    },
-  });
+  const loginMutation = trpc.login.useMutation();
+  const registerMutation = trpc.register.useMutation();
 
   useEffect(() => {
     const token = localStorage.getItem('ownwave:token');
     if (token) {
       setAuthToken(token);
-      api
-        .me()
-        .then((u) => {
-          if (u) {
-            setUser(u);
-          } else {
-            setAuthToken(null);
-            localStorage.removeItem('ownwave:token');
-          }
-        })
-        .finally(() => setLoading(false));
+      loadUser().finally(() => setLoading(false));
     } else {
       setLoading(false);
     }
   }, []);
 
+  const loadUser = async () => {
+    const me = await api.me();
+    if (me) {
+      setUser(me);
+    } else {
+      setAuthToken(null);
+      localStorage.removeItem('ownwave:token');
+      setUser(null);
+    }
+  };
+
   const login = async (username: string, password: string) => {
-    await loginMutation.mutateAsync({ username, password });
+    const data = await loginMutation.mutateAsync({ username, password });
+    setAuthToken(data.token);
+    localStorage.setItem('ownwave:token', data.token);
+    await loadUser();
   };
 
   const register = async (username: string, password: string) => {
-    await registerMutation.mutateAsync({ username, password });
+    const data = await registerMutation.mutateAsync({ username, password });
+    setAuthToken(data.token);
+    localStorage.setItem('ownwave:token', data.token);
+    await loadUser();
   };
 
   const logout = async () => {

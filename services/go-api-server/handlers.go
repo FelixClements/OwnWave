@@ -746,10 +746,86 @@ func (h *Handler) Me(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
-		"id":       user.ID,
-		"username": user.Username,
-		"is_admin": user.IsAdmin,
+		"id":        user.ID,
+		"username":  user.Username,
+		"email":     user.Email,
+		"full_name": user.FullName,
+		"is_admin":  user.IsAdmin,
 	})
+}
+
+func (h *Handler) UpdateProfile(w http.ResponseWriter, r *http.Request) {
+	user, ok := h.authUser(r)
+	if !ok {
+		http.Error(w, "unauthorized", 401)
+		return
+	}
+
+	var req struct {
+		Email    *string `json:"email"`
+		FullName *string `json:"full_name"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, err.Error(), 400)
+		return
+	}
+
+	email := ""
+	if req.Email != nil {
+		email = *req.Email
+	}
+	fullName := ""
+	if req.FullName != nil {
+		fullName = *req.FullName
+	}
+
+	if err := h.db.UpdateUserProfile(r.Context(), user.ID, email, fullName); err != nil {
+		http.Error(w, err.Error(), 500)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+}
+
+func (h *Handler) ChangePassword(w http.ResponseWriter, r *http.Request) {
+	user, ok := h.authUser(r)
+	if !ok {
+		http.Error(w, "unauthorized", 401)
+		return
+	}
+
+	var req struct {
+		CurrentPassword string `json:"current_password"`
+		NewPassword     string `json:"new_password"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, err.Error(), 400)
+		return
+	}
+	if req.CurrentPassword == "" || req.NewPassword == "" {
+		http.Error(w, "current and new password required", 400)
+		return
+	}
+
+	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(req.CurrentPassword)); err != nil {
+		http.Error(w, "invalid current password", 401)
+		return
+	}
+
+	hash, err := bcrypt.GenerateFromPassword([]byte(req.NewPassword), bcrypt.DefaultCost)
+	if err != nil {
+		http.Error(w, err.Error(), 500)
+		return
+	}
+
+	if err := h.db.UpdateUserPassword(r.Context(), user.ID, string(hash)); err != nil {
+		http.Error(w, err.Error(), 500)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 }
 
 func (h *Handler) authUser(r *http.Request) (User, bool) {

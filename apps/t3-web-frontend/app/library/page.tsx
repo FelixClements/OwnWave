@@ -31,11 +31,13 @@ const PAGE_LIMIT = 20;
 export default function LibraryPage() {
   const [tab, setTab] = useState<Tab>('tracks');
   const [q, setQ] = useState('');
+  const [search, setSearch] = useState('');
   const sentinelRef = useRef<HTMLDivElement | null>(null);
 
   const tracksQuery = trpc.tracks.useInfiniteQuery(
     { limit: PAGE_LIMIT, q },
     {
+      enabled: tab === 'tracks',
       getNextPageParam: (lastPage, allPages) =>
         lastPage.length < PAGE_LIMIT ? undefined : allPages.length * PAGE_LIMIT,
     }
@@ -131,8 +133,16 @@ export default function LibraryPage() {
       )}
 
       {tab === 'albums' && (
-        <section className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-6">
-          {albums?.map((album) => (
+        <div className="space-y-4">
+          <input
+            type="text"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search albums..."
+            className="w-full px-4 py-2 rounded-full bg-spotify-elevated text-spotify-text placeholder-spotify-subdued border border-spotify-border focus:outline-none focus:border-spotify-green"
+          />
+          <section className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-6">
+            {albums?.filter((album) => album.title.toLowerCase().includes(search.toLowerCase())).map((album) => (
             <div key={album.id} className="bg-spotify-card rounded-lg p-4 text-left">
               <div className="w-full aspect-square rounded-md bg-spotify-elevated mb-4 flex items-center justify-center text-2xl font-bold text-spotify-subdued">
                 {album.title.charAt(0).toUpperCase()}
@@ -140,12 +150,21 @@ export default function LibraryPage() {
               <h3 className="font-bold text-spotify-text truncate">{album.title}</h3>
             </div>
           ))}
-        </section>
+          </section>
+        </div>
       )}
 
       {tab === 'artists' && (
-        <section className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-6">
-          {artists?.map((artist) => (
+        <div className="space-y-4">
+          <input
+            type="text"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search artists..."
+            className="w-full px-4 py-2 rounded-full bg-spotify-elevated text-spotify-text placeholder-spotify-subdued border border-spotify-border focus:outline-none focus:border-spotify-green"
+          />
+          <section className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-6">
+            {artists?.filter((artist) => artist.name.toLowerCase().includes(search.toLowerCase())).map((artist) => (
             <div key={artist.id} className="bg-spotify-card rounded-lg p-4 text-left">
               <div className="w-full aspect-square rounded-md bg-spotify-elevated mb-4 flex items-center justify-center text-2xl font-bold text-spotify-subdued">
                 {artist.name.charAt(0).toUpperCase()}
@@ -153,7 +172,8 @@ export default function LibraryPage() {
               <h3 className="font-bold text-spotify-text truncate">{artist.name}</h3>
             </div>
           ))}
-        </section>
+          </section>
+        </div>
       )}
     </div>
   );

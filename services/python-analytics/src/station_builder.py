@@ -24,7 +24,7 @@ def build_station(
         raise ValueError("No analyzed tracks found")
 
     if seed_filter:
-        tracks = _apply_filter(tracks, seed_filter)
+        tracks = _apply_filter(conn, tracks, seed_filter)
 
     tracks = _exclude_banned(tracks)
 
@@ -44,11 +44,13 @@ def _exclude_banned(tracks: List[dict]) -> List[dict]:
     return [t for t in tracks if "ban" not in (t.get("feedback") or [])]
 
 
-def _apply_filter(tracks: List[dict], filters: dict) -> List[dict]:
+def _apply_filter(conn: psycopg.Connection, tracks: List[dict], filters: dict) -> List[dict]:
     seed_type = filters.get("type")
     if seed_type == "track":
         target = UUID(filters["track_id"])
-        return [t for t in tracks if t["id"] == target] or [t for t in tracks]
+        similar = get_similar_tracks(conn, target, limit=200)
+        similar_ids = {target} | {(tid if isinstance(tid, UUID) else UUID(tid)) for tid, _ in similar}
+        return [t for t in tracks if t["id"] in similar_ids]
     if seed_type == "artist":
         artist_id = UUID(filters["artist_id"])
         return [t for t in tracks if t["artist_id"] == artist_id]

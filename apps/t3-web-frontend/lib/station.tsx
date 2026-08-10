@@ -48,7 +48,7 @@ export function StationProvider({ children }: { children: React.ReactNode }) {
     } else {
       url.searchParams.delete('station');
     }
-    router.replace(url.toString());
+    router.replace(url.pathname + url.search);
   };
 
   const setNowPlaying = (track: QueueTrack | null) => {

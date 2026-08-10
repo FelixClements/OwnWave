@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { trpc } from '@/lib/trpc/client';
+import { useStation } from '@/lib/station';
 import { getCoverUrl } from '@/lib/api';
 
 function Cover({ id, title, className }: { id: string; title: string; className?: string }) {
@@ -25,8 +26,21 @@ export default function SimilarPage() {
     { id: trackId ?? '' },
     { enabled: !!trackId }
   );
+  const utils = trpc.useContext();
+  const { setSelectedStation } = useStation();
+  const create = trpc.createStation.useMutation({
+    onSuccess: (data) => {
+      setStationName('');
+      utils.stations.invalidate();
+      setSelectedStation(data.station_id);
+    },
+    onError: (err) => {
+      console.error('create station failed', err);
+    },
+  });
 
   const [selected, setSelected] = useState(trackId ?? '');
+  const [stationName, setStationName] = useState('');
 
   const handleSelect = (id: string) => {
     setSelected(id);
@@ -35,12 +49,23 @@ export default function SimilarPage() {
     window.history.replaceState({}, '', url.toString());
   };
 
+  const handleCreateStation = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selected || !stationName.trim()) return;
+    create.mutate({
+      name: stationName.trim(),
+      seed_type: 'track',
+      track_id: selected,
+    });
+  };
+
   return (
     <div className="space-y-6">
       <h2 className="text-2xl font-bold">Similar Tracks</h2>
 
-      <div className="max-w-xl">
-        <label className="block text-sm font-semibold mb-2">Seed track</label>
+      <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-4">
+        <div className="max-w-xl flex-1">
+          <label className="block text-sm font-semibold mb-2">Seed track</label>
         <select
           value={selected}
           onChange={(e) => handleSelect(e.target.value)}
@@ -53,6 +78,37 @@ export default function SimilarPage() {
             </option>
           ))}
         </select>
+      </div>
+
+      {selected && (
+        <form onSubmit={handleCreateStation} className="w-full md:max-w-sm space-y-3 p-4 rounded bg-spotify-card">
+          <h3 className="text-lg font-bold">Create Station</h3>
+          <div className="space-y-2">
+            <label htmlFor="station-name" className="text-sm font-semibold">
+              Station Name
+            </label>
+            <input
+              id="station-name"
+              type="text"
+              value={stationName}
+              onChange={(e) => setStationName(e.target.value)}
+              placeholder="e.g. Like this track"
+              className="w-full px-3 py-2 rounded bg-spotify-elevated text-spotify-text placeholder-spotify-subdued border border-spotify-border focus:outline-none focus:border-spotify-green"
+              required
+            />
+          </div>
+          {create.error && (
+            <p className="text-sm text-red-500">{create.error.message}</p>
+          )}
+          <button
+            type="submit"
+            disabled={create.isLoading || !stationName.trim()}
+            className="w-full px-4 py-2 rounded bg-spotify-green text-black font-semibold hover:bg-spotify-green-hover transition disabled:opacity-50"
+          >
+            {create.isLoading ? 'Creating...' : 'Create Station'}
+          </button>
+        </form>
+      )}
       </div>
 
       {similar && similar.length > 0 && (

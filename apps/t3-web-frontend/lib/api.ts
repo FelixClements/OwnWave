@@ -71,6 +71,8 @@ export type SearchResults = {
 export type User = {
   id: string;
   username: string;
+  email?: string;
+  full_name?: string;
   is_admin: boolean;
 };
 
@@ -292,8 +294,24 @@ export class OwnWaveAPI {
     });
   }
 
+  updateProfile(email: string, fullName: string) {
+    return this.request<{ status: string }>('/me/profile', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, full_name: fullName }),
+    });
+  }
+
   logout() {
     return this.request<void>('/logout', { method: 'POST' });
+  }
+
+  changePassword(currentPassword: string, newPassword: string) {
+    return this.request<{ status: string }>('/me/password', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ current_password: currentPassword, new_password: newPassword }),
+    });
   }
 
   adminHealth() {

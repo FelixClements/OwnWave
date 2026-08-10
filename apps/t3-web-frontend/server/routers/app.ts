@@ -43,7 +43,15 @@ export const appRouter = t.router({
 
   me: t.procedure.query(async () => api.me()),
 
+  updateProfile: t.procedure
+    .input(z.object({ email: z.string(), fullName: z.string() }))
+    .mutation(async ({ input }) => api.updateProfile(input.email, input.fullName)),
+
   logout: t.procedure.mutation(async () => api.logout()),
+
+  changePassword: t.procedure
+    .input(z.object({ currentPassword: z.string(), newPassword: z.string() }))
+    .mutation(async ({ input }) => api.changePassword(input.currentPassword, input.newPassword)),
 
   similar: t.procedure
     .input(z.object({ id: z.string(), limit: z.number().optional() }))

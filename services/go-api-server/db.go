@@ -282,10 +282,12 @@ func (db *DB) MarkTrackPlayed(ctx context.Context, stationID, trackID string) er
 }
 
 type User struct {
-	ID           string `json:"id"`
-	Username     string `json:"username"`
-	IsAdmin      bool   `json:"is_admin"`
-	PasswordHash string `json:"-"`
+	ID           string  `json:"id"`
+	Username     string  `json:"username"`
+	Email        *string `json:"email"`
+	FullName     *string `json:"full_name"`
+	IsAdmin      bool    `json:"is_admin"`
+	PasswordHash string  `json:"-"`
 }
 
 func (db *DB) CreateUser(ctx context.Context, username, passwordHash string) (string, error) {
@@ -305,10 +307,10 @@ func (db *DB) CreateUser(ctx context.Context, username, passwordHash string) (st
 func (db *DB) GetUserByUsername(ctx context.Context, username string) (User, error) {
 	var u User
 	err := db.pool.QueryRow(ctx, `
-		SELECT id::text, username, is_admin, password_hash
+		SELECT id::text, username, email, full_name, is_admin, password_hash
 		FROM users
 		WHERE username = $1
-	`, username).Scan(&u.ID, &u.Username, &u.IsAdmin, &u.PasswordHash)
+	`, username).Scan(&u.ID, &u.Username, &u.Email, &u.FullName, &u.IsAdmin, &u.PasswordHash)
 	return u, err
 }
 
@@ -328,11 +330,11 @@ func (db *DB) CreateSession(ctx context.Context, userID, tokenHash string, expir
 func (db *DB) GetUserByTokenHash(ctx context.Context, tokenHash string) (User, error) {
 	var u User
 	err := db.pool.QueryRow(ctx, `
-		SELECT u.id::text, u.username, u.is_admin, u.password_hash
+		SELECT u.id::text, u.username, u.email, u.full_name, u.is_admin, u.password_hash
 		FROM users u
 		JOIN sessions s ON u.id = s.user_id
 		WHERE s.token_hash = $1 AND s.expires_at > NOW()
-	`, tokenHash).Scan(&u.ID, &u.Username, &u.IsAdmin, &u.PasswordHash)
+	`, tokenHash).Scan(&u.ID, &u.Username, &u.Email, &u.FullName, &u.IsAdmin, &u.PasswordHash)
 	return u, err
 }
 
@@ -341,6 +343,25 @@ func (db *DB) DeleteSession(ctx context.Context, tokenHash string) error {
 		DELETE FROM sessions
 		WHERE token_hash = $1
 	`, tokenHash)
+	return err
+}
+
+func (db *DB) UpdateUserPassword(ctx context.Context, userID, passwordHash string) error {
+	_, err := db.pool.Exec(ctx, `
+		UPDATE users
+		SET password_hash = $2
+		WHERE id = $1
+	`, userID, passwordHash)
+	return err
+}
+
+func (db *DB) UpdateUserProfile(ctx context.Context, userID, email, fullName string) error {
+	_, err := db.pool.Exec(ctx, `
+		UPDATE users
+		SET email = NULLIF($2, ''),
+		    full_name = NULLIF($3, '')
+		WHERE id = $1
+	`, userID, email, fullName)
 	return err
 }
 

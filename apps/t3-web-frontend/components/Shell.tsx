@@ -1,19 +1,15 @@
 'use client';
 
 import Link from 'next/link';
-import { useState, useEffect } from 'react';
 import { useStation } from '@/lib/station';
+import { useTheme } from '@/lib/theme';
 import { Player } from '@/components/Player';
 import { ProfileButton } from '@/components/ProfileButton';
 import { SunIcon, MoonIcon, PlayIcon } from '@/components/Icons';
 
 export function Shell({ children }: { children: React.ReactNode }) {
   const { selectedStation, setSelectedStation, stations, queue, playingStation } = useStation();
-  const [isLight, setIsLight] = useState(false);
-
-  useEffect(() => {
-    document.documentElement.classList.toggle('light', isLight);
-  }, [isLight]);
+  const { isLight, toggleTheme } = useTheme();
 
   return (
     <div className="h-screen flex flex-col bg-spotify-bg text-spotify-text overflow-hidden">
@@ -67,11 +63,10 @@ export function Shell({ children }: { children: React.ReactNode }) {
         </aside>
 
         <main className="flex-1 flex flex-col min-w-0 overflow-hidden">
-          <header className="h-16 flex items-center justify-between px-4 md:px-8 bg-spotify-bg/95 sticky top-0 z-10 gap-4">
-            <h2 className="text-sm font-bold text-spotify-text shrink-0">OwnWave</h2>
+          <header className="h-16 flex items-center justify-end px-4 md:px-8 bg-spotify-bg/95 sticky top-0 z-10 gap-4">
             <div className="flex items-center gap-3 shrink-0">
               <button
-                onClick={() => setIsLight(!isLight)}
+                onClick={toggleTheme}
                 className="w-9 h-9 rounded-full bg-spotify-elevated text-spotify-text flex items-center justify-center hover:bg-spotify-card-hover transition"
                 aria-label="Toggle theme"
               >
