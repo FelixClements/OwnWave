@@ -42,19 +42,6 @@ function LikeButton({
   );
 }
 
-function PlayIcon({ className }: { className?: string }) {
-  return (
-    <svg
-      className={className}
-      viewBox="0 0 24 24"
-      fill="currentColor"
-      xmlns="http://www.w3.org/2000/svg"
-    >
-      <path d="M8 5v14l11-7L8 5z" />
-    </svg>
-  );
-}
-
 function Cover({
   id,
   title,
@@ -141,43 +128,43 @@ export default function Home() {
           <h2 className="text-2xl font-bold text-spotify-text mb-5">Stations</h2>
           <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-6">
             {filteredStations.map((station) => (
-              <div
+              <button
                 key={station.id}
                 onClick={() => setSelectedStation(station.id)}
-                className="group relative bg-spotify-card rounded-lg p-4 hover:bg-spotify-card-hover transition text-left cursor-pointer"
+                className={`group relative bg-spotify-card rounded-lg p-4 hover:bg-spotify-card-hover transition text-left w-full ${
+                  selectedStation === station.id ? 'ring-2 ring-spotify-green' : ''
+                }`}
               >
                 <div className="w-full aspect-square rounded-md bg-gradient-to-br from-spotify-green to-spotify-green-hover shadow-lg mb-4 flex items-center justify-center text-black font-bold text-2xl">
                   {station.name.charAt(0).toUpperCase()}
                 </div>
                 <h3 className="font-bold text-spotify-text truncate">{station.name}</h3>
                 <p className="text-sm text-spotify-subdued">AI Radio</p>
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setSelectedStation(station.id);
-                    setIsPlaying(true);
-                  }}
-                  className="absolute bottom-16 right-4 w-12 h-12 rounded-full bg-spotify-green shadow-lg flex items-center justify-center text-black hover:scale-105 focus:outline-none focus:ring-2 focus:ring-spotify-green"
-                  aria-label={`Play ${station.name}`}
-                >
-                  <PlayIcon className="w-5 h-5 ml-0.5" />
-                </button>
-              </div>
+              </button>
             ))}
           </div>
         </section>
       )}
 
-      {selectedStation && ((queue || []).length > 0 || nowPlaying) && (
+      {selectedStation && (
         <section>
-          <h2 className="text-2xl font-bold text-spotify-text mb-5">
-            {isPlaying ? 'Now Playing' : 'Station'}
-            {(() => {
-              const station = stations.find((s) => s.id === selectedStation);
-              return station ? <span className="text-spotify-subdued text-base font-normal ml-2">from {station.name}</span> : null;
-            })()}
-          </h2>
+          {(() => {
+            const station = stations.find((s) => s.id === selectedStation);
+            if (!station) return null;
+            const active = isPlaying && playingStation === selectedStation;
+            return (
+              <div className="flex items-center gap-4 mb-5">
+                <h2 className="text-2xl font-bold text-spotify-text">{station.name}</h2>
+                <button
+                  type="button"
+                  onClick={() => setIsPlaying(!active)}
+                  className="px-4 py-1.5 rounded-full bg-spotify-green text-black text-sm font-semibold hover:bg-spotify-green-hover focus:outline-none focus:ring-2 focus:ring-spotify-green"
+                >
+                  {active ? 'Pause' : 'Play'}
+                </button>
+              </div>
+            );
+          })()}
           {(() => {
             const track = nowPlaying || (queue || [])[0];
             if (!track) return null;

@@ -5,10 +5,10 @@ import { useStation } from '@/lib/station';
 import { useTheme } from '@/lib/theme';
 import { Player } from '@/components/Player';
 import { ProfileButton } from '@/components/ProfileButton';
-import { SunIcon, MoonIcon, PlayIcon, PauseIcon } from '@/components/Icons';
+import { SunIcon, MoonIcon, PlayIcon } from '@/components/Icons';
 
 export function Shell({ children }: { children: React.ReactNode }) {
-  const { selectedStation, setSelectedStation, stations, queue, playingStation, isPlaying, setIsPlaying } = useStation();
+  const { selectedStation, setSelectedStation, stations, queue, playingStation, isPlaying } = useStation();
   const { isLight, toggleTheme } = useTheme();
 
   return (
@@ -41,39 +41,23 @@ export function Shell({ children }: { children: React.ReactNode }) {
             <h3 className="text-xs uppercase tracking-widest text-spotify-subdued mb-3">
               Stations
             </h3>
-            {(stations || []).map((station) => (
-              <div
-                key={station.id}
-                onClick={() => setSelectedStation(station.id)}
-                className={`flex items-center gap-2 w-full text-left py-2 px-3 rounded-md text-sm transition cursor-pointer ${
-                  selectedStation === station.id
-                    ? 'bg-spotify-elevated text-spotify-text'
-                    : 'text-spotify-subdued hover:text-spotify-text'
-                }`}
-              >
-                <span className="flex-1 truncate">{station.name}</span>
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    if (isPlaying && playingStation === station.id) {
-                      setIsPlaying(false);
-                    } else {
-                      setSelectedStation(station.id);
-                      setIsPlaying(true);
-                    }
-                  }}
-                  className="p-1 rounded hover:bg-spotify-elevated focus:outline-none focus:ring-1 focus:ring-spotify-green"
-                  aria-label={isPlaying && playingStation === station.id ? `Pause ${station.name}` : `Play ${station.name}`}
+            {(stations || []).map((station) => {
+              const active = isPlaying && playingStation === station.id;
+              return (
+                <div
+                  key={station.id}
+                  onClick={() => setSelectedStation(station.id)}
+                  className={`flex items-center gap-2 w-full text-left py-2 px-3 rounded-md text-sm transition cursor-pointer ${
+                    selectedStation === station.id
+                      ? 'bg-spotify-elevated text-spotify-text'
+                      : 'text-spotify-subdued hover:text-spotify-text'
+                  }`}
                 >
-                  {isPlaying && playingStation === station.id ? (
-                    <PauseIcon className="w-3 h-3 text-spotify-green" />
-                  ) : (
-                    <PlayIcon className="w-3 h-3 text-spotify-subdued" />
-                  )}
-                </button>
-              </div>
-            ))}
+                  <span className="flex-1 truncate">{station.name}</span>
+                  {active && <PlayIcon className="w-3 h-3 text-spotify-green" aria-hidden="true" />}
+                </div>
+              );
+            })}
           </div>
         </aside>
 

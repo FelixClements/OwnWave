@@ -46,7 +46,7 @@ function PauseIcon({ className }: { className?: string }) {
 }
 
 export function Player({ queue: queueProp }: { queue: QueueTrack[] }) {
-  const { nowPlaying, setNowPlaying, selectedStation, setPlayingStation, playingStation, isPlaying, setIsPlaying } = useStation();
+  const { nowPlaying, setNowPlaying, selectedStation, setPlayingStation, playingStation, isPlaying, setIsPlaying, stations } = useStation();
 
   const queueRef = useRef(queueProp);
   useEffect(() => {
@@ -403,6 +403,15 @@ export function Player({ queue: queueProp }: { queue: QueueTrack[] }) {
             <div className="text-[10px] md:text-xs text-spotify-subdued truncate">
               {nowPlaying.artist || 'Unknown artist'}
             </div>
+            {(() => {
+              const stationId = playingStation || selectedStation;
+              const station = stations.find((s) => s.id === stationId);
+              return station ? (
+                <div className="text-[10px] md:text-xs text-spotify-green truncate">
+                  {station.name}
+                </div>
+              ) : null;
+            })()}
           </div>
         </div>
       ) : (
