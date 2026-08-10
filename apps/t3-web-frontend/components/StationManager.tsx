@@ -151,6 +151,7 @@ export function StationManager() {
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
             <input
               type="number"
+              required
               value={createFilters.min_bpm}
               onChange={(e) => setCreateFilters({ ...createFilters, min_bpm: e.target.value })}
               placeholder="Min BPM"
@@ -158,6 +159,7 @@ export function StationManager() {
             />
             <input
               type="number"
+              required
               value={createFilters.max_bpm}
               onChange={(e) => setCreateFilters({ ...createFilters, max_bpm: e.target.value })}
               placeholder="Max BPM"
@@ -166,6 +168,7 @@ export function StationManager() {
             <input
               type="number"
               step="0.01"
+              required
               min="0"
               max="1"
               value={createFilters.min_energy}
@@ -176,6 +179,7 @@ export function StationManager() {
             <input
               type="number"
               step="0.01"
+              required
               min="0"
               max="1"
               value={createFilters.max_energy}
@@ -186,6 +190,7 @@ export function StationManager() {
             <input
               type="number"
               step="0.01"
+              required
               min="0"
               max="1"
               value={createFilters.min_valence}
@@ -196,6 +201,7 @@ export function StationManager() {
             <input
               type="number"
               step="0.01"
+              required
               min="0"
               max="1"
               value={createFilters.max_valence}
@@ -204,6 +210,7 @@ export function StationManager() {
               className="px-3 py-2 rounded bg-spotify-elevated text-spotify-text placeholder-spotify-subdued border border-spotify-border focus:outline-none focus:border-spotify-green"
             />
             <select
+              required
               value={createFilters.seed_type}
               onChange={(e) => setCreateFilters({ ...createFilters, seed_type: e.target.value })}
               className="px-3 py-2 rounded bg-spotify-elevated text-spotify-text border border-spotify-border focus:outline-none focus:border-spotify-green"
