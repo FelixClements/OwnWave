@@ -31,7 +31,11 @@ def build_station(
     if len(tracks) < 2:
         raise ValueError("Not enough tracks match the seed")
 
-    sequence = _smart_queue(conn, tracks, length)
+    seed_track_id = None
+    if seed_filter and seed_filter.get("type") == "track":
+        seed_track_id = UUID(seed_filter["track_id"])
+
+    sequence = _smart_queue(conn, tracks, length, seed_id=seed_track_id)
     track_ids = [t["id"] for t in sequence]
 
     station_id = create_station(conn, name, seed_features=seed_filter)
@@ -94,11 +98,16 @@ def _smart_queue(
     tracks: List[dict],
     length: int,
     novelty: float = 0.05,
+    seed_id: Optional[UUID] = None,
 ) -> List[dict]:
     """Greedy k-NN walk that occasionally jumps for novelty."""
-    # Start from a liked track if possible, then random from the seed pool
-    liked = [t for t in tracks if "like" in (t.get("feedback") or [])]
-    current = random.choice(liked) if liked else random.choice(tracks)
+    # Start from the seed track if provided and in the pool, otherwise a liked/random track
+    current = None
+    if seed_id is not None:
+        current = next((t for t in tracks if t["id"] == seed_id), None)
+    if current is None:
+        liked = [t for t in tracks if "like" in (t.get("feedback") or [])]
+        current = random.choice(liked) if liked else random.choice(tracks)
     queue = [current]
     remaining = [t for t in tracks if t["id"] != current["id"]]
 
