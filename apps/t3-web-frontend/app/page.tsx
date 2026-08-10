@@ -35,6 +35,19 @@ function Cover({
   );
 }
 
+function PlayIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      className={className}
+      viewBox="0 0 24 24"
+      fill="currentColor"
+      xmlns="http://www.w3.org/2000/svg"
+    >
+      <path d="M8 5v14l11-7L8 5z" />
+    </svg>
+  );
+}
+
 function SunIcon({ className }: { className?: string }) {
   return (
     <svg
@@ -190,15 +203,27 @@ export default function Home() {
             )}
 
             {!selectedStation && (stations || []).length > 0 && (
-              <div className="text-center py-20">
-                <h2 className="text-2xl font-bold text-spotify-text mb-4">Select a station to start listening</h2>
-                <Link
-                  href="/stations"
-                  className="inline-block px-6 py-3 rounded-full bg-spotify-green text-black font-semibold hover:bg-spotify-green-hover transition"
-                >
-                  Browse stations
-                </Link>
-              </div>
+              <section>
+                <h2 className="text-2xl font-bold text-spotify-text mb-5">Stations</h2>
+                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-6">
+                  {(stations || []).map((station) => (
+                    <button
+                      key={station.id}
+                      onClick={() => handleSelectStation(station.id)}
+                      className="group relative bg-spotify-card rounded-lg p-4 hover:bg-spotify-card-hover transition text-left"
+                    >
+                      <div className="w-full aspect-square rounded-md bg-gradient-to-br from-spotify-green to-spotify-green-hover shadow-lg mb-4 flex items-center justify-center text-black font-bold text-2xl">
+                        {station.name.charAt(0).toUpperCase()}
+                      </div>
+                      <h3 className="font-bold text-spotify-text truncate">{station.name}</h3>
+                      <p className="text-sm text-spotify-subdued">AI Radio</p>
+                      <div className="absolute bottom-16 right-4 w-12 h-12 rounded-full bg-spotify-green shadow-lg opacity-0 group-hover:opacity-100 transition transform translate-y-2 group-hover:translate-y-0 flex items-center justify-center text-black">
+                        <PlayIcon className="w-5 h-5 ml-0.5" />
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              </section>
             )}
 
             {searchQuery && (
