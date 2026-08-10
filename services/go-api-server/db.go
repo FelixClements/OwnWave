@@ -235,6 +235,7 @@ func (db *DB) GetStationQueue(ctx context.Context, stationID string) ([]TrackWit
 	defer rows.Close()
 
 	var queue []TrackWithFeatures
+	seen := make(map[string]bool)
 	for rows.Next() {
 		var q TrackWithFeatures
 		if err := rows.Scan(&q.ID, &q.Title, &q.Artist, &q.Album, &q.Path,
@@ -246,6 +247,15 @@ func (db *DB) GetStationQueue(ctx context.Context, stationID string) ([]TrackWit
 			&q.Position); err != nil {
 			return nil, err
 		}
+		artist := ""
+		if q.Artist != nil {
+			artist = *q.Artist
+		}
+		key := strings.ToLower(strings.TrimSpace(q.Title) + "|" + strings.TrimSpace(artist))
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
 		queue = append(queue, q)
 	}
 	return queue, rows.Err()
