@@ -38,75 +38,71 @@ export default function LoginPage() {
   };
 
   return (
-    <div className="min-h-screen flex bg-black text-spotify-text">
-      <div className="hidden md:flex flex-1 bg-black" />
+    <div className="min-h-screen flex flex-col md:flex-row bg-black text-spotify-text">
+      <div className="w-full md:w-3/4 min-h-[50vh] md:min-h-screen bg-white flex items-center justify-center text-black p-8">
+        <h1 className="text-7xl md:text-8xl font-extrabold tracking-tight">OwnWave</h1>
+      </div>
 
-      <div className="flex-1 flex flex-col md:flex-row min-h-screen">
-        <div className="flex-1 bg-white flex items-center justify-center text-black p-8">
-          <h1 className="text-6xl font-extrabold tracking-tight">OwnWave</h1>
-        </div>
+      <div className="w-full md:w-1/4 min-h-[50vh] md:min-h-screen bg-black flex flex-col justify-center items-center p-4 md:p-6">
+        <div className="w-full max-w-sm">
+          <h2 className="text-2xl font-bold mb-6 text-center md:text-left">
+            {mode === 'login' ? 'Sign in' : 'Create account'}
+          </h2>
 
-        <div className="flex-1 bg-black flex flex-col justify-center items-center p-4 md:p-8">
-          <div className="w-full max-w-md">
-            <h2 className="text-2xl font-bold mb-6 text-center">
-              {mode === 'login' ? 'Sign in' : 'Create account'}
-            </h2>
+          <div className="flex rounded bg-spotify-elevated p-1 mb-6">
+            <button
+              type="button"
+              onClick={() => setMode('login')}
+              className={`flex-1 py-1.5 text-sm font-semibold rounded transition ${
+                mode === 'login' ? 'bg-spotify-card text-spotify-text' : 'text-spotify-subdued'
+              }`}
+            >
+              Login
+            </button>
+            <button
+              type="button"
+              onClick={() => setMode('register')}
+              className={`flex-1 py-1.5 text-sm font-semibold rounded transition ${
+                mode === 'register' ? 'bg-spotify-card text-spotify-text' : 'text-spotify-subdued'
+              }`}
+            >
+              Register
+            </button>
+          </div>
 
-            <div className="flex rounded bg-spotify-elevated p-1 mb-6">
-              <button
-                type="button"
-                onClick={() => setMode('login')}
-                className={`flex-1 py-1.5 text-sm font-semibold rounded transition ${
-                  mode === 'login' ? 'bg-spotify-card text-spotify-text' : 'text-spotify-subdued'
-                }`}
-              >
-                Login
-              </button>
-              <button
-                type="button"
-                onClick={() => setMode('register')}
-                className={`flex-1 py-1.5 text-sm font-semibold rounded transition ${
-                  mode === 'register' ? 'bg-spotify-card text-spotify-text' : 'text-spotify-subdued'
-                }`}
-              >
-                Register
-              </button>
-            </div>
+          <form onSubmit={handleSubmit} className="space-y-4">
+            <input
+              type="text"
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
+              placeholder="Username"
+              className="w-full px-4 py-2 rounded bg-spotify-elevated text-spotify-text placeholder-spotify-subdued border border-spotify-border focus:outline-none focus:border-spotify-green"
+              required
+            />
+            <input
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              placeholder="Password"
+              className="w-full px-4 py-2 rounded bg-spotify-elevated text-spotify-text placeholder-spotify-subdued border border-spotify-border focus:outline-none focus:border-spotify-green"
+              required
+            />
 
-            <form onSubmit={handleSubmit} className="space-y-4">
-              <input
-                type="text"
-                value={username}
-                onChange={(e) => setUsername(e.target.value)}
-                placeholder="Username"
-                className="w-full px-4 py-2 rounded bg-spotify-elevated text-spotify-text placeholder-spotify-subdued border border-spotify-border focus:outline-none focus:border-spotify-green"
-                required
-              />
-              <input
-                type="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                placeholder="Password"
-                className="w-full px-4 py-2 rounded bg-spotify-elevated text-spotify-text placeholder-spotify-subdued border border-spotify-border focus:outline-none focus:border-spotify-green"
-                required
-              />
+            {error && <p className="text-red-500 text-sm">{error}</p>}
 
-              {error && <p className="text-red-500 text-sm">{error}</p>}
+            <button
+              type="submit"
+              disabled={loading}
+              className="w-full px-4 py-2 rounded bg-spotify-green text-black font-semibold hover:bg-spotify-green-hover transition disabled:opacity-50"
+            >
+              {loading ? 'Please wait...' : mode === 'login' ? 'Sign in' : 'Create account'}
+            </button>
+          </form>
 
-              <button
-                type="submit"
-                disabled={loading}
-                className="w-full px-4 py-2 rounded bg-spotify-green text-black font-semibold hover:bg-spotify-green-hover transition disabled:opacity-50"
-              >
-                {loading ? 'Please wait...' : mode === 'login' ? 'Sign in' : 'Create account'}
-              </button>
-            </form>
-
-            <div className="mt-6 text-center text-sm text-spotify-subdued">
-              <Link href="/" className="hover:text-spotify-text transition">
-                ← Back to home
-              </Link>
-            </div>
+          <div className="mt-6 text-center text-sm text-spotify-subdued">
+            <Link href="/" className="hover:text-spotify-text transition">
+              ← Back to home
+            </Link>
           </div>
         </div>
       </div>
