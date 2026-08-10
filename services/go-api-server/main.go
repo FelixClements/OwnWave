@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"time"
@@ -27,13 +28,14 @@ func waitForDB(ctx context.Context, dsn string) (*pgxpool.Pool, error) {
 		} else {
 			lastErr = err
 		}
-		log.Printf("waiting for db... (%d/30)", i+1)
+		slog.Info("waiting for db", "attempt", i+1, "max", 30)
 		time.Sleep(2 * time.Second)
 	}
 	return nil, lastErr
 }
 
 func main() {
+	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo})))
 	_ = godotenv.Load()
 
 	dsn := os.Getenv("DATABASE_URL")
@@ -72,6 +74,7 @@ func main() {
 
 	r := chi.NewRouter()
 	r.Use(middleware.Logger)
+	r.Use(prometheusMiddleware)
 	r.Use(cors.New(cors.Options{
 		AllowedOrigins: []string{"*"},
 		AllowedMethods: []string{"GET", "POST", "OPTIONS"},
@@ -110,9 +113,11 @@ func main() {
 	r.Get("/admin/stations", h.AdminStations)
 	r.Post("/admin/rebuild-vectors", h.AdminRebuildVectors)
 	r.Post("/admin/rebuild-clusters", h.AdminRebuildClusters)
+	r.Mount("/metrics", metricsHandler())
 
-	log.Println("go-api listening on :8080")
+	slog.Info("go-api listening", "port", "8080")
 	if err := http.ListenAndServe(":8080", r); err != nil {
+		slog.Error("server failed", "error", err)
 		log.Fatal(err)
 	}
 }
