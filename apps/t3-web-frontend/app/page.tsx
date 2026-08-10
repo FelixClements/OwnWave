@@ -82,7 +82,7 @@ export default function Home() {
           <h2 className="text-2xl font-bold text-spotify-text mb-5">Search Results</h2>
           {search ? (
             <div className="space-y-6">
-              {search.tracks.length > 0 && (
+              {search.tracks?.length > 0 && (
                 <div>
                   <h3 className="text-sm font-bold text-spotify-subdued uppercase tracking-widest mb-3">Tracks</h3>
                   <ul className="space-y-1 bg-spotify-card rounded-lg p-4">
@@ -100,7 +100,7 @@ export default function Home() {
                   </ul>
                 </div>
               )}
-              {search.albums.length > 0 && (
+              {search.albums?.length > 0 && (
                 <div>
                   <h3 className="text-sm font-bold text-spotify-subdued uppercase tracking-widest mb-3">Albums</h3>
                   <ul className="space-y-1 bg-spotify-card rounded-lg p-4">
@@ -112,7 +112,7 @@ export default function Home() {
                   </ul>
                 </div>
               )}
-              {search.artists.length > 0 && (
+              {search.artists?.length > 0 && (
                 <div>
                   <h3 className="text-sm font-bold text-spotify-subdued uppercase tracking-widest mb-3">Artists</h3>
                   <ul className="space-y-1 bg-spotify-card rounded-lg p-4">
@@ -124,7 +124,7 @@ export default function Home() {
                   </ul>
                 </div>
               )}
-              {search.tracks.length === 0 && search.albums.length === 0 && search.artists.length === 0 && (
+              {search.tracks?.length === 0 && search.albums?.length === 0 && search.artists?.length === 0 && (
                 <p className="text-spotify-subdued">No results found.</p>
               )}
             </div>
