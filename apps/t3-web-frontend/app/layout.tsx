@@ -18,8 +18,6 @@ export const metadata: Metadata = {
 export const viewport: Viewport = {
   width: 'device-width',
   initialScale: 1,
-  maximumScale: 1,
-  userScalable: false,
   themeColor: '#1db954',
 };
 
@@ -30,7 +28,7 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en">
-      <body className="h-full overflow-hidden antialiased">
+      <body className="min-h-screen overflow-y-auto antialiased">
         <Provider>
           <AuthProvider>
             <RequireAuth>{children}</RequireAuth>

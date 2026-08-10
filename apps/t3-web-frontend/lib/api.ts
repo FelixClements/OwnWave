@@ -268,8 +268,13 @@ export class OwnWaveAPI {
     });
   }
 
-  me() {
-    return this.request<User>('/me');
+  me(): Promise<User | null> {
+    return this.request<User>('/me').catch((err) => {
+      if (err instanceof Error && err.message.includes('401')) {
+        return null;
+      }
+      throw err;
+    });
   }
 
   logout() {

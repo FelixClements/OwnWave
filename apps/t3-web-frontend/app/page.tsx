@@ -6,7 +6,7 @@ import { trpc } from '@/lib/trpc/client';
 import { Player } from '@/components/Player';
 import { ProfileButton } from '@/components/ProfileButton';
 import { getCoverUrl } from '@/lib/api';
-import { Station, QueueTrack } from '@/server/routers/app';
+import { Station } from '@/server/routers/app';
 
 function Cover({
   id,
@@ -34,88 +34,6 @@ function Cover({
     />
   );
 }
-
-const DEMO_STATIONS: Station[] = [
-  { id: 'demo-station-1', name: 'Focus Flow' },
-  { id: 'demo-station-2', name: 'High Energy' },
-  { id: 'demo-station-3', name: 'Late Night Jazz' },
-  { id: 'demo-station-4', name: 'Indie Mix' },
-  { id: 'demo-station-5', name: 'Classical Mornings' },
-  { id: 'demo-station-6', name: 'Electronic Dreams' },
-];
-
-const DEMO_QUEUE: QueueTrack[] = [
-  {
-    id: 'demo-track-1',
-    title: 'Midnight City',
-    artist: 'M83',
-    album: 'Hurry Up, We\'re Dreaming',
-    path: '/music/demo1.flac',
-    bpm: 120,
-    key: 'A min',
-    energy: 0.8,
-    valence: 0.6,
-    outro_start_seconds: 240,
-    ideal_crossfade_seconds: 8,
-    position: 1,
-  },
-  {
-    id: 'demo-track-2',
-    title: 'Starboy',
-    artist: 'The Weeknd',
-    album: 'Starboy',
-    path: '/music/demo2.flac',
-    bpm: 124,
-    key: 'D maj',
-    energy: 0.7,
-    valence: 0.5,
-    outro_start_seconds: 200,
-    ideal_crossfade_seconds: 6,
-    position: 2,
-  },
-  {
-    id: 'demo-track-3',
-    title: 'Electric Feel',
-    artist: 'MGMT',
-    album: 'Oracular Spectacular',
-    path: '/music/demo3.flac',
-    bpm: 95,
-    key: 'F maj',
-    energy: 0.6,
-    valence: 0.7,
-    outro_start_seconds: 220,
-    ideal_crossfade_seconds: 7,
-    position: 3,
-  },
-  {
-    id: 'demo-track-4',
-    title: 'Get Lucky',
-    artist: 'Daft Punk',
-    album: 'Random Access Memories',
-    path: '/music/demo4.flac',
-    bpm: 116,
-    key: 'F# min',
-    energy: 0.75,
-    valence: 0.8,
-    outro_start_seconds: 210,
-    ideal_crossfade_seconds: 5,
-    position: 4,
-  },
-  {
-    id: 'demo-track-5',
-    title: 'Nightcall',
-    artist: 'Kavinsky',
-    album: 'OutRun',
-    path: '/music/demo5.flac',
-    bpm: 110,
-    key: 'C min',
-    energy: 0.65,
-    valence: 0.4,
-    outro_start_seconds: 230,
-    ideal_crossfade_seconds: 8,
-    position: 5,
-  },
-];
 
 function PlayIcon({ className }: { className?: string }) {
   return (
@@ -165,7 +83,6 @@ function MoonIcon({ className }: { className?: string }) {
 
 export default function Home() {
   const [isLight, setIsLight] = useState(false);
-  const [demo, setDemo] = useState(true);
   const [selectedStation, setSelectedStation] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
 
@@ -177,21 +94,18 @@ export default function Home() {
   const { data: stations } = trpc.stations.useQuery();
   const { data: queue } = trpc.queue.useQuery(
     { id: selectedStation || '' },
-    { enabled: !!selectedStation && !demo, refetchInterval: 5000 }
+    { enabled: !!selectedStation, refetchInterval: 5000 }
   );
-
-  const displayStations = demo ? DEMO_STATIONS : (stations || []);
-  const displayQueue = demo ? DEMO_QUEUE : (queue || []);
 
   useEffect(() => {
     document.documentElement.classList.toggle('light', isLight);
   }, [isLight]);
 
   useEffect(() => {
-    if (!selectedStation || !displayStations.some((s) => s.id === selectedStation)) {
-      setSelectedStation(displayStations[0]?.id ?? null);
+    if (!selectedStation || !(stations || []).some((s) => s.id === selectedStation)) {
+      setSelectedStation((stations || [])[0]?.id ?? null);
     }
-  }, [displayStations, selectedStation]);
+  }, [stations, selectedStation]);
 
   return (
     <div className="h-screen flex flex-col bg-spotify-bg text-spotify-text overflow-hidden">
@@ -226,7 +140,7 @@ export default function Home() {
             <h3 className="text-xs uppercase tracking-widest text-spotify-subdued mb-3">
               Stations
             </h3>
-            {displayStations.map((station) => (
+            {(stations || []).map((station) => (
               <button
                 key={station.id}
                 onClick={() => setSelectedStation(station.id)}
@@ -256,12 +170,6 @@ export default function Home() {
             </div>
             <div className="flex items-center gap-3 shrink-0">
               <button
-                onClick={() => setDemo(!demo)}
-                className="text-xs font-semibold px-3 py-1.5 rounded-full bg-spotify-elevated text-spotify-text hover:bg-spotify-card-hover transition"
-              >
-                {demo ? 'Demo data: on' : 'Demo data: off'}
-              </button>
-              <button
                 onClick={() => setIsLight(!isLight)}
                 className="w-9 h-9 rounded-full bg-spotify-elevated text-spotify-text flex items-center justify-center hover:bg-spotify-card-hover transition"
                 aria-label="Toggle theme"
@@ -273,7 +181,7 @@ export default function Home() {
           </header>
 
           <div className="flex-1 overflow-y-auto p-4 md:p-8 bg-gradient-to-b from-spotify-elevated to-spotify-bg">
-            {displayStations.length === 0 && (
+            {(stations || []).length === 0 && (
               <p className="text-spotify-subdued">
                 No stations yet. Scan your library and build a station first.
               </p>
@@ -339,7 +247,7 @@ export default function Home() {
             <section className="mb-10">
               <h2 className="text-2xl font-bold text-spotify-text mb-5">Stations</h2>
               <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-6">
-                {displayStations.map((station) => (
+                {(stations || []).map((station) => (
                   <button
                     key={station.id}
                     onClick={() => setSelectedStation(station.id)}
@@ -360,7 +268,7 @@ export default function Home() {
               </div>
             </section>
 
-            {displayQueue.length > 0 && (
+            {(queue || []).length > 0 && (
               <section>
                 <h2 className="text-2xl font-bold text-spotify-text mb-5">
                   Now Playing
@@ -368,45 +276,45 @@ export default function Home() {
                 <div className="bg-spotify-card rounded-lg p-4 mb-6">
                   <div className="flex items-center gap-4 mb-4">
                     <Cover
-                      id={displayQueue[0].id}
-                      title={displayQueue[0].title}
+                      id={(queue || [])[0].id}
+                      title={(queue || [])[0].title}
                       className="w-16 h-16 rounded shadow object-cover bg-spotify-green flex items-center justify-center text-black text-xl font-bold"
                     />
                     <div className="min-w-0">
                       <div className="text-lg font-bold text-spotify-text truncate">
-                        {displayQueue[0].title}
+                        {(queue || [])[0].title}
                       </div>
                       <div className="text-sm text-spotify-subdued truncate">
-                        {displayQueue[0].artist || 'Unknown artist'}
+                        {(queue || [])[0].artist || 'Unknown artist'}
                       </div>
-                      {displayQueue[0].album && (
+                      {(queue || [])[0].album && (
                         <div className="text-xs text-spotify-subdued truncate">
-                          {displayQueue[0].album}
+                          {(queue || [])[0].album}
                         </div>
                       )}
                     </div>
                   </div>
                   <div className="flex flex-wrap gap-3 text-xs text-spotify-subdued">
-                    {displayQueue[0].bpm && (
-                      <span>{displayQueue[0].bpm.toFixed(0)} BPM</span>
+                    {(queue || [])[0].bpm && (
+                      <span>{(queue || [])[0].bpm.toFixed(0)} BPM</span>
                     )}
-                    {displayQueue[0].key && (
-                      <span>{displayQueue[0].key}</span>
+                    {(queue || [])[0].key && (
+                      <span>{(queue || [])[0].key}</span>
                     )}
-                    {displayQueue[0].energy !== undefined && (
-                      <span>Energy {displayQueue[0].energy.toFixed(2)}</span>
+                    {(queue || [])[0].energy !== undefined && (
+                      <span>Energy {(queue || [])[0].energy.toFixed(2)}</span>
                     )}
                   </div>
                 </div>
 
-                {displayQueue.length > 1 && (
+                {(queue || []).length > 1 && (
                   <>
                     <h3 className="text-lg font-bold text-spotify-text mb-3">
                       Up Next
                     </h3>
                     <div className="bg-spotify-card rounded-lg p-4">
                       <ul className="space-y-1">
-                        {displayQueue.slice(1).map((track, i) => (
+                        {(queue || []).slice(1).map((track, i) => (
                           <li
                             key={track.id}
                             className="flex items-center justify-between py-2 px-3 rounded hover:bg-spotify-elevated text-sm"
@@ -434,8 +342,8 @@ export default function Home() {
       </div>
 
       <div className="h-24 bg-spotify-black border-t border-spotify-border px-4 flex items-center">
-        {displayQueue.length > 0 ? (
-          <Player queue={displayQueue} />
+        {(queue || []).length > 0 ? (
+          <Player queue={(queue || [])} />
         ) : (
           <div className="w-full text-center text-spotify-subdued text-sm">
             Select a station to start listening
