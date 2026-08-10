@@ -2,7 +2,6 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import Link from 'next/link';
 import { useAuth } from '@/lib/auth';
 
 export default function LoginPage() {
@@ -99,11 +98,6 @@ export default function LoginPage() {
             </button>
           </form>
 
-          <div className="mt-6 text-center text-sm text-spotify-subdued">
-            <Link href="/" className="hover:text-spotify-text transition">
-              ← Back to home
-            </Link>
-          </div>
         </div>
       </div>
     </div>
