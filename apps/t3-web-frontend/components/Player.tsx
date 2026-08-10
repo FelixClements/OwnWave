@@ -38,7 +38,7 @@ export function Player({ queue }: { queue: QueueTrack[] }) {
   const [coverUrl, setCoverUrl] = useState<string | null>(null);
   const [coverError, setCoverError] = useState(false);
   const [format, setFormat] = useState('flac');
-  const [bitrate, setBitrate] = useState('192');
+  const [bitrate, setBitrate] = useState('320');
 
   const recordPlay = trpc.recordPlay.useMutation();
   const recordFeedback = trpc.recordFeedback.useMutation();
