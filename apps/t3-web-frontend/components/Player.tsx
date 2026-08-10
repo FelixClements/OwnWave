@@ -2,16 +2,8 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { QueueTrack } from '@/server/routers/app';
-import { getCoverUrl } from '@/lib/api';
+import { getCoverUrl, getStreamBaseUrl, api } from '@/lib/api';
 import { trpc } from '@/lib/trpc/client';
-
-const GO_API = process.env.NEXT_PUBLIC_GO_API_URL || 'http://localhost:8080';
-
-async function getStreamUrl(id: string, format = 'mp3') {
-  const res = await fetch(`${GO_API}/tracks/${id}/stream-url?format=${format}`);
-  const data = await res.json();
-  return `${GO_API}${data.url}`;
-}
 
 function PlayIcon({ className }: { className?: string }) {
   return (
@@ -45,9 +37,23 @@ export function Player({ queue }: { queue: QueueTrack[] }) {
   const [currentTrack, setCurrentTrack] = useState<QueueTrack | null>(null);
   const [coverUrl, setCoverUrl] = useState<string | null>(null);
   const [coverError, setCoverError] = useState(false);
+  const [format, setFormat] = useState('mp3');
+  const [bitrate, setBitrate] = useState('192');
 
   const recordPlay = trpc.recordPlay.useMutation();
   const recordFeedback = trpc.recordFeedback.useMutation();
+
+  useEffect(() => {
+    const savedFormat = localStorage.getItem('ownwave:format');
+    const savedBitrate = localStorage.getItem('ownwave:bitrate');
+    if (savedFormat) setFormat(savedFormat);
+    if (savedBitrate) setBitrate(savedBitrate);
+  }, []);
+
+  useEffect(() => {
+    localStorage.setItem('ownwave:format', format);
+    localStorage.setItem('ownwave:bitrate', bitrate);
+  }, [format, bitrate]);
 
   const audioARef = useRef<HTMLAudioElement | null>(null);
   const audioBRef = useRef<HTMLAudioElement | null>(null);
@@ -174,8 +180,8 @@ export function Player({ queue }: { queue: QueueTrack[] }) {
     if (track.id) {
       recordPlay.mutate({ id: track.id });
     }
-    const url = await getStreamUrl(track.id);
-    audio.src = url;
+    const { url } = await api.getStreamUrl(track.id, { format: format as any, bitrate });
+    audio.src = `${getStreamBaseUrl()}${url}`;
     audio.load();
   }
 
@@ -252,8 +258,8 @@ export function Player({ queue }: { queue: QueueTrack[] }) {
     const nextTrack = queue[nextIndex];
     if (!nextTrack) return;
 
-    const url = await getStreamUrl(nextTrack.id);
-    nextAudio.src = url;
+    const { url } = await api.getStreamUrl(nextTrack.id, { format: format as any, bitrate });
+    nextAudio.src = `${getStreamBaseUrl()}${url}`;
     nextAudio.load();
     await nextAudio.play();
     setIsPlaying(true);
@@ -404,9 +410,35 @@ export function Player({ queue }: { queue: QueueTrack[] }) {
         )}
       </div>
 
-      <div className="w-1/4 md:w-1/4 flex justify-end text-[10px] md:text-xs text-spotify-subdued truncate">
-        {currentTrack &&
-          `${currentTrack.bpm.toFixed(0)} BPM · ${currentTrack.key}`}
+      <div className="w-1/4 md:w-1/4 flex flex-col items-end gap-1 text-[10px] md:text-xs text-spotify-subdued">
+        <div className="flex items-center gap-1">
+          <select
+            value={format}
+            onChange={(e) => setFormat(e.target.value)}
+            className="bg-spotify-elevated text-spotify-text rounded px-1 py-0.5 border border-spotify-border"
+            aria-label="Stream format"
+          >
+            <option value="flac">FLAC</option>
+            <option value="mp3">MP3</option>
+            <option value="opus">Opus</option>
+            <option value="aac">AAC</option>
+          </select>
+          <select
+            value={bitrate}
+            onChange={(e) => setBitrate(e.target.value)}
+            className="bg-spotify-elevated text-spotify-text rounded px-1 py-0.5 border border-spotify-border w-14"
+            aria-label="Bitrate"
+          >
+            <option value="128">128</option>
+            <option value="192">192</option>
+            <option value="256">256</option>
+            <option value="320">320</option>
+          </select>
+          <span className="text-spotify-subdued">kbps</span>
+        </div>
+        {currentTrack && (
+          <span className="truncate">{`${currentTrack.bpm.toFixed(0)} BPM · ${currentTrack.key}`}</span>
+        )}
       </div>
     </div>
   );

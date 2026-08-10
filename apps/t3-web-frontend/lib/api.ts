@@ -13,6 +13,10 @@ export function getAuthToken() {
   return authToken;
 }
 
+export function getStreamBaseUrl() {
+  return DEFAULT_BASE_URL;
+}
+
 export function getCoverUrl(id: string) {
   return `${DEFAULT_BASE_URL}/tracks/${id}/cover`;
 }
