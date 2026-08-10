@@ -91,7 +91,7 @@ def _smart_queue(
     conn: psycopg.Connection,
     tracks: List[dict],
     length: int,
-    novelty: float = 0.15,
+    novelty: float = 0.05,
 ) -> List[dict]:
     """Greedy k-NN walk that occasionally jumps for novelty."""
     # Start from a liked track if possible, then random from the seed pool
@@ -143,12 +143,14 @@ def _nearest_remaining(
 
         def _score(t: dict) -> float:
             base = sims.get(t["id"], float("inf"))
+            smooth = _distance(current, t)
+            key_pen = _key_penalty(current.get("key"), t.get("key"))
             feedback = t.get("feedback") or []
             if "like" in feedback:
-                return base * 0.8
+                return base + 0.3 * smooth + key_pen - 0.05
             if "skip" in feedback:
-                return base * 1.5
-            return base
+                return base + 0.3 * smooth + key_pen + 0.15
+            return base + 0.3 * smooth + key_pen
 
         best = min(remaining, key=_score)
         return best
@@ -170,3 +172,11 @@ def _distance(a: dict, b: dict) -> float:
     valence_diff = abs(valence_a - valence_b)
 
     return math.sqrt(bpm_diff ** 2 + energy_diff ** 2 + valence_diff ** 2)
+
+
+def _key_penalty(a: Optional[str], b: Optional[str]) -> float:
+    if not a or not b:
+        return 0.2
+    if a == b:
+        return 0.0
+    return 0.6
