@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { trpc } from '@/lib/trpc/client';
+import { useStation } from '@/lib/station';
 
 export function StationManager() {
   const [name, setName] = useState('');
@@ -31,6 +32,7 @@ export function StationManager() {
   });
 
   const utils = trpc.useContext();
+  const { selectedStation, setSelectedStation } = useStation();
   const { data: stations } = trpc.stations.useQuery();
   const { data: queue } = trpc.queue.useQuery(
     { id: previewId || '' },
@@ -63,8 +65,11 @@ export function StationManager() {
   });
 
   const remove = trpc.deleteStation.useMutation({
-    onSuccess: () => {
+    onSuccess: (_, variables) => {
       utils.stations.invalidate();
+      if (variables.id === selectedStation) {
+        setSelectedStation(null);
+      }
     },
     onError: (err) => {
       console.error('delete station failed', err);
@@ -414,10 +419,16 @@ export function StationManager() {
                 </span>
                 <div className="flex flex-wrap gap-2">
                   <button
+                    onClick={() => setSelectedStation(station.id)}
+                    className="px-3 py-1 rounded bg-spotify-green text-black text-sm font-semibold hover:bg-spotify-green-hover transition"
+                  >
+                    Play
+                  </button>
+                  <button
                     onClick={() => setPreviewId(previewId === station.id ? null : station.id)}
                     className={`px-3 py-1 rounded text-sm transition ${
                       previewId === station.id
-                        ? 'bg-spotify-green text-black'
+                        ? 'bg-spotify-elevated text-spotify-text'
                         : 'bg-spotify-elevated text-spotify-text hover:bg-spotify-card-hover'
                     }`}
                   >
