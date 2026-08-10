@@ -83,11 +83,11 @@ export default function Home() {
         </p>
       )}
 
-      {searchQuery && filteredStations.length === 0 && (
+      {searchQuery && filteredStations.length === 0 && !selectedStation && (
         <p className="text-spotify-subdued mb-6">No stations found.</p>
       )}
 
-      {filteredStations.length > 0 && (
+      {filteredStations.length > 0 && (!selectedStation || searchQuery) && (
         <section className="mb-10">
           <h2 className="text-2xl font-bold text-spotify-text mb-5">Stations</h2>
           <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-6">
