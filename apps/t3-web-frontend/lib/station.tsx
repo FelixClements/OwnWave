@@ -3,12 +3,15 @@
 import { createContext, useContext, useMemo, useState, useEffect } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { trpc } from '@/lib/trpc/client';
+import { QueueTrack } from '@/server/routers/app';
 
 interface StationContextValue {
   selectedStation: string | null;
   setSelectedStation: (id: string | null) => void;
   stations: { id: string; name: string }[];
-  queue: any[];
+  queue: QueueTrack[];
+  nowPlaying: QueueTrack | null;
+  setNowPlaying: (track: QueueTrack | null) => void;
 }
 
 const StationContext = createContext<StationContextValue | null>(null);
@@ -19,6 +22,7 @@ export function StationProvider({ children }: { children: React.ReactNode }) {
   const stationParam = searchParams?.get('station') ?? null;
 
   const [selectedStation, setSelectedState] = useState<string | null>(stationParam);
+  const [nowPlaying, setNowPlayingState] = useState<QueueTrack | null>(null);
   const { data: stations } = trpc.stations.useQuery();
   const { data: queue } = trpc.queue.useQuery(
     { id: selectedStation || '' },
@@ -45,14 +49,20 @@ export function StationProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
+  const setNowPlaying = (track: QueueTrack | null) => {
+    setNowPlayingState(track);
+  };
+
   const value = useMemo(
     () => ({
       selectedStation,
       setSelectedStation,
       stations: stations || [],
       queue: queue || [],
+      nowPlaying,
+      setNowPlaying,
     }),
-    [selectedStation, stations, queue]
+    [selectedStation, stations, queue, nowPlaying]
   );
 
   return <StationContext.Provider value={value}>{children}</StationContext.Provider>;

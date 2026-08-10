@@ -48,7 +48,7 @@ function Cover({
 }
 
 export default function Home() {
-  const { selectedStation, setSelectedStation, stations, queue } = useStation();
+  const { selectedStation, setSelectedStation, stations, queue, nowPlaying } = useStation();
   const [searchQuery, setSearchQuery] = useState('');
 
   const { data: search } = trpc.search.useQuery(
@@ -155,42 +155,48 @@ export default function Home() {
         </section>
       )}
 
-      {selectedStation && (queue || []).length > 0 && (
+      {selectedStation && ((queue || []).length > 0 || nowPlaying) && (
         <section>
           <h2 className="text-2xl font-bold text-spotify-text mb-5">Now Playing</h2>
-          <div className="bg-spotify-card rounded-lg p-4 mb-6">
-            <div className="flex items-center gap-4 mb-4">
-              <Cover
-                id={(queue || [])[0].id}
-                title={(queue || [])[0].title}
-                className="w-16 h-16 rounded shadow object-cover bg-spotify-green flex items-center justify-center text-black text-xl font-bold"
-              />
-              <div className="min-w-0">
-                <div className="text-lg font-bold text-spotify-text truncate">
-                  {(queue || [])[0].title}
-                </div>
-                <div className="text-sm text-spotify-subdued truncate">
-                  {(queue || [])[0].artist || 'Unknown artist'}
-                </div>
-                {(queue || [])[0].album && (
-                  <div className="text-xs text-spotify-subdued truncate">
-                    {(queue || [])[0].album}
+          {(() => {
+            const track = nowPlaying || (queue || [])[0];
+            if (!track) return null;
+            return (
+              <div className="bg-spotify-card rounded-lg p-4 mb-6">
+                <div className="flex items-center gap-4 mb-4">
+                  <Cover
+                    id={track.id}
+                    title={track.title}
+                    className="w-16 h-16 rounded shadow object-cover bg-spotify-green flex items-center justify-center text-black text-xl font-bold"
+                  />
+                  <div className="min-w-0">
+                    <div className="text-lg font-bold text-spotify-text truncate">
+                      {track.title}
+                    </div>
+                    <div className="text-sm text-spotify-subdued truncate">
+                      {track.artist || 'Unknown artist'}
+                    </div>
+                    {track.album && (
+                      <div className="text-xs text-spotify-subdued truncate">
+                        {track.album}
+                      </div>
+                    )}
                   </div>
-                )}
+                </div>
+                <div className="flex flex-wrap gap-3 text-xs text-spotify-subdued">
+                  {track.bpm && (
+                    <span>{track.bpm.toFixed(0)} BPM</span>
+                  )}
+                  {track.key && (
+                    <span>{track.key}</span>
+                  )}
+                  {track.energy !== undefined && (
+                    <span>Energy {track.energy.toFixed(2)}</span>
+                  )}
+                </div>
               </div>
-            </div>
-            <div className="flex flex-wrap gap-3 text-xs text-spotify-subdued">
-              {(queue || [])[0].bpm && (
-                <span>{(queue || [])[0].bpm.toFixed(0)} BPM</span>
-              )}
-              {(queue || [])[0].key && (
-                <span>{(queue || [])[0].key}</span>
-              )}
-              {(queue || [])[0].energy !== undefined && (
-                <span>Energy {(queue || [])[0].energy.toFixed(2)}</span>
-              )}
-            </div>
-          </div>
+            );
+          })()}
 
           {(queue || []).length > 1 && (
             <>

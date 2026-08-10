@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { QueueTrack } from '@/server/routers/app';
 import { getCoverUrl, getStreamBaseUrl, api } from '@/lib/api';
+import { useStation } from '@/lib/station';
 import { trpc } from '@/lib/trpc/client';
 
 function PlayIcon({ className }: { className?: string }) {
@@ -32,9 +33,9 @@ function PauseIcon({ className }: { className?: string }) {
 }
 
 export function Player({ queue }: { queue: QueueTrack[] }) {
+  const { nowPlaying, setNowPlaying } = useStation();
   const [started, setStarted] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
-  const [currentTrack, setCurrentTrack] = useState<QueueTrack | null>(null);
   const [coverUrl, setCoverUrl] = useState<string | null>(null);
   const [coverError, setCoverError] = useState(false);
   const [format, setFormat] = useState('flac');
@@ -119,7 +120,7 @@ export function Player({ queue }: { queue: QueueTrack[] }) {
   }, [started]);
 
   useEffect(() => {
-    if (typeof window === 'undefined' || !('mediaSession' in navigator) || !currentTrack) return;
+    if (typeof window === 'undefined' || !('mediaSession' in navigator) || !nowPlaying) return;
 
     const artwork: MediaImage[] = [];
     if (coverUrl && !coverError) {
@@ -131,9 +132,9 @@ export function Player({ queue }: { queue: QueueTrack[] }) {
     }
 
     navigator.mediaSession.metadata = new MediaMetadata({
-      title: currentTrack.title,
-      artist: currentTrack.artist || undefined,
-      album: currentTrack.album || undefined,
+      title: nowPlaying.title,
+      artist: nowPlaying.artist || undefined,
+      album: nowPlaying.album || undefined,
       artwork,
     });
 
@@ -149,7 +150,7 @@ export function Player({ queue }: { queue: QueueTrack[] }) {
     });
     navigator.mediaSession.setActionHandler('nexttrack', () => skipNext());
     navigator.mediaSession.setActionHandler('previoustrack', () => skipPrev());
-  }, [currentTrack, coverUrl, coverError, isPlaying]);
+  }, [nowPlaying, coverUrl, coverError, isPlaying]);
 
   useEffect(() => {
     if (typeof window === 'undefined' || !queue.length) return;
@@ -176,7 +177,7 @@ export function Player({ queue }: { queue: QueueTrack[] }) {
   async function loadTrack(audio: HTMLAudioElement, index: number) {
     const track = queue[index];
     if (!track) return;
-    setCurrentTrack(track);
+    setNowPlaying(track);
     setCoverUrl(getCoverUrl(track.id));
     setCoverError(false);
     if (track.id) {
@@ -294,8 +295,8 @@ export function Player({ queue }: { queue: QueueTrack[] }) {
   }
 
   function skipNext() {
-    if (crossfadingRef.current || !currentTrack) return;
-    recordFeedback.mutate({ id: currentTrack.id, feedback: 'skip' });
+    if (crossfadingRef.current || !nowPlaying) return;
+    recordFeedback.mutate({ id: nowPlaying.id, feedback: 'skip' });
     const next = currentIndexRef.current + 1;
     if (next < queue.length) {
       const audio = activeRef.current === 'A' ? audioARef.current : audioBRef.current;
@@ -308,7 +309,7 @@ export function Player({ queue }: { queue: QueueTrack[] }) {
   }
 
   function skipPrev() {
-    if (crossfadingRef.current || !currentTrack) return;
+    if (crossfadingRef.current || !nowPlaying) return;
     const prev = currentIndexRef.current - 1;
     if (prev >= 0) {
       const audio = activeRef.current === 'A' ? audioARef.current : audioBRef.current;
@@ -342,7 +343,7 @@ export function Player({ queue }: { queue: QueueTrack[] }) {
       <audio ref={audioARef} crossOrigin="anonymous" className="hidden" />
       <audio ref={audioBRef} crossOrigin="anonymous" className="hidden" />
 
-      {currentTrack ? (
+      {nowPlaying ? (
         <div className="flex items-center gap-2 md:gap-4 w-5/12 md:w-5/12 min-w-0">
           <div className="w-10 h-10 md:w-14 md:h-14 shrink-0 relative rounded shadow overflow-hidden bg-spotify-card flex items-center justify-center text-xs text-spotify-subdued font-bold">
             {coverUrl && !coverError ? (
@@ -353,15 +354,15 @@ export function Player({ queue }: { queue: QueueTrack[] }) {
                 onError={() => setCoverError(true)}
               />
             ) : (
-              currentTrack.title.charAt(0).toUpperCase()
+              nowPlaying.title.charAt(0).toUpperCase()
             )}
           </div>
           <div className="min-w-0">
             <div className="text-xs md:text-sm font-bold text-spotify-text truncate">
-              {currentTrack.title}
+              {nowPlaying.title}
             </div>
             <div className="text-[10px] md:text-xs text-spotify-subdued truncate">
-              {currentTrack.artist || 'Unknown artist'}
+              {nowPlaying.artist || 'Unknown artist'}
             </div>
           </div>
         </div>
@@ -373,7 +374,7 @@ export function Player({ queue }: { queue: QueueTrack[] }) {
         <button
           onClick={togglePlay}
           className="w-10 h-10 md:w-12 md:h-12 rounded-full bg-spotify-text text-spotify-bg flex items-center justify-center hover:scale-105 transition disabled:opacity-50"
-          disabled={started && !currentTrack}
+          disabled={started && !nowPlaying}
           aria-label={started ? 'Play/Pause' : 'Start radio'}
         >
           {started ? (
@@ -386,10 +387,10 @@ export function Player({ queue }: { queue: QueueTrack[] }) {
             <PlayIcon className="w-5 h-5 md:w-6 md:h-6 ml-0.5" />
           )}
         </button>
-        {currentTrack && (
+        {nowPlaying && (
           <div className="flex items-center gap-1 md:gap-2">
             <button
-              onClick={() => recordFeedback.mutate({ id: currentTrack.id, feedback: 'like' })}
+              onClick={() => recordFeedback.mutate({ id: nowPlaying.id, feedback: 'like' })}
               className="px-2.5 py-1.5 rounded bg-spotify-elevated text-spotify-text hover:bg-spotify-card-hover transition text-xs"
               title="Like"
             >
@@ -403,7 +404,7 @@ export function Player({ queue }: { queue: QueueTrack[] }) {
               Skip
             </button>
             <button
-              onClick={() => recordFeedback.mutate({ id: currentTrack.id, feedback: 'ban' })}
+              onClick={() => recordFeedback.mutate({ id: nowPlaying.id, feedback: 'ban' })}
               className="px-2.5 py-1.5 rounded bg-red-600 text-white hover:bg-red-700 transition text-xs"
               title="Ban"
             >
@@ -443,8 +444,8 @@ export function Player({ queue }: { queue: QueueTrack[] }) {
             </>
           )}
         </div>
-        {currentTrack && (
-          <span className="truncate">{`${currentTrack.bpm.toFixed(0)} BPM · ${currentTrack.key}`}</span>
+        {nowPlaying && (
+          <span className="truncate">{`${nowPlaying.bpm.toFixed(0)} BPM · ${nowPlaying.key}`}</span>
         )}
       </div>
     </div>
