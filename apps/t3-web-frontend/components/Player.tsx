@@ -338,6 +338,13 @@ export function Player({ queue: queueProp }: { queue: QueueTrack[] }) {
       currentAudio.ontimeupdate = null;
       currentAudio.onended = null;
 
+      setNowPlaying(nextTrack);
+      setCoverUrl(getCoverUrl(nextTrack.id));
+      setCoverError(false);
+      if (nextTrack.id) {
+        recordPlay.mutate({ id: nextTrack.id });
+      }
+
       nextAudio.ontimeupdate = () => handleTimeUpdate(nextAudio, nextTarget);
       nextAudio.onended = () => handleEnded(nextTarget);
 
