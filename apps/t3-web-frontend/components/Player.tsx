@@ -427,18 +427,19 @@ export function Player({ queue: queueProp }: { queue: QueueTrack[] }) {
       )}
 
       <div className="absolute left-1/2 -translate-x-1/2 flex items-center gap-2 md:gap-4">
-        <button
-          onClick={togglePlay}
-          className="w-10 h-10 md:w-12 md:h-12 rounded-full bg-spotify-text text-spotify-bg flex items-center justify-center hover:scale-105 transition disabled:opacity-50"
-          disabled={!selectedStation && !nowPlaying}
-          aria-label={nowPlaying ? 'Play/Pause' : 'Start radio'}
-        >
-          {isPlaying && nowPlaying ? (
-            <PauseIcon className="w-5 h-5 md:w-6 md:h-6" />
-          ) : (
-            <PlayIcon className="w-5 h-5 md:w-6 md:h-6 ml-0.5" />
-          )}
-        </button>
+        {nowPlaying ? (
+          <button
+            onClick={togglePlay}
+            className="w-10 h-10 md:w-12 md:h-12 rounded-full bg-spotify-text text-spotify-bg flex items-center justify-center hover:scale-105 transition disabled:opacity-50"
+            aria-label={isPlaying ? 'Pause' : 'Play'}
+          >
+            {isPlaying ? (
+              <PauseIcon className="w-5 h-5 md:w-6 md:h-6" />
+            ) : (
+              <PlayIcon className="w-5 h-5 md:w-6 md:h-6 ml-0.5" />
+            )}
+          </button>
+        ) : null}
         {nowPlaying && (
           <div className="flex items-center gap-1 md:gap-2">
             <button
