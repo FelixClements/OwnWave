@@ -32,14 +32,16 @@ class StationRequest(BaseModel):
     max_bpm: Optional[float] = None
     min_energy: Optional[float] = None
     max_energy: Optional[float] = None
+    min_valence: Optional[float] = None
+    max_valence: Optional[float] = None
     # New seed options
     seed_type: Optional[str] = None
     track_id: Optional[UUID] = None
     artist_id: Optional[UUID] = None
     album_id: Optional[UUID] = None
     cluster_id: Optional[int] = None
-    min_valence: Optional[float] = None
-    max_valence: Optional[float] = None
+    main_genre: Optional[str] = None
+    sub_genre: Optional[str] = None
 
 
 @contextmanager
@@ -139,6 +141,10 @@ def _seed_filter(req: StationRequest) -> dict:
             "min_valence": req.min_valence,
             "max_valence": req.max_valence,
         }
+    if req.seed_type == "genre" and req.main_genre:
+        return {"type": "genre", "main_genre": req.main_genre}
+    if req.seed_type == "sub_genre" and req.main_genre and req.sub_genre:
+        return {"type": "sub_genre", "main_genre": req.main_genre, "sub_genre": req.sub_genre}
 
     filters = {}
     if req.min_bpm is not None:
@@ -207,10 +213,57 @@ async def rebuild_clusters():
     return {"status": "not implemented"}
 
 
+@app.get("/genres")
+async def list_genres():
+    with _db_conn() as conn:
+        return {"genres": db.list_genres(conn)}
+
+
+@app.get("/tracks/{track_id}/genres")
+async def track_genres(track_id: UUID):
+    with _db_conn() as conn:
+        return {"track_id": str(track_id), "genres": db.get_track_genres(conn, track_id)}
+
+
+@app.post("/rebuild-genres")
+async def rebuild_genres(background_tasks: BackgroundTasks):
+    if _celery_available():
+        from tasks import rebuild_track_genres
+
+        task = rebuild_track_genres.delay(MUSIC_DIR)
+        return {"task_id": task.id, "status": "queued"}
+    background_tasks.add_task(_run_rebuild_genres)
+    return {"status": "pending"}
+
+
+@app.post("/rebuild-genre-stations")
+async def rebuild_genre_stations(background_tasks: BackgroundTasks):
+    if _celery_available():
+        from tasks import rebuild_genre_stations
+
+        task = rebuild_genre_stations.delay()
+        return {"task_id": task.id, "status": "queued"}
+    background_tasks.add_task(_run_rebuild_genre_stations)
+    return {"status": "pending"}
+
+
 def _run_rebuild_vectors():
     from feature_vector import backfill_library_feature_vectors
 
     backfill_library_feature_vectors()
+
+
+def _run_rebuild_genres():
+    from tasks import rebuild_track_genres
+
+    rebuild_track_genres(MUSIC_DIR)
+
+
+def _run_rebuild_genre_stations():
+    from station_builder import rebuild_genre_stations
+
+    with _db_conn() as conn:
+        rebuild_genre_stations(conn)
 
 
 def _run_scan(job_id: UUID, path: str, force: bool):

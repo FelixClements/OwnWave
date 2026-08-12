@@ -12,6 +12,7 @@ pydantic>=2.0
 watchdog>=4.0
 pgvector>=0.2.5
 scikit-learn>=1.3
-numpy>=1.24,<2.0
-# essentia is heavy and optional. If available, install it separately:
-# pip install essentia
+numpy>=1.25,<2.0
+# Optional genre analysis: installs Essentia with TensorFlow support and the Discogs400 models.
+# Disable with ENABLE_GENRE_ANALYSIS=false.
+essentia-tensorflow==2.1b6.dev1389

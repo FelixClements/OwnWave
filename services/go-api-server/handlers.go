@@ -268,6 +268,8 @@ func (h *Handler) UpdateStation(w http.ResponseWriter, r *http.Request) {
 		ArtistID   *string  `json:"artist_id"`
 		AlbumID    *string  `json:"album_id"`
 		ClusterID  *int     `json:"cluster_id"`
+		MainGenre  *string  `json:"main_genre"`
+		SubGenre   *string  `json:"sub_genre"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, err.Error(), 400)
@@ -314,6 +316,12 @@ func (h *Handler) UpdateStation(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.ClusterID != nil {
 		filters["cluster_id"] = *req.ClusterID
+	}
+	if req.MainGenre != nil && *req.MainGenre != "" {
+		filters["main_genre"] = *req.MainGenre
+	}
+	if req.SubGenre != nil && *req.SubGenre != "" {
+		filters["sub_genre"] = *req.SubGenre
 	}
 
 	var seedFeatures string
@@ -440,6 +448,55 @@ func (h *Handler) AdminRebuildVectors(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) AdminRebuildClusters(w http.ResponseWriter, r *http.Request) {
 	resp, err := http.Post(h.pythonURL+"/rebuild-clusters", "application/json", nil)
+	if err != nil {
+		http.Error(w, err.Error(), 500)
+		return
+	}
+	defer resp.Body.Close()
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(resp.StatusCode)
+	io.Copy(w, resp.Body)
+}
+
+func (h *Handler) ListGenres(w http.ResponseWriter, r *http.Request) {
+	resp, err := http.Get(h.pythonURL + "/genres")
+	if err != nil {
+		http.Error(w, err.Error(), 500)
+		return
+	}
+	defer resp.Body.Close()
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(resp.StatusCode)
+	io.Copy(w, resp.Body)
+}
+
+func (h *Handler) GetTrackGenres(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	resp, err := http.Get(h.pythonURL + "/tracks/" + id + "/genres")
+	if err != nil {
+		http.Error(w, err.Error(), 500)
+		return
+	}
+	defer resp.Body.Close()
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(resp.StatusCode)
+	io.Copy(w, resp.Body)
+}
+
+func (h *Handler) AdminRebuildGenres(w http.ResponseWriter, r *http.Request) {
+	resp, err := http.Post(h.pythonURL+"/rebuild-genres", "application/json", nil)
+	if err != nil {
+		http.Error(w, err.Error(), 500)
+		return
+	}
+	defer resp.Body.Close()
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(resp.StatusCode)
+	io.Copy(w, resp.Body)
+}
+
+func (h *Handler) AdminRebuildGenreStations(w http.ResponseWriter, r *http.Request) {
+	resp, err := http.Post(h.pythonURL+"/rebuild-genre-stations", "application/json", nil)
 	if err != nil {
 		http.Error(w, err.Error(), 500)
 		return

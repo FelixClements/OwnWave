@@ -129,6 +129,8 @@ def finalize_scan(self, master_job_id: str, task_ids: List[str], root_path: str)
 
     _prune_deleted_tracks(root_path)
 
+    rebuild_genre_stations.delay()
+
     return {
         "master_job_id": master_job_id,
         "total": len(results),
@@ -150,6 +152,55 @@ def rebuild_clusters(n_clusters: Optional[int] = None) -> dict:
     from clustering import backfill_library_clusters
 
     return backfill_library_clusters(n_clusters=n_clusters)
+
+
+@celery_app.task
+def rebuild_track_genres(path: str, force: bool = False) -> dict:
+    """Batch backfill genre predictions for a path."""
+    import genre_analyzer
+    from scanner import SUPPORTED_EXTS
+
+    root = Path(path).expanduser().resolve()
+    if not root.exists():
+        raise FileNotFoundError(f"Music path does not exist: {root}")
+
+    files = sorted(p for p in root.rglob("*") if p.is_file() and p.suffix.lower() in SUPPORTED_EXTS)
+    updated = 0
+    skipped = 0
+
+    with db.get_conn() as conn:
+        for file_path in files:
+            path_str = str(file_path)
+            track_id = db.get_track_by_path(conn, path_str)
+            if not track_id:
+                skipped += 1
+                continue
+            if not force:
+                existing = db.get_track_genres(conn, track_id)
+                if existing:
+                    skipped += 1
+                    continue
+            try:
+                predictions = genre_analyzer.analyze(path_str)
+                if predictions:
+                    db.upsert_track_genres(conn, track_id, predictions)
+                    updated += 1
+            except Exception as exc:
+                print(f"[rebuild_track_genres] failed for {path_str}: {exc}")
+                skipped += 1
+        conn.commit()
+
+    return {"updated": updated, "skipped": skipped}
+
+
+@celery_app.task
+def rebuild_genre_stations() -> dict:
+    """Refresh auto-generated genre stations."""
+    from station_builder import rebuild_genre_stations
+
+    with db.get_conn() as conn:
+        result = rebuild_genre_stations(conn)
+    return result
 
 
 def _prune_deleted_tracks(root_path: str) -> int:

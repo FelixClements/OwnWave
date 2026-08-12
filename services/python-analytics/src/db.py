@@ -7,7 +7,7 @@ import psycopg
 from psycopg.types.json import Jsonb
 
 from config import DATABASE_URL
-from models import AudioFeatures
+from models import AudioFeatures, GenrePrediction
 
 
 def get_conn():
@@ -375,9 +375,9 @@ def upsert_audio_features_batch(
             """
             INSERT INTO audio_features
                 (track_id, bpm, key, loudness, energy, valence,
-                 outro_start_seconds, ideal_crossfade_seconds, chroma,
-                 spectral_centroid, mfcc, feature_vector, analyzed_at)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())
+                 outro_start_seconds, ideal_crossfade_seconds, intro_start_seconds,
+                 outro_end_seconds, chroma, spectral_centroid, mfcc, feature_vector, analyzed_at)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())
             ON CONFLICT (track_id) DO UPDATE SET
                 bpm = EXCLUDED.bpm,
                 key = EXCLUDED.key,
@@ -406,3 +406,162 @@ def delete_tracks(conn: psycopg.Connection, track_ids: List[UUID]) -> None:
             "DELETE FROM tracks WHERE id = ANY(%s)",
             (track_ids,),
         )
+
+
+def upsert_track_genres(
+    conn: psycopg.Connection,
+    track_id: UUID,
+    predictions: List[GenrePrediction],
+) -> None:
+    if not predictions:
+        return
+    values = [
+        (track_id, p.main_genre, p.sub_genre, p.confidence, p.source)
+        for p in predictions
+    ]
+    with conn.cursor() as cur:
+        cur.executemany(
+            """
+            INSERT INTO track_genres
+                (track_id, main_genre, sub_genre, confidence, source, updated_at)
+            VALUES (%s, %s, %s, %s, %s, NOW())
+            ON CONFLICT (track_id, sub_genre, source) DO UPDATE SET
+                main_genre = EXCLUDED.main_genre,
+                confidence = EXCLUDED.confidence,
+                updated_at = NOW()
+            """,
+            values,
+        )
+
+
+def get_track_genres(conn: psycopg.Connection, track_id: UUID) -> List[dict]:
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            SELECT main_genre, sub_genre, confidence, source
+            FROM track_genres
+            WHERE track_id = %s
+            ORDER BY confidence DESC
+            """,
+            (track_id,),
+        )
+        return [
+            {"main_genre": r[0], "sub_genre": r[1], "confidence": r[2], "source": r[3]}
+            for r in cur.fetchall()
+        ]
+
+
+def list_genres(conn: psycopg.Connection, min_confidence: float = 0.3) -> List[dict]:
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            SELECT main_genre, sub_genre, COUNT(DISTINCT track_id) as track_count
+            FROM track_genres
+            WHERE confidence >= %s
+            GROUP BY main_genre, sub_genre
+            ORDER BY main_genre, sub_genre
+            """,
+            (min_confidence,),
+        )
+        return [
+            {"main_genre": r[0], "sub_genre": r[1], "track_count": r[2]}
+            for r in cur.fetchall()
+        ]
+
+
+def get_tracks_by_genre(
+    conn: psycopg.Connection,
+    main_genre: str,
+    sub_genre: Optional[str] = None,
+    min_confidence: float = 0.0,
+    limit: int = 200,
+) -> List[UUID]:
+    with conn.cursor() as cur:
+        if sub_genre:
+            cur.execute(
+                """
+                SELECT track_id
+                FROM track_genres
+                WHERE main_genre = %s AND sub_genre = %s AND confidence >= %s
+                ORDER BY confidence DESC
+                LIMIT %s
+                """,
+                (main_genre, sub_genre, min_confidence, limit),
+            )
+        else:
+            cur.execute(
+                """
+                SELECT track_id
+                FROM track_genres
+                WHERE main_genre = %s AND confidence >= %s
+                ORDER BY confidence DESC
+                LIMIT %s
+                """,
+                (main_genre, min_confidence, limit),
+            )
+        return [r[0] for r in cur.fetchall()]
+
+
+def create_station(
+    conn: psycopg.Connection,
+    name: str,
+    seed_features: Optional[dict] = None,
+    is_auto: bool = False,
+    source: Optional[str] = None,
+) -> UUID:
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            INSERT INTO stations (name, seed_features, is_auto, source, last_refreshed_at)
+            VALUES (%s, %s::jsonb, %s, %s, NOW())
+            RETURNING id
+            """,
+            (name, Jsonb(seed_features) if seed_features else None, is_auto, source),
+        )
+        return cur.fetchone()[0]
+
+
+def upsert_auto_station(
+    conn: psycopg.Connection,
+    name: str,
+    seed_features: Optional[dict],
+    source: str = "genre",
+) -> UUID:
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            INSERT INTO stations (name, seed_features, is_auto, source, last_refreshed_at)
+            VALUES (%s, %s::jsonb, TRUE, %s, NOW())
+            ON CONFLICT (name) WHERE is_auto = TRUE DO UPDATE SET
+                seed_features = EXCLUDED.seed_features,
+                is_auto = TRUE,
+                source = EXCLUDED.source,
+                last_refreshed_at = NOW()
+            RETURNING id
+            """,
+            (name, Jsonb(seed_features) if seed_features else None, source),
+        )
+        return cur.fetchone()[0]
+
+
+def delete_orphaned_auto_stations(conn: psycopg.Connection, valid_names: List[str]) -> int:
+    if not valid_names:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                DELETE FROM stations
+                WHERE is_auto = TRUE AND source = 'genre'
+                """
+            )
+            return cur.rowcount
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            DELETE FROM stations
+            WHERE is_auto = TRUE
+              AND source = 'genre'
+              AND name <> ALL(%s)
+            """,
+            (list(valid_names),),
+        )
+        return cur.rowcount

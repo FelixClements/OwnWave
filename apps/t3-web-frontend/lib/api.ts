@@ -120,11 +120,13 @@ export type CreateStationRequest = {
   max_energy?: number;
   min_valence?: number;
   max_valence?: number;
-  seed_type?: 'track' | 'artist' | 'album' | 'cluster' | 'mood';
+  seed_type?: 'track' | 'artist' | 'album' | 'cluster' | 'mood' | 'genre' | 'sub_genre';
   track_id?: string;
   artist_id?: string;
   album_id?: string;
   cluster_id?: number;
+  main_genre?: string;
+  sub_genre?: string;
 };
 
 export type UpdateStationRequest = {
@@ -136,11 +138,26 @@ export type UpdateStationRequest = {
   max_energy?: number;
   min_valence?: number;
   max_valence?: number;
-  seed_type?: 'track' | 'artist' | 'album' | 'cluster' | 'mood';
+  seed_type?: 'track' | 'artist' | 'album' | 'cluster' | 'mood' | 'genre' | 'sub_genre';
   track_id?: string;
   artist_id?: string;
   album_id?: string;
   cluster_id?: number;
+  main_genre?: string;
+  sub_genre?: string;
+};
+
+export type Genre = {
+  main_genre: string;
+  sub_genre: string;
+  track_count: number;
+};
+
+export type TrackGenre = {
+  main_genre: string;
+  sub_genre: string;
+  confidence: number;
+  source: string;
 };
 
 export type CreateStationResponse = { station_id: string };
@@ -338,6 +355,24 @@ export class OwnWaveAPI {
 
   adminRebuildClusters() {
     return this.request<{ status: string }>('/admin/rebuild-clusters', { method: 'POST' });
+  }
+
+  adminRebuildGenres() {
+    return this.request<{ status: string }>('/admin/rebuild-genres', { method: 'POST' });
+  }
+
+  adminRebuildGenreStations() {
+    return this.request<{ status: string }>('/admin/rebuild-genre-stations', { method: 'POST' });
+  }
+
+  getGenres() {
+    return this.request<{ genres: Genre[] }>('/genres').then((r) => r.genres);
+  }
+
+  getTrackGenres(id: string) {
+    return this.request<{ track_id: string; genres: TrackGenre[] }>(
+      `/tracks/${encodeURIComponent(id)}/genres`
+    ).then((r) => r.genres);
   }
 
   getStreamUrl(id: string, opts?: StreamUrlOptions) {

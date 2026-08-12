@@ -5,11 +5,19 @@ from uuid import UUID
 
 import psycopg
 
-from db import create_station, get_all_tracks_with_features, insert_station_tracks
+from config import GENRE_MIN_CONFIDENCE, GENRE_MIN_TRACKS_PER_STATION
+from db import (
+    create_station,
+    get_all_tracks_with_features,
+    get_tracks_by_genre,
+    insert_station_tracks,
+    list_genres,
+    upsert_auto_station,
+)
 from similarity import get_similar_tracks
 
 
-SEED_TYPES = {"track", "artist", "album", "mood", "cluster"}
+SEED_TYPES = {"track", "artist", "album", "mood", "cluster", "genre", "sub_genre"}
 
 
 def build_station(
@@ -75,6 +83,19 @@ def _apply_filter(conn: psycopg.Connection, tracks: List[dict], filters: dict) -
             if min_energy <= (t["energy"] or 0) <= max_energy
             and min_valence <= (t["valence"] or 0) <= max_valence
         ]
+    if seed_type == "genre":
+        main_genre = filters.get("main_genre")
+        if not main_genre:
+            return []
+        genre_track_ids = set(get_tracks_by_genre(conn, main_genre, min_confidence=GENRE_MIN_CONFIDENCE))
+        return [t for t in tracks if t["id"] in genre_track_ids]
+    if seed_type == "sub_genre":
+        main_genre = filters.get("main_genre")
+        sub_genre = filters.get("sub_genre")
+        if not main_genre or not sub_genre:
+            return []
+        genre_track_ids = set(get_tracks_by_genre(conn, main_genre, sub_genre, min_confidence=GENRE_MIN_CONFIDENCE))
+        return [t for t in tracks if t["id"] in genre_track_ids]
 
     # Legacy numeric filters
     out = []
@@ -191,3 +212,76 @@ def _key_penalty(a: Optional[str], b: Optional[str]) -> float:
     if a == b:
         return 0.0
     return 0.6
+
+
+def rebuild_genre_stations(
+    conn: psycopg.Connection,
+    min_confidence: float = None,
+    min_tracks: int = None,
+    station_length: int = 50,
+) -> dict:
+    """Create or refresh auto-generated genre and sub-genre stations."""
+    if min_confidence is None:
+        min_confidence = GENRE_MIN_CONFIDENCE
+    if min_tracks is None:
+        min_tracks = GENRE_MIN_TRACKS_PER_STATION
+
+    genres = list_genres(conn, min_confidence=min_confidence)
+    main_counts = {}
+    for g in genres:
+        main_counts.setdefault(g["main_genre"], {"total": 0, "subs": []})
+        main_counts[g["main_genre"]]["total"] += g["track_count"]
+        main_counts[g["main_genre"]]["subs"].append(g)
+
+    valid_names = set()
+    created = 0
+    for main_genre, info in main_counts.items():
+        if info["total"] < min_tracks:
+            continue
+        name = f"Genre: {main_genre}"
+        valid_names.add(name)
+        seed = {"type": "genre", "main_genre": main_genre}
+        upsert_auto_station(conn, name, seed, source="genre")
+        _build_station_from_seed(conn, name, seed, station_length)
+        created += 1
+
+    for g in genres:
+        if g["track_count"] < min_tracks or g["main_genre"] == g["sub_genre"]:
+            continue
+        name = f"Genre: {g['main_genre']} / {g['sub_genre']}"
+        valid_names.add(name)
+        seed = {"type": "sub_genre", "main_genre": g["main_genre"], "sub_genre": g["sub_genre"]}
+        upsert_auto_station(conn, name, seed, source="genre")
+        _build_station_from_seed(conn, name, seed, station_length)
+        created += 1
+
+    from db import delete_orphaned_auto_stations
+    removed = delete_orphaned_auto_stations(conn, valid_names)
+
+    conn.commit()
+    return {"created_or_refreshed": created, "removed": removed}
+
+
+def _build_station_from_seed(conn: psycopg.Connection, name: str, seed: dict, length: int) -> None:
+    try:
+        tracks = get_all_tracks_with_features(conn)
+        tracks = _apply_filter(conn, tracks, seed)
+        tracks = _exclude_banned(tracks)
+        if len(tracks) < 2:
+            return
+        sequence = _smart_queue(conn, tracks, length)
+        track_ids = [t["id"] for t in sequence]
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT id FROM stations WHERE name = %s",
+                (name,),
+            )
+            row = cur.fetchone()
+        if not row:
+            return
+        station_id = row[0]
+        with conn.cursor() as cur:
+            cur.execute("DELETE FROM station_tracks WHERE station_id = %s", (station_id,))
+        insert_station_tracks(conn, station_id, track_ids)
+    except Exception as exc:
+        print(f"[rebuild_genre_stations] error building {name}: {exc}")

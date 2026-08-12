@@ -27,6 +27,14 @@ export default function AdminPage() {
     onSuccess: () => alert('Cluster rebuild queued.'),
     onError: (err) => alert('Cluster rebuild failed: ' + err.message),
   });
+  const rebuildGenres = trpc.adminRebuildGenres.useMutation({
+    onSuccess: () => alert('Genre rebuild queued.'),
+    onError: (err) => alert('Genre rebuild failed: ' + err.message),
+  });
+  const rebuildGenreStations = trpc.adminRebuildGenreStations.useMutation({
+    onSuccess: () => alert('Genre station rebuild queued.'),
+    onError: (err) => alert('Genre station rebuild failed: ' + err.message),
+  });
 
   return (
     <div className="space-y-8">
@@ -101,6 +109,20 @@ export default function AdminPage() {
             className="px-4 py-2 rounded bg-spotify-elevated text-spotify-text font-semibold hover:bg-spotify-card-hover transition disabled:opacity-50"
           >
             {rebuildClusters.isLoading ? 'Queueing...' : 'Rebuild clusters'}
+          </button>
+          <button
+            onClick={() => { if (confirm('Rebuild all genre predictions?')) rebuildGenres.mutate(); }}
+            disabled={rebuildGenres.isLoading}
+            className="px-4 py-2 rounded bg-spotify-elevated text-spotify-text font-semibold hover:bg-spotify-card-hover transition disabled:opacity-50"
+          >
+            {rebuildGenres.isLoading ? 'Queueing...' : 'Rebuild genres'}
+          </button>
+          <button
+            onClick={() => { if (confirm('Rebuild all genre stations?')) rebuildGenreStations.mutate(); }}
+            disabled={rebuildGenreStations.isLoading}
+            className="px-4 py-2 rounded bg-spotify-elevated text-spotify-text font-semibold hover:bg-spotify-card-hover transition disabled:opacity-50"
+          >
+            {rebuildGenreStations.isLoading ? 'Queueing...' : 'Rebuild genre stations'}
           </button>
         </div>
       </section>

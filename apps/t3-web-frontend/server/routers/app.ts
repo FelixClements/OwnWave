@@ -64,6 +64,11 @@ export const appRouter = t.router({
     .mutation(async ({ input }) => api.adminScan(input.path, input.force)),
   adminRebuildVectors: t.procedure.mutation(async () => api.adminRebuildVectors()),
   adminRebuildClusters: t.procedure.mutation(async () => api.adminRebuildClusters()),
+  adminRebuildGenres: t.procedure.mutation(async () => api.adminRebuildGenres()),
+  adminRebuildGenreStations: t.procedure.mutation(async () => api.adminRebuildGenreStations()),
+
+  genres: t.procedure.query(async () => api.getGenres()),
+  trackGenres: t.procedure.input(z.object({ id: z.string() })).query(async ({ input }) => api.getTrackGenres(input.id)),
 
   recordPlay: t.procedure
     .input(z.object({ id: z.string(), stationId: z.string().optional() }))
@@ -112,11 +117,13 @@ export const appRouter = t.router({
         max_energy: z.number().optional(),
         min_valence: z.number().optional(),
         max_valence: z.number().optional(),
-        seed_type: z.enum(['track', 'artist', 'album', 'cluster', 'mood']).optional(),
+        seed_type: z.enum(['track', 'artist', 'album', 'cluster', 'mood', 'genre', 'sub_genre']).optional(),
         track_id: z.string().optional(),
         artist_id: z.string().optional(),
         album_id: z.string().optional(),
         cluster_id: z.number().optional(),
+        main_genre: z.string().optional(),
+        sub_genre: z.string().optional(),
       })
     )
     .mutation(async ({ input }) => api.createStation(input)),
@@ -133,11 +140,13 @@ export const appRouter = t.router({
         max_energy: z.number().optional(),
         min_valence: z.number().optional(),
         max_valence: z.number().optional(),
-        seed_type: z.enum(['track', 'artist', 'album', 'cluster', 'mood']).optional(),
+        seed_type: z.enum(['track', 'artist', 'album', 'cluster', 'mood', 'genre', 'sub_genre']).optional(),
         track_id: z.string().optional(),
         artist_id: z.string().optional(),
         album_id: z.string().optional(),
         cluster_id: z.number().optional(),
+        main_genre: z.string().optional(),
+        sub_genre: z.string().optional(),
       })
     )
     .mutation(async ({ input }) => api.updateStation(input.id, input)),

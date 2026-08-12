@@ -120,6 +120,10 @@ func main() {
 	r.Get("/admin/stations", h.AdminStations)
 	r.Post("/admin/rebuild-vectors", h.AdminRebuildVectors)
 	r.Post("/admin/rebuild-clusters", h.AdminRebuildClusters)
+	r.Post("/admin/rebuild-genres", h.AdminRebuildGenres)
+	r.Post("/admin/rebuild-genre-stations", h.AdminRebuildGenreStations)
+	r.Get("/genres", h.ListGenres)
+	r.Get("/tracks/{id}/genres", h.GetTrackGenres)
 	r.Mount("/metrics", metricsHandler())
 
 	slog.Info("go-api listening", "port", "8080")

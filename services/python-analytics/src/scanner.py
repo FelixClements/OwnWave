@@ -5,7 +5,7 @@ from uuid import UUID
 import psycopg
 
 from analyzers import analyze_file, get_analyzers
-from config import MUSIC_DIR
+from config import ENABLE_GENRE_ANALYSIS, MUSIC_DIR
 from db import (
     get_conn,
     get_or_create_album,
@@ -13,10 +13,14 @@ from db import (
     get_track_by_path,
     upsert_audio_features,
     upsert_track,
+    upsert_track_genres,
 )
 from feature_vector import build_feature_vector
 from models import AudioFeatures
 from tags import read_tags
+
+if ENABLE_GENRE_ANALYSIS:
+    import genre_analyzer
 
 
 SUPPORTED_EXTS = {".flac", ".mp3"}
@@ -115,6 +119,15 @@ def _process_file(
     )
 
     upsert_audio_features(conn, track_id, features)
+
+    if ENABLE_GENRE_ANALYSIS:
+        try:
+            predictions = genre_analyzer.analyze(path_str)
+            if predictions:
+                upsert_track_genres(conn, track_id, predictions)
+        except Exception as e:
+            print(f"[scanner] genre analysis failed for {path_str}: {e}")
+
     return track_id
 
 

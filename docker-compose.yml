@@ -30,12 +30,20 @@ services:
 
   python:
     build: ./services/python-analytics
+    platform: linux/amd64
     environment:
       DATABASE_URL: postgres://${POSTGRES_USER:-ownwave}:${POSTGRES_PASSWORD:-ownwave}@db:5432/${POSTGRES_DB:-ownwave}
       REDIS_URL: redis://redis:6379/0
       CELERY_BROKER_URL: redis://redis:6379/0
       CELERY_RESULT_BACKEND: redis://redis:6379/0
       MUSIC_DIR: /music
+      ENABLE_GENRE_ANALYSIS: ${ENABLE_GENRE_ANALYSIS:-false}
+      GENRE_MODEL_DIR: ${GENRE_MODEL_DIR:-/app/models}
+      GENRE_SNIPPET_START: ${GENRE_SNIPPET_START:-30}
+      GENRE_SNIPPET_DURATION: ${GENRE_SNIPPET_DURATION:-30}
+      GENRE_MIN_CONFIDENCE: ${GENRE_MIN_CONFIDENCE:-0.3}
+      GENRE_MIN_TRACKS_PER_STATION: ${GENRE_MIN_TRACKS_PER_STATION:-5}
+      GENRE_FULL_TRACK_MODE: ${GENRE_FULL_TRACK_MODE:-false}
     volumes:
       - ${MUSIC_PATH:-./music}:/music:ro
     ports:
@@ -50,6 +58,7 @@ services:
 
   worker:
     build: ./services/python-analytics
+    platform: linux/amd64
     command: celery -A celery_app worker -P gevent -c 50 --loglevel=info -n worker@%h
     environment:
       DATABASE_URL: postgres://${POSTGRES_USER:-ownwave}:${POSTGRES_PASSWORD:-ownwave}@db:5432/${POSTGRES_DB:-ownwave}
@@ -57,6 +66,13 @@ services:
       CELERY_BROKER_URL: redis://redis:6379/0
       CELERY_RESULT_BACKEND: redis://redis:6379/0
       MUSIC_DIR: /music
+      ENABLE_GENRE_ANALYSIS: ${ENABLE_GENRE_ANALYSIS:-false}
+      GENRE_MODEL_DIR: ${GENRE_MODEL_DIR:-/app/models}
+      GENRE_SNIPPET_START: ${GENRE_SNIPPET_START:-30}
+      GENRE_SNIPPET_DURATION: ${GENRE_SNIPPET_DURATION:-30}
+      GENRE_MIN_CONFIDENCE: ${GENRE_MIN_CONFIDENCE:-0.3}
+      GENRE_MIN_TRACKS_PER_STATION: ${GENRE_MIN_TRACKS_PER_STATION:-5}
+      GENRE_FULL_TRACK_MODE: ${GENRE_FULL_TRACK_MODE:-false}
     volumes:
       - ${MUSIC_PATH:-./music}:/music:ro
     depends_on:
@@ -69,6 +85,7 @@ services:
 
   watcher:
     build: ./services/python-analytics
+    platform: linux/amd64
     command: python -m main watch
     environment:
       DATABASE_URL: postgres://${POSTGRES_USER:-ownwave}:${POSTGRES_PASSWORD:-ownwave}@db:5432/${POSTGRES_DB:-ownwave}
@@ -76,6 +93,13 @@ services:
       CELERY_BROKER_URL: redis://redis:6379/0
       CELERY_RESULT_BACKEND: redis://redis:6379/0
       MUSIC_DIR: /music
+      ENABLE_GENRE_ANALYSIS: ${ENABLE_GENRE_ANALYSIS:-false}
+      GENRE_MODEL_DIR: ${GENRE_MODEL_DIR:-/app/models}
+      GENRE_SNIPPET_START: ${GENRE_SNIPPET_START:-30}
+      GENRE_SNIPPET_DURATION: ${GENRE_SNIPPET_DURATION:-30}
+      GENRE_MIN_CONFIDENCE: ${GENRE_MIN_CONFIDENCE:-0.3}
+      GENRE_MIN_TRACKS_PER_STATION: ${GENRE_MIN_TRACKS_PER_STATION:-5}
+      GENRE_FULL_TRACK_MODE: ${GENRE_FULL_TRACK_MODE:-false}
     volumes:
       - ${MUSIC_PATH:-./music}:/music:ro
     depends_on:
@@ -98,7 +122,7 @@ services:
       - ${MUSIC_PATH:-./music}:/music:ro
       - ./database/migrations:/migrations:ro
     ports:
-      - "8080:8080"
+      - "${GO_HOST_PORT:-8080}:8080"
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://localhost:8080/health"]
       interval: 5s

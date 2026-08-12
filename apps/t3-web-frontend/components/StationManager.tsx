@@ -20,6 +20,8 @@ export function StationManager() {
     min_valence: '',
     max_valence: '',
     seed_type: '',
+    main_genre: '',
+    sub_genre: '',
   });
   const [editFilters, setEditFilters] = useState({
     min_bpm: '',
@@ -29,11 +31,14 @@ export function StationManager() {
     min_valence: '',
     max_valence: '',
     seed_type: '',
+    main_genre: '',
+    sub_genre: '',
   });
 
   const utils = trpc.useContext();
   const { selectedStation, setSelectedStation, setIsPlaying } = useStation();
   const { data: stations } = trpc.stations.useQuery();
+  const { data: genres } = trpc.genres.useQuery();
   const { data: queue } = trpc.queue.useQuery(
     { id: previewId || '' },
     { enabled: !!previewId }
@@ -50,6 +55,8 @@ export function StationManager() {
         min_valence: '',
         max_valence: '',
         seed_type: '',
+        main_genre: '',
+        sub_genre: '',
       });
       setShowCreate(false);
       utils.stations.invalidate();
@@ -94,6 +101,8 @@ export function StationManager() {
       min_valence: toNum(createFilters.min_valence),
       max_valence: toNum(createFilters.max_valence),
       seed_type: createFilters.seed_type as any || undefined,
+      main_genre: createFilters.main_genre || undefined,
+      sub_genre: createFilters.sub_genre || undefined,
     });
   };
 
@@ -110,12 +119,14 @@ export function StationManager() {
       min_valence: toNum(editFilters.min_valence),
       max_valence: toNum(editFilters.max_valence),
       seed_type: editFilters.seed_type as any || undefined,
+      main_genre: editFilters.main_genre || undefined,
+      sub_genre: editFilters.sub_genre || undefined,
     });
   };
 
   const startEdit = (id: string, currentName: string) => {
     setEditing(id);
-    setEditName(currentName);
+    setEditName('');
     setEditFilters({
       min_bpm: '',
       max_bpm: '',
@@ -124,6 +135,8 @@ export function StationManager() {
       min_valence: '',
       max_valence: '',
       seed_type: '',
+      main_genre: '',
+      sub_genre: '',
     });
   };
 
@@ -177,8 +190,46 @@ export function StationManager() {
                 <option value="album">Album</option>
                 <option value="cluster">Cluster</option>
                 <option value="mood">Mood</option>
+                <option value="genre">Genre</option>
+                <option value="sub_genre">Sub-genre</option>
               </select>
             </div>
+            {['genre', 'sub_genre'].includes(createFilters.seed_type) && (
+              <>
+                <div className="space-y-1">
+                  <label htmlFor="create-main-genre" className="text-xs text-spotify-subdued">Main Genre</label>
+                  <select
+                    id="create-main-genre"
+                    value={createFilters.main_genre}
+                    onChange={(e) => setCreateFilters({ ...createFilters, main_genre: e.target.value })}
+                    className="w-full px-3 py-2 rounded bg-spotify-elevated text-spotify-text border border-spotify-border focus:outline-none focus:border-spotify-green"
+                  >
+                    <option value="">Select genre</option>
+                    {Array.from(new Set((genres || []).map((g) => g.main_genre))).map((g) => (
+                      <option key={g} value={g}>{g}</option>
+                    ))}
+                  </select>
+                </div>
+                {createFilters.seed_type === 'sub_genre' && (
+                  <div className="space-y-1">
+                    <label htmlFor="create-sub-genre" className="text-xs text-spotify-subdued">Sub Genre</label>
+                    <select
+                      id="create-sub-genre"
+                      value={createFilters.sub_genre}
+                      onChange={(e) => setCreateFilters({ ...createFilters, sub_genre: e.target.value })}
+                      className="w-full px-3 py-2 rounded bg-spotify-elevated text-spotify-text border border-spotify-border focus:outline-none focus:border-spotify-green"
+                    >
+                      <option value="">Select sub-genre</option>
+                      {(genres || [])
+                        .filter((g) => g.main_genre === createFilters.main_genre && g.sub_genre !== g.main_genre)
+                        .map((g) => (
+                          <option key={`${g.main_genre}-${g.sub_genre}`} value={g.sub_genre}>{g.sub_genre}</option>
+                        ))}
+                    </select>
+                  </div>
+                )}
+              </>
+            )}
           </div>
           {createError && (
             <p className="text-red-500 text-sm">{createError}</p>
@@ -394,8 +445,46 @@ export function StationManager() {
                       <option value="album">Album</option>
                       <option value="cluster">Cluster</option>
                       <option value="mood">Mood</option>
+                      <option value="genre">Genre</option>
+                      <option value="sub_genre">Sub-genre</option>
                     </select>
                   </div>
+                  {['genre', 'sub_genre'].includes(editFilters.seed_type) && (
+                    <>
+                      <div className="space-y-1">
+                        <label htmlFor="edit-main-genre" className="text-xs text-spotify-subdued">Main Genre</label>
+                        <select
+                          id="edit-main-genre"
+                          value={editFilters.main_genre}
+                          onChange={(e) => setEditFilters({ ...editFilters, main_genre: e.target.value })}
+                          className="w-full px-2 py-1 rounded bg-spotify-elevated text-spotify-text border border-spotify-border"
+                        >
+                          <option value="">Select genre</option>
+                          {Array.from(new Set((genres || []).map((g) => g.main_genre))).map((g) => (
+                            <option key={g} value={g}>{g}</option>
+                          ))}
+                        </select>
+                      </div>
+                      {editFilters.seed_type === 'sub_genre' && (
+                        <div className="space-y-1">
+                          <label htmlFor="edit-sub-genre" className="text-xs text-spotify-subdued">Sub Genre</label>
+                          <select
+                            id="edit-sub-genre"
+                            value={editFilters.sub_genre}
+                            onChange={(e) => setEditFilters({ ...editFilters, sub_genre: e.target.value })}
+                            className="w-full px-2 py-1 rounded bg-spotify-elevated text-spotify-text border border-spotify-border"
+                          >
+                            <option value="">Select sub-genre</option>
+                            {(genres || [])
+                              .filter((g) => g.main_genre === editFilters.main_genre && g.sub_genre !== g.main_genre)
+                              .map((g) => (
+                                <option key={`${g.main_genre}-${g.sub_genre}`} value={g.sub_genre}>{g.sub_genre}</option>
+                              ))}
+                          </select>
+                        </div>
+                      )}
+                    </>
+                  )}
                 </div>
                 <div className="flex gap-2 justify-end">
                   <button

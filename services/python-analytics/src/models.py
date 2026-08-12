@@ -3,6 +3,14 @@ from typing import Optional, Protocol
 
 
 @dataclass
+class GenrePrediction:
+    main_genre: str
+    sub_genre: str
+    confidence: float
+    source: str
+
+
+@dataclass
 class AudioFeatures:
     bpm: float
     key: str
