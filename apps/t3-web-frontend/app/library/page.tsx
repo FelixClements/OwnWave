@@ -28,10 +28,14 @@ function Cover({ id, title, className }: { id: string; title: string; className?
 
 const PAGE_LIMIT = 20;
 
+type Status = { message: string; type: 'info' | 'success' | 'error' } | null;
+
 export default function LibraryPage() {
   const [tab, setTab] = useState<Tab>('tracks');
   const [q, setQ] = useState('');
   const [search, setSearch] = useState('');
+  const [status, setStatus] = useState<Status>(null);
+  const statusTimeout = useRef<NodeJS.Timeout | null>(null);
   const sentinelRef = useRef<HTMLDivElement | null>(null);
 
   const tracksQuery = trpc.tracks.useInfiniteQuery(
@@ -45,10 +49,31 @@ export default function LibraryPage() {
 
   const { data: albums } = trpc.albums.useQuery();
   const { data: artists } = trpc.artists.useQuery();
+
+  const clearStatus = () => {
+    if (statusTimeout.current) {
+      clearTimeout(statusTimeout.current);
+      statusTimeout.current = null;
+    }
+  };
+
+  const showStatus = (next: Status, duration = 5000) => {
+    clearStatus();
+    setStatus(next);
+    if (next && duration > 0) {
+      statusTimeout.current = setTimeout(() => setStatus(null), duration);
+    }
+  };
+
   const rescan = trpc.rescan.useMutation({
-    onSuccess: () => alert('Library rescan started.'),
-    onError: () => alert('Rescan failed.'),
+    onMutate: () => showStatus({ message: 'Rescanning library...', type: 'info' }, 0),
+    onSuccess: () => showStatus({ message: 'Library rescan started.', type: 'success' }),
+    onError: () => showStatus({ message: 'Rescan failed.', type: 'error' }),
   });
+
+  useEffect(() => {
+    return () => clearStatus();
+  }, []);
 
   const allTracks = tracksQuery.data?.pages.flat() ?? [];
 
@@ -73,11 +98,69 @@ export default function LibraryPage() {
         <button
           onClick={() => rescan.mutate()}
           disabled={rescan.isLoading}
-          className="text-xs font-semibold px-3 py-1.5 rounded-full bg-spotify-elevated text-spotify-text hover:bg-spotify-card-hover transition disabled:opacity-50"
+          className="text-xs font-semibold px-3 py-1.5 rounded-full bg-spotify-elevated text-spotify-text hover:bg-spotify-card-hover transition disabled:opacity-50 inline-flex items-center gap-2"
         >
+          {rescan.isLoading && (
+            <svg
+              className="animate-spin h-3.5 w-3.5"
+              xmlns="http://www.w3.org/2000/svg"
+              fill="none"
+              viewBox="0 0 24 24"
+            >
+              <circle
+                className="opacity-25"
+                cx="12"
+                cy="12"
+                r="10"
+                stroke="currentColor"
+                strokeWidth="4"
+              />
+              <path
+                className="opacity-75"
+                fill="currentColor"
+                d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
+              />
+            </svg>
+          )}
           {rescan.isLoading ? 'Rescanning...' : 'Rescan library'}
         </button>
       </div>
+
+      {status && (
+        <div
+          className={`rounded-lg px-4 py-2 text-sm font-semibold flex items-center gap-2 ${
+            status.type === 'success'
+              ? 'bg-green-900/40 text-spotify-green border border-spotify-green/30'
+              : status.type === 'error'
+              ? 'bg-red-900/40 text-red-400 border border-red-400/30'
+              : 'bg-spotify-elevated text-spotify-text border border-spotify-border'
+          }`}
+        >
+          {status.type === 'info' && rescan.isLoading && (
+            <svg
+              className="animate-spin h-4 w-4"
+              xmlns="http://www.w3.org/2000/svg"
+              fill="none"
+              viewBox="0 0 24 24"
+            >
+              <circle
+                className="opacity-25"
+                cx="12"
+                cy="12"
+                r="10"
+                stroke="currentColor"
+                strokeWidth="4"
+              />
+              <path
+                className="opacity-75"
+                fill="currentColor"
+                d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
+              />
+            </svg>
+          )}
+          {status.message}
+        </div>
+      )}
 
       <div className="flex gap-4 border-b border-spotify-border mb-6">
         {(['tracks', 'albums', 'artists'] as Tab[]).map((t) => (
