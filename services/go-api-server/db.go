@@ -83,7 +83,7 @@ func (db *DB) ListTracks(ctx context.Context, limit, offset int, q string) ([]Tr
 	}
 	defer rows.Close()
 
-	var tracks []Track
+	tracks := make([]Track, 0)
 	for rows.Next() {
 		var t Track
 		if err := rows.Scan(&t.ID, &t.Title, &t.Artist, &t.Album, &t.Path,
@@ -105,7 +105,7 @@ func (db *DB) ListAlbums(ctx context.Context) ([]Album, error) {
 		return nil, err
 	}
 	defer rows.Close()
-	var albums []Album
+	albums := make([]Album, 0)
 	for rows.Next() {
 		var a Album
 		if err := rows.Scan(&a.ID, &a.Title); err != nil {
@@ -126,7 +126,7 @@ func (db *DB) ListArtists(ctx context.Context) ([]Artist, error) {
 		return nil, err
 	}
 	defer rows.Close()
-	var artists []Artist
+	artists := make([]Artist, 0)
 	for rows.Next() {
 		var a Artist
 		if err := rows.Scan(&a.ID, &a.Name); err != nil {
@@ -148,7 +148,7 @@ func (db *DB) ListStations(ctx context.Context) ([]Station, error) {
 	}
 	defer rows.Close()
 
-	var stations []Station
+	stations := make([]Station, 0)
 	for rows.Next() {
 		var s Station
 		if err := rows.Scan(&s.ID, &s.Name, &s.SeedFeatures); err != nil {
@@ -179,7 +179,7 @@ func (db *DB) ListStationsWithQueueStatus(ctx context.Context) ([]StationQueueSt
 		return nil, err
 	}
 	defer rows.Close()
-	var out []StationQueueStatus
+	out := make([]StationQueueStatus, 0)
 	for rows.Next() {
 		var q StationQueueStatus
 		if err := rows.Scan(&q.ID, &q.Name, &q.SeedFeatures, &q.TrackCount, &q.PlayedCount); err != nil {
@@ -254,7 +254,7 @@ func (db *DB) GetStationQueue(ctx context.Context, stationID string) ([]TrackWit
 	}
 	defer rows.Close()
 
-	var queue []TrackWithFeatures
+	queue := make([]TrackWithFeatures, 0)
 	seen := make(map[string]bool)
 	for rows.Next() {
 		var q TrackWithFeatures
@@ -391,7 +391,11 @@ type SearchResults struct {
 }
 
 func (db *DB) Search(ctx context.Context, query string) (SearchResults, error) {
-	var results SearchResults
+	results := SearchResults{
+		Tracks:  make([]Track, 0),
+		Albums:  make([]Album, 0),
+		Artists: make([]Artist, 0),
+	}
 	tsquery := strings.TrimSpace(query)
 	if tsquery == "" {
 		return results, nil
@@ -516,7 +520,7 @@ func (db *DB) ListHistory(ctx context.Context, limit int) ([]HistoryEntry, error
 		return nil, err
 	}
 	defer rows.Close()
-	var entries []HistoryEntry
+	entries := make([]HistoryEntry, 0)
 	for rows.Next() {
 		var e HistoryEntry
 		if err := rows.Scan(&e.TrackID, &e.Title, &e.Artist, &e.Album, &e.StationID, &e.PlayedAt); err != nil {
@@ -545,7 +549,7 @@ func (db *DB) ListFeedback(ctx context.Context, feedback string, limit int) ([]T
 		return nil, err
 	}
 	defer rows.Close()
-	var tracks []Track
+	tracks := make([]Track, 0)
 	for rows.Next() {
 		var t Track
 		if err := rows.Scan(&t.ID, &t.Title, &t.Artist, &t.Album); err != nil {

@@ -39,7 +39,7 @@ export default function LibraryPage() {
     {
       enabled: tab === 'tracks',
       getNextPageParam: (lastPage, allPages) =>
-        lastPage.length < PAGE_LIMIT ? undefined : allPages.length * PAGE_LIMIT,
+        !lastPage || lastPage.length < PAGE_LIMIT ? undefined : allPages.length * PAGE_LIMIT,
     }
   );
 
