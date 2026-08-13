@@ -124,6 +124,19 @@ func (h *Handler) Rescan(w http.ResponseWriter, r *http.Request) {
 	io.Copy(w, resp.Body)
 }
 
+func (h *Handler) ScanStatus(w http.ResponseWriter, r *http.Request) {
+	jobID := chi.URLParam(r, "id")
+	resp, err := http.Get(h.pythonURL + "/jobs/" + jobID)
+	if err != nil {
+		http.Error(w, err.Error(), 500)
+		return
+	}
+	defer resp.Body.Close()
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(resp.StatusCode)
+	io.Copy(w, resp.Body)
+}
+
 func (h *Handler) RecordPlay(w http.ResponseWriter, r *http.Request) {
 	trackID := chi.URLParam(r, "id")
 	var req struct {
@@ -843,6 +856,68 @@ func (h *Handler) UpdateProfile(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+}
+
+func (h *Handler) SetupStatus(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	hasUsers, err := h.db.CountUsers(ctx)
+	if err != nil {
+		http.Error(w, err.Error(), 500)
+		return
+	}
+	trackCount, err := h.db.CountTracks(ctx)
+	if err != nil {
+		http.Error(w, err.Error(), 500)
+		return
+	}
+	state, _ := h.db.GetAppState(ctx, "setup_completed")
+	completed := false
+	if state != nil {
+		if v, ok := state["completed"].(bool); ok {
+			completed = v
+		}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"setup_completed": completed,
+		"has_users":       hasUsers > 0,
+		"track_count":     trackCount,
+	})
+}
+
+func (h *Handler) SetupComplete(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	if err := h.db.SetAppState(ctx, "setup_completed", map[string]interface{}{"completed": true}); err != nil {
+		http.Error(w, err.Error(), 500)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{"setup_completed": true})
+}
+
+func (h *Handler) SetupSummary(w http.ResponseWriter, r *http.Request) {
+	resp, err := http.Get(h.pythonURL + "/setup/summary")
+	if err != nil {
+		http.Error(w, err.Error(), 500)
+		return
+	}
+	defer resp.Body.Close()
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(resp.StatusCode)
+	io.Copy(w, resp.Body)
+}
+
+func (h *Handler) SetupStations(w http.ResponseWriter, r *http.Request) {
+	resp, err := http.Post(h.pythonURL+"/setup/stations", "application/json", r.Body)
+	if err != nil {
+		http.Error(w, err.Error(), 500)
+		return
+	}
+	defer resp.Body.Close()
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(resp.StatusCode)
+	io.Copy(w, resp.Body)
 }
 
 func (h *Handler) ChangePassword(w http.ResponseWriter, r *http.Request) {

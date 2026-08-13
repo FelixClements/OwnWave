@@ -7,7 +7,7 @@ import psycopg
 from psycopg.types.json import Jsonb
 
 from config import DATABASE_URL
-from models import AudioFeatures, GenrePrediction
+from models import AudioFeatures, GenrePrediction, ScanResult
 
 
 def get_conn():
@@ -201,6 +201,99 @@ def update_scan_job(
             """,
             (status, error, status, status, job_id),
         )
+
+
+def upsert_scan_job_progress(
+    conn: psycopg.Connection,
+    job_id: UUID,
+    master_job_id: Optional[UUID],
+    result: ScanResult,
+) -> None:
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            INSERT INTO scan_job_progress (job_id, master_job_id, stats, updated_at)
+            VALUES (%s, %s, %s, NOW())
+            ON CONFLICT (job_id) DO UPDATE
+            SET master_job_id = EXCLUDED.master_job_id,
+                stats = EXCLUDED.stats,
+                updated_at = NOW()
+            """,
+            (job_id, master_job_id, Jsonb(result.to_dict())),
+        )
+
+
+def get_scan_job(conn: psycopg.Connection, job_id: UUID) -> Optional[dict]:
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT id, path, status, error, started_at, finished_at, created_at "
+            "FROM scan_jobs WHERE id = %s",
+            (job_id,),
+        )
+        row = cur.fetchone()
+        if not row:
+            return None
+        return {
+            "id": str(row[0]),
+            "path": row[1],
+            "status": row[2],
+            "error": row[3],
+            "started_at": row[4].isoformat() if row[4] else None,
+            "finished_at": row[5].isoformat() if row[5] else None,
+            "created_at": row[6].isoformat() if row[6] else None,
+        }
+
+
+def get_scan_status(conn: psycopg.Connection, job_id: UUID) -> Optional[dict]:
+    job = get_scan_job(conn, job_id)
+    if not job:
+        return None
+
+    stats = {
+        "total_files": 0,
+        "imported": 0,
+        "scanned": 0,
+        "features": 0,
+        "model_success": 0,
+        "model_failed": 0,
+        "failed_paths": [],
+    }
+
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT stats FROM scan_job_progress WHERE master_job_id = %s",
+            (job_id,),
+        )
+        for row in cur.fetchall():
+            s = row[0] or {}
+            stats["total_files"] += s.get("total_files", 0) or 0
+            stats["imported"] += s.get("imported", 0) or 0
+            stats["scanned"] += s.get("scanned", 0) or 0
+            stats["features"] += s.get("features", 0) or 0
+            stats["model_success"] += s.get("model_success", 0) or 0
+            stats["model_failed"] += s.get("model_failed", 0) or 0
+            for fp in s.get("failed_paths", []) or []:
+                stats["failed_paths"].append(fp)
+
+    # Also include the master job's own progress row if no sub-jobs yet.
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT stats FROM scan_job_progress WHERE job_id = %s",
+            (job_id,),
+        )
+        row = cur.fetchone()
+        if row and not stats["total_files"]:
+            s = row[0] or {}
+            stats["total_files"] = s.get("total_files", 0) or 0
+            stats["imported"] = s.get("imported", 0) or 0
+            stats["scanned"] = s.get("scanned", 0) or 0
+            stats["features"] = s.get("features", 0) or 0
+            stats["model_success"] = s.get("model_success", 0) or 0
+            stats["model_failed"] = s.get("model_failed", 0) or 0
+            stats["failed_paths"] = list(s.get("failed_paths", []) or [])
+
+    job["stats"] = stats
+    return job
 
 
 def create_station(
@@ -565,3 +658,101 @@ def delete_orphaned_auto_stations(conn: psycopg.Connection, valid_names: List[st
             (list(valid_names),),
         )
         return cur.rowcount
+
+
+def get_app_state(conn: psycopg.Connection, key: str) -> Optional[dict]:
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT value FROM app_state WHERE key = %s",
+            (key,),
+        )
+        row = cur.fetchone()
+        return row[0] if row else None
+
+
+def set_app_state(conn: psycopg.Connection, key: str, value: dict) -> None:
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            INSERT INTO app_state (key, value, updated_at)
+            VALUES (%s, %s, NOW())
+            ON CONFLICT (key) DO UPDATE SET
+                value = EXCLUDED.value,
+                updated_at = NOW()
+            """,
+            (key, Jsonb(value)),
+        )
+
+
+def count_tracks(conn: psycopg.Connection) -> int:
+    with conn.cursor() as cur:
+        cur.execute("SELECT COUNT(*) FROM tracks")
+        return cur.fetchone()[0]
+
+
+def count_users(conn: psycopg.Connection) -> int:
+    with conn.cursor() as cur:
+        cur.execute("SELECT COUNT(*) FROM users")
+        return cur.fetchone()[0]
+
+
+def get_main_genre_counts(conn: psycopg.Connection) -> List[dict]:
+    """Return main genres with how many tracks and sub-genres each has."""
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            SELECT main_genre,
+                   COUNT(DISTINCT track_id) as track_count,
+                   COUNT(DISTINCT sub_genre) as sub_count
+            FROM track_genres
+            GROUP BY main_genre
+            ORDER BY track_count DESC
+            """
+        )
+        return [
+            {"main_genre": r[0], "track_count": r[1], "sub_count": r[2]}
+            for r in cur.fetchall()
+        ]
+
+
+def get_sub_genre_counts(conn: psycopg.Connection) -> List[dict]:
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            SELECT main_genre, sub_genre,
+                   COUNT(DISTINCT track_id) as track_count
+            FROM track_genres
+            GROUP BY main_genre, sub_genre
+            ORDER BY main_genre, sub_genre
+            """
+        )
+        return [
+            {"main_genre": r[0], "sub_genre": r[1], "track_count": r[2]}
+            for r in cur.fetchall()
+        ]
+
+
+def get_uncovered_tracks(conn: psycopg.Connection) -> List[UUID]:
+    """Tracks that are not assigned to any station."""
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            SELECT t.id
+            FROM tracks t
+            LEFT JOIN station_tracks st ON t.id = st.track_id
+            WHERE st.track_id IS NULL
+            """
+        )
+        return [r[0] for r in cur.fetchall()]
+
+
+def get_station_track_ids(conn: psycopg.Connection, station_id: UUID) -> List[UUID]:
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT track_id FROM station_tracks WHERE station_id = %s",
+            (station_id,),
+        )
+        return [r[0] for r in cur.fetchall()]
+
+
+

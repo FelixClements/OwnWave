@@ -30,11 +30,92 @@ const PAGE_LIMIT = 20;
 
 type Status = { message: string; type: 'info' | 'success' | 'error' } | null;
 
+type ScanStatusData = {
+  id: string;
+  path: string;
+  status: string;
+  stats: {
+    total_files: number;
+    imported: number;
+    scanned: number;
+    features: number;
+    model_success: number;
+    model_failed: number;
+    failed_paths: { path: string; error: string }[];
+  };
+};
+
+function ScanStatusPanel({ data }: { data: ScanStatusData }) {
+  const [showFailed, setShowFailed] = useState(false);
+  const stats = data.stats;
+
+  return (
+    <div className="rounded-lg border border-spotify-border bg-spotify-elevated p-4 space-y-3">
+      <div className="flex items-center justify-between">
+        <h3 className="text-sm font-bold text-spotify-text uppercase tracking-wide">Scan status</h3>
+        <span
+          className={`text-xs font-semibold px-2 py-0.5 rounded ${
+            data.status === 'completed'
+              ? 'bg-green-900/40 text-spotify-green'
+              : data.status === 'failed'
+              ? 'bg-red-900/40 text-red-400'
+              : 'bg-spotify-card text-spotify-text'
+          }`}
+        >
+          {data.status}
+        </span>
+      </div>
+
+      <div className="grid grid-cols-2 sm:grid-cols-6 gap-3">
+        <StatBox label="Found" value={stats.total_files} />
+        <StatBox label="Imported" value={stats.imported} />
+        <StatBox label="Scanned" value={stats.scanned} />
+        <StatBox label="Features" value={stats.features} />
+        <StatBox label="Model OK" value={stats.model_success} />
+        <StatBox label="Model failed" value={stats.model_failed} />
+      </div>
+
+      {stats.failed_paths.length > 0 && (
+        <div className="space-y-2">
+          <button
+            onClick={() => setShowFailed(!showFailed)}
+            className="text-xs font-semibold text-spotify-green hover:underline"
+          >
+            {showFailed ? 'Hide' : 'Show'} {stats.failed_paths.length} failed file
+            {stats.failed_paths.length === 1 ? '' : 's'}
+          </button>
+          {showFailed && (
+            <div className="max-h-48 overflow-y-auto rounded border border-spotify-border bg-black p-2 space-y-1 text-xs">
+              {stats.failed_paths.map((fp, i) => (
+                <div key={i} className="text-spotify-subdued break-all">
+                  <span className="text-spotify-text font-medium">{fp.path}</span>
+                  <span className="mx-1">—</span>
+                  {fp.error}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function StatBox({ label, value }: { label: string; value: number }) {
+  return (
+    <div className="rounded bg-black p-2 text-center">
+      <div className="text-lg font-bold text-spotify-text">{value}</div>
+      <div className="text-[10px] uppercase tracking-wide text-spotify-subdued">{label}</div>
+    </div>
+  );
+}
+
 export default function LibraryPage() {
   const [tab, setTab] = useState<Tab>('tracks');
   const [q, setQ] = useState('');
   const [search, setSearch] = useState('');
   const [status, setStatus] = useState<Status>(null);
+  const [scanJobId, setScanJobId] = useState<string | null>(null);
   const statusTimeout = useRef<NodeJS.Timeout | null>(null);
   const sentinelRef = useRef<HTMLDivElement | null>(null);
 
@@ -65,9 +146,21 @@ export default function LibraryPage() {
     }
   };
 
+  const scanStatus = trpc.scanStatus.useQuery(
+    { jobId: scanJobId ?? '' },
+    {
+      enabled: !!scanJobId,
+      refetchInterval: (data) =>
+        data && (data.status === 'completed' || data.status === 'failed') ? false : 1000,
+    }
+  );
+
   const rescan = trpc.rescan.useMutation({
     onMutate: () => showStatus({ message: 'Rescanning library...', type: 'info' }, 0),
-    onSuccess: () => showStatus({ message: 'Library rescan started.', type: 'success' }),
+    onSuccess: (data) => {
+      setScanJobId(data.job_id ?? null);
+      showStatus({ message: 'Library rescan started.', type: 'success' });
+    },
     onError: () => showStatus({ message: 'Rescan failed.', type: 'error' }),
   });
 
@@ -161,6 +254,8 @@ export default function LibraryPage() {
           {status.message}
         </div>
       )}
+
+      {scanStatus.data && <ScanStatusPanel data={scanStatus.data} />}
 
       <div className="flex gap-4 border-b border-spotify-border mb-6">
         {(['tracks', 'albums', 'artists'] as Tab[]).map((t) => (

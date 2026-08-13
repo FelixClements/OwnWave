@@ -33,6 +33,10 @@ export const appRouter = t.router({
 
   rescan: t.procedure.mutation(async () => api.rescan()),
 
+  scanStatus: t.procedure
+    .input(z.object({ jobId: z.string() }))
+    .query(async ({ input }) => api.getScanStatus(input.jobId)),
+
   register: t.procedure
     .input(z.object({ username: z.string(), password: z.string() }))
     .mutation(async ({ input }) => api.register(input.username, input.password)),
@@ -167,6 +171,13 @@ export const appRouter = t.router({
       const { url } = await api.getStreamUrl(input.id, { format: input.format });
       return `${goBase}${url}`;
     }),
+
+  setupStatus: t.procedure.query(async () => api.setupStatus()),
+  setupSummary: t.procedure.query(async () => api.setupSummary()),
+  setupStations: t.procedure
+    .input(z.object({ selectedMainGenres: z.array(z.string()) }))
+    .mutation(async ({ input }) => api.setupStations(input.selectedMainGenres)),
+  setupComplete: t.procedure.mutation(async () => api.setupComplete()),
 });
 
 export type AppRouter = typeof appRouter;

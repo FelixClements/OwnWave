@@ -9,6 +9,7 @@ import db
 from celery_app import celery_app
 from config import MUSIC_DIR
 from folder_importer import import_folder
+from models import ScanResult
 from scanner import SUPPORTED_EXTS
 
 
@@ -25,13 +26,21 @@ def process_audio_folder(self, folder_path: str, master_job_id: str, force: bool
             db.update_scan_job(conn, job_id, "running")
             conn.commit()
 
-        track_ids = import_folder(folder_path, analyze=True, force=force)
+        result = import_folder(folder_path, analyze=True, force=force)
 
         with db.get_conn() as conn:
+            db.upsert_scan_job_progress(
+                conn, job_id, UUID(master_job_id), result
+            )
             db.update_scan_job(conn, job_id, "completed")
             conn.commit()
 
-        return {"folder": folder_path, "tracks": len(track_ids), "job_id": str(job_id)}
+        return {
+            "folder": folder_path,
+            "tracks": len(result.track_ids),
+            "stats": result.to_dict(),
+            "job_id": str(job_id),
+        }
     except Exception as exc:
         with db.get_conn() as conn:
             db.update_scan_job(conn, job_id, "failed", error=str(exc))
@@ -80,6 +89,9 @@ def trigger_library_scan(master_job_id: Optional[str], path: str, force: bool = 
 
     if not folders:
         with db.get_conn() as conn:
+            db.upsert_scan_job_progress(
+                conn, UUID(master_job_id), None, ScanResult()
+            )
             db.update_scan_job(conn, UUID(master_job_id), "completed")
             conn.commit()
         return {"master_job_id": master_job_id, "dispatched": 0}

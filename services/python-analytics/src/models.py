@@ -1,5 +1,34 @@
-from dataclasses import dataclass
-from typing import Optional, Protocol
+from dataclasses import dataclass, field
+from typing import List, Optional, Protocol
+
+
+@dataclass
+class FailedPath:
+    path: str
+    error: str
+
+
+@dataclass
+class ScanResult:
+    total_files: int = 0
+    imported: int = 0
+    scanned: int = 0
+    features: int = 0
+    model_success: int = 0
+    model_failed: int = 0
+    failed_paths: List[FailedPath] = field(default_factory=list)
+    track_ids: List = field(default_factory=list)
+
+    def to_dict(self):
+        return {
+            "total_files": self.total_files,
+            "imported": self.imported,
+            "scanned": self.scanned,
+            "features": self.features,
+            "model_success": self.model_success,
+            "model_failed": self.model_failed,
+            "failed_paths": [{"path": f.path, "error": f.error} for f in self.failed_paths],
+        }
 
 
 @dataclass

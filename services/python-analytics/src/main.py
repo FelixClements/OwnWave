@@ -45,8 +45,8 @@ def main():
 
     if args.command == "scan":
         wait_for_db()
-        track_ids = scan_path(args.path, force=args.force)
-        print(f"Scanned {len(track_ids)} tracks")
+        result = scan_path(args.path, force=args.force)
+        print(f"Scanned {result.to_dict()}")
 
     elif args.command == "scan-celery":
         wait_for_db()

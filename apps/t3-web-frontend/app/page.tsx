@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useMemo } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { useStation } from '@/lib/station';
 import { getCoverUrl } from '@/lib/api';
 import { trpc } from '@/lib/trpc/client';
@@ -74,8 +75,16 @@ function Cover({
 }
 
 export default function Home() {
+  const router = useRouter();
   const { selectedStation, setSelectedStation, stations, queue, nowPlaying, isPlaying, setIsPlaying, setPlayingStation, playingStation } = useStation();
   const [searchQuery, setSearchQuery] = useState('');
+
+  const setupStatus = trpc.setupStatus.useQuery();
+  useEffect(() => {
+    if (setupStatus.data && !setupStatus.data.setup_completed) {
+      router.push('/setup');
+    }
+  }, [setupStatus.data, router]);
 
   const utils = trpc.useContext();
   const recordFeedback = trpc.recordFeedback.useMutation({

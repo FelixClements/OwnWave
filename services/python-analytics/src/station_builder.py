@@ -9,12 +9,19 @@ from config import GENRE_MIN_CONFIDENCE, GENRE_MIN_TRACKS_PER_STATION
 from db import (
     create_station,
     get_all_tracks_with_features,
+    get_station_track_ids,
     get_tracks_by_genre,
+    get_uncovered_tracks,
     insert_station_tracks,
     list_genres,
     upsert_auto_station,
 )
 from similarity import get_similar_tracks
+
+
+def _title_case_name(name: str) -> str:
+    """Convert a raw genre string to a clean title-cased station name."""
+    return " ".join(part.capitalize() for part in name.split(" "))
 
 
 SEED_TYPES = {"track", "artist", "album", "mood", "cluster", "genre", "sub_genre"}
@@ -285,3 +292,56 @@ def _build_station_from_seed(conn: psycopg.Connection, name: str, seed: dict, le
         insert_station_tracks(conn, station_id, track_ids)
     except Exception as exc:
         print(f"[rebuild_genre_stations] error building {name}: {exc}")
+
+
+def setup_main_genre_stations(
+    conn: psycopg.Connection,
+    selected_main_genres: List[str],
+    station_length: int = 50,
+) -> dict:
+    """Create main-genre stations from the setup wizard."""
+    created = 0
+    created_ids = []
+    all_covered = set()
+
+    for main_genre in selected_main_genres:
+        track_ids = set(get_tracks_by_genre(conn, main_genre, min_confidence=GENRE_MIN_CONFIDENCE))
+        if not track_ids:
+            continue
+
+        name = _title_case_name(main_genre)
+        seed = {"type": "genre", "main_genre": main_genre}
+
+        try:
+            station_id = upsert_auto_station(conn, name, seed, source="setup")
+            if len(track_ids) >= 2:
+                _build_station_from_seed(conn, name, seed, station_length)
+            else:
+                with conn.cursor() as cur:
+                    cur.execute("DELETE FROM station_tracks WHERE station_id = %s", (station_id,))
+                insert_station_tracks(conn, station_id, list(track_ids))
+            conn.commit()
+            created += 1
+            created_ids.append(str(station_id))
+            all_covered |= set(get_station_track_ids(conn, station_id))
+        except Exception as exc:
+            print(f"[setup_main_genre_stations] error building {name}: {exc}")
+
+    # Ensure every track is in at least one station.
+    uncovered = [t for t in get_uncovered_tracks(conn) if t not in all_covered]
+    if uncovered:
+        uncategorized_name = "Uncategorized"
+        uncategorized_id = upsert_auto_station(
+            conn,
+            uncategorized_name,
+            seed_features={"type": "uncategorized"},
+            source="setup",
+        )
+        with conn.cursor() as cur:
+            cur.execute("DELETE FROM station_tracks WHERE station_id = %s", (uncategorized_id,))
+        insert_station_tracks(conn, uncategorized_id, uncovered)
+        conn.commit()
+        created += 1
+        created_ids.append(str(uncategorized_id))
+
+    return {"created": created, "station_ids": created_ids, "uncovered": len(uncovered)}

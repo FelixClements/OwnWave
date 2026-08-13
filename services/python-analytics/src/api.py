@@ -1,5 +1,5 @@
 from contextlib import contextmanager
-from typing import Optional
+from typing import List, Optional
 from uuid import UUID
 
 from fastapi import BackgroundTasks, FastAPI, HTTPException
@@ -10,7 +10,7 @@ from celery_app import celery_app
 from config import CELERY_BROKER_URL, MUSIC_DIR
 from scanner import scan_path
 from similarity import get_similar_tracks
-from station_builder import build_station
+from station_builder import build_station, setup_main_genre_stations
 
 app = FastAPI(title="OwnWave Analytics")
 
@@ -42,6 +42,10 @@ class StationRequest(BaseModel):
     cluster_id: Optional[int] = None
     main_genre: Optional[str] = None
     sub_genre: Optional[str] = None
+
+
+class SetupStationsRequest(BaseModel):
+    selected_main_genres: List[str]
 
 
 @contextmanager
@@ -94,24 +98,10 @@ async def scan(req: ScanRequest, background_tasks: BackgroundTasks):
 @app.get("/jobs/{job_id}")
 async def get_job(job_id: UUID):
     with _db_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                "SELECT id, path, status, error, started_at, finished_at, created_at "
-                "FROM scan_jobs WHERE id = %s",
-                (job_id,),
-            )
-            row = cur.fetchone()
-            if not row:
-                raise HTTPException(status_code=404, detail="not found")
-            return {
-                "id": str(row[0]),
-                "path": row[1],
-                "status": row[2],
-                "error": row[3],
-                "started_at": row[4],
-                "finished_at": row[5],
-                "created_at": row[6],
-            }
+        status = db.get_scan_status(conn, job_id)
+        if not status:
+            raise HTTPException(status_code=404, detail="not found")
+        return status
 
 
 @app.post("/stations")
@@ -271,9 +261,32 @@ def _run_scan(job_id: UUID, path: str, force: bool):
         db.update_scan_job(conn, job_id, "running")
         conn.commit()
         try:
-            scan_path(path, force=force)
+            result = scan_path(path, force=force)
+            db.upsert_scan_job_progress(conn, job_id, None, result)
             db.update_scan_job(conn, job_id, "completed")
             conn.commit()
         except Exception as e:
             db.update_scan_job(conn, job_id, "failed", error=str(e))
             conn.commit()
+
+
+@app.get("/setup/summary")
+async def setup_summary():
+    with _db_conn() as conn:
+        total_tracks = db.count_tracks(conn)
+        main_genres = db.get_main_genre_counts(conn)
+        sub_genres = db.get_sub_genre_counts(conn)
+        uncovered = db.get_uncovered_tracks(conn)
+        return {
+            "total_tracks": total_tracks,
+            "main_genres": main_genres,
+            "sub_genres": sub_genres,
+            "uncovered": len(uncovered),
+        }
+
+
+@app.post("/setup/stations")
+async def setup_stations(req: SetupStationsRequest):
+    with _db_conn() as conn:
+        result = setup_main_genre_stations(conn, req.selected_main_genres)
+        return result

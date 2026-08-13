@@ -160,7 +160,47 @@ export type TrackGenre = {
   source: string;
 };
 
+export type FailedPath = { path: string; error: string };
+
+export type ScanStatus = {
+  id: string;
+  path: string;
+  status: string;
+  error?: string;
+  started_at?: string;
+  finished_at?: string;
+  created_at?: string;
+  stats: {
+    total_files: number;
+    imported: number;
+    scanned: number;
+    features: number;
+    model_success: number;
+    model_failed: number;
+    failed_paths: FailedPath[];
+  };
+};
+
 export type CreateStationResponse = { station_id: string };
+
+export type SetupStatus = {
+  setup_completed: boolean;
+  has_users: boolean;
+  track_count: number;
+};
+
+export type SetupSummary = {
+  total_tracks: number;
+  main_genres: { main_genre: string; track_count: number; sub_count: number }[];
+  sub_genres: { main_genre: string; sub_genre: string; track_count: number }[];
+  uncovered: number;
+};
+
+export type SetupStationsResponse = {
+  created: number;
+  station_ids: string[];
+  uncovered: number;
+};
 
 export class OwnWaveAPI {
   constructor(private baseURL: string = DEFAULT_BASE_URL) {}
@@ -209,6 +249,10 @@ export class OwnWaveAPI {
 
   rescan() {
     return this.request<{ job_id?: string }>('/rescan', { method: 'POST' });
+  }
+
+  getScanStatus(jobId: string) {
+    return this.request<ScanStatus>(`/admin/scan/${encodeURIComponent(jobId)}`);
   }
 
   getTrack(id: string) {
@@ -399,6 +443,28 @@ export class OwnWaveAPI {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
+    });
+  }
+
+  setupStatus() {
+    return this.request<SetupStatus>('/setup/status');
+  }
+
+  setupSummary() {
+    return this.request<SetupSummary>('/setup/summary');
+  }
+
+  setupStations(selectedMainGenres: string[]) {
+    return this.request<SetupStationsResponse>('/setup/stations', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ selected_main_genres: selectedMainGenres }),
+    });
+  }
+
+  setupComplete() {
+    return this.request<{ setup_completed: boolean }>('/setup/complete', {
+      method: 'POST',
     });
   }
 }

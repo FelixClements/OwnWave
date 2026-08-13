@@ -18,9 +18,9 @@ from db import (
     upsert_track_genres,
 )
 from feature_vector import build_feature_vector
-from models import AudioFeatures, GenrePrediction
+from models import AudioFeatures, FailedPath, GenrePrediction, ScanResult
 from scanner import SUPPORTED_EXTS, _get_duration, _parse_int
-from tags import read_tags
+from tags import extract_genres_from_tags, read_tags
 
 if ENABLE_GENRE_ANALYSIS:
     import genre_analyzer
@@ -46,7 +46,7 @@ def _file_changed(
     )
 
 
-def import_folder(folder_path: str, analyze: bool = True, force: bool = False) -> List[UUID]:
+def import_folder(folder_path: str, analyze: bool = True, force: bool = False) -> ScanResult:
     """Import a single music folder with batch database upserts.
 
     Performs incremental updates: files whose size/mtime have not changed
@@ -61,11 +61,13 @@ def import_folder(folder_path: str, analyze: bool = True, force: bool = False) -
     files = sorted(
         p for p in folder.rglob("*") if p.is_file() and p.suffix.lower() in SUPPORTED_EXTS
     )
+    result = ScanResult(total_files=len(files))
+
     if not files:
         with get_conn() as conn:
             _remove_deleted_tracks(conn, folder, set())
             conn.commit()
-        return []
+        return result
 
     analyzers = get_analyzers() if analyze else None
     track_records: List[dict] = []
@@ -88,17 +90,28 @@ def import_folder(folder_path: str, analyze: bool = True, force: bool = False) -
                         if analyzers and not stats.get("has_features"):
                             # Metadata is up to date but features are missing;
                             # analyze and backfill without rebuilding the track row.
-                            feature_rec, predictions = _build_feature_record(
+                            result.scanned += 1
+                            feature_rec, predictions, error = _build_feature_record(
                                 conn, file_path, path_str, analyzers
                             )
                             if feature_rec:
                                 feature_records.append(feature_rec)
                                 processed_ids.append(stats["id"])
+                                result.features += 1
                             if predictions:
                                 genre_records.append((path_str, predictions))
+                                result.model_success += 1
+                            if error:
+                                if feature_rec:
+                                    result.model_failed += 1
+                                result.failed_paths.append(FailedPath(path_str, error))
+                        # Always backfill tag-based genres for existing tracks.
+                        tag_genres = extract_genres_from_tags(read_tags(path_str))
+                        if tag_genres:
+                            upsert_track_genres(conn, stats["id"], tag_genres)
                         continue
 
-                    track_rec, feature_rec, predictions = _build_record(
+                    track_rec, feature_rec, predictions, tag_genres, feature_error = _build_record(
                         conn,
                         file_path,
                         analyzers,
@@ -108,12 +121,28 @@ def import_folder(folder_path: str, analyze: bool = True, force: bool = False) -
                     )
                     if track_rec:
                         track_records.append(track_rec)
+                        result.imported += 1
+                        if tag_genres:
+                            genre_records.append((track_rec["path"], tag_genres))
+                    if analyzers:
+                        result.scanned += 1
                     if feature_rec:
                         feature_records.append(feature_rec)
+                        result.features += 1
                     if predictions:
                         genre_records.append((track_rec["path"], predictions))
+                        result.model_success += 1
+                    elif ENABLE_GENRE_ANALYSIS and not feature_error:
+                        # Audio features succeeded but model produced no predictions.
+                        result.model_failed += 1
+                        result.failed_paths.append(FailedPath(path_str, "genre analysis produced no predictions"))
+
+                    if feature_error:
+                        result.failed_paths.append(FailedPath(path_str, feature_error))
                 except Exception as e:
+                    reason = str(e)
                     print(f"Error processing {file_path}: {e}")
+                    result.failed_paths.append(FailedPath(str(file_path), reason))
                     continue
 
             if track_records:
@@ -143,11 +172,13 @@ def import_folder(folder_path: str, analyze: bool = True, force: bool = False) -
                 if track_id:
                     processed_ids.append(track_id)
 
+            result.track_ids = processed_ids
+
         except Exception:
             conn.rollback()
             raise
 
-    return processed_ids
+    return result
 
 
 def _build_record(
@@ -191,18 +222,19 @@ def _build_record(
         "file_size": file_size,
         "file_mtime": file_mtime,
     }
+    tag_genres = extract_genres_from_tags(tags)
 
-    feature_rec, predictions = _build_feature_record(conn, file_path, path_str, analyzers) if analyzers and (force or not _has_features(conn, path_str)) else (None, [])
-    if not predictions and ENABLE_GENRE_ANALYSIS:
-        try:
-            predictions = genre_analyzer.analyze(path_str)
-        except Exception as exc:
-            print(f"[folder_importer] genre analysis failed for {path_str}: {exc}")
+    feature_error = None
+    if analyzers and (force or not _has_features(conn, path_str)):
+        feature_rec, predictions, feature_error = _build_feature_record(conn, file_path, path_str, analyzers)
+    else:
+        feature_rec, predictions = None, []
 
-    return track_rec, feature_rec, predictions
+    return track_rec, feature_rec, predictions, tag_genres, feature_error
 
 
 def _build_feature_record(conn: psycopg.Connection, file_path: Path, path_str: str, analyzers: List[Any]) -> tuple:
+    error = None
     try:
         features = analyze_file(path_str, analyzers=analyzers)
         record = {
@@ -222,17 +254,19 @@ def _build_feature_record(conn: psycopg.Connection, file_path: Path, path_str: s
             "feature_vector": build_feature_vector(features, conn),
         }
     except Exception as exc:
+        error = f"audio analysis failed: {exc}"
         print(f"Error analyzing {file_path}: {exc}")
-        return None, []
+        return None, [], error
 
     predictions = []
     if ENABLE_GENRE_ANALYSIS:
         try:
             predictions = genre_analyzer.analyze(path_str)
         except Exception as exc:
+            error = f"genre analysis failed: {exc}"
             print(f"[folder_importer] genre analysis failed for {path_str}: {exc}")
 
-    return record, predictions
+    return record, predictions, error
 
 
 def _has_features(conn: psycopg.Connection, path_str: str) -> bool:

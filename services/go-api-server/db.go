@@ -559,3 +559,39 @@ func (db *DB) ListFeedback(ctx context.Context, feedback string, limit int) ([]T
 	}
 	return tracks, rows.Err()
 }
+
+func (db *DB) CountUsers(ctx context.Context) (int, error) {
+	var count int
+	err := db.pool.QueryRow(ctx, `SELECT COUNT(*) FROM users`).Scan(&count)
+	return count, err
+}
+
+func (db *DB) CountTracks(ctx context.Context) (int, error) {
+	var count int
+	err := db.pool.QueryRow(ctx, `SELECT COUNT(*) FROM tracks`).Scan(&count)
+	return count, err
+}
+
+func (db *DB) GetAppState(ctx context.Context, key string) (map[string]interface{}, error) {
+	var value map[string]interface{}
+	err := db.pool.QueryRow(ctx, `
+		SELECT value
+		FROM app_state
+		WHERE key = $1
+	`, key).Scan(&value)
+	if err != nil {
+		return nil, err
+	}
+	return value, nil
+}
+
+func (db *DB) SetAppState(ctx context.Context, key string, value map[string]interface{}) error {
+	_, err := db.pool.Exec(ctx, `
+		INSERT INTO app_state (key, value, updated_at)
+		VALUES ($1, $2, NOW())
+		ON CONFLICT (key) DO UPDATE SET
+			value = EXCLUDED.value,
+			updated_at = NOW()
+	`, key, value)
+	return err
+}
