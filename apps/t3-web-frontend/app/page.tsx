@@ -74,6 +74,74 @@ function Cover({
   );
 }
 
+const STATION_PATTERNS = [
+  {
+    backgroundImage:
+      'radial-gradient(circle at 30% 30%, rgba(255,255,255,0.4) 0 8%, transparent 9%), radial-gradient(circle at 70% 70%, rgba(255,255,255,0.25) 0 12%, transparent 13%)',
+    backgroundSize: '48px 48px',
+  },
+  {
+    backgroundImage:
+      'repeating-linear-gradient(45deg, rgba(255,255,255,0.15) 0, rgba(255,255,255,0.15) 8px, transparent 8px, transparent 16px)',
+  },
+  {
+    backgroundImage:
+      'conic-gradient(from 0deg, rgba(255,255,255,0.12), transparent 30%, rgba(255,255,255,0.12) 50%, transparent 80%)',
+  },
+  {
+    backgroundImage:
+      'linear-gradient(rgba(255,255,255,0.1) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.1) 1px, transparent 1px)',
+    backgroundSize: '24px 24px',
+  },
+];
+
+function hashString(s: string) {
+  return s.split('').reduce((a, c) => a + c.charCodeAt(0) * 31, 0);
+}
+
+function StationCover({ name }: { name: string }) {
+  const style = useMemo(() => {
+    const seed = hashString(name);
+    const hue1 = Math.abs(seed % 360);
+    const hue2 = Math.abs((seed * 17 + 120) % 360);
+    const angle = Math.abs((seed * 13) % 360);
+    const patternIdx = Math.abs(seed % STATION_PATTERNS.length);
+    const patternOpacity = 0.08 + (Math.abs(seed) % 6) * 0.05;
+    const fontSize = 2.2 + (Math.abs(seed) % 5) * 0.4;
+    const letterSpacing = 0.02 + (Math.abs(seed) % 7) / 100;
+    const display = name.replace(/ Radio$/i, '');
+    const pattern = STATION_PATTERNS[patternIdx];
+    return { hue1, hue2, angle, patternIdx, patternOpacity, fontSize, letterSpacing, display, pattern };
+  }, [name]);
+
+  return (
+    <div
+      className="w-full aspect-square rounded-md shadow-lg mb-4 relative overflow-hidden flex items-center justify-center text-white font-black uppercase break-words leading-none z-0"
+      style={{
+        background: `linear-gradient(${style.angle}deg, hsl(${style.hue1} 75% 30%), hsl(${style.hue2} 75% 50%))`,
+      }}
+    >
+      <div
+        className="absolute inset-0"
+        style={{
+          backgroundImage: style.pattern.backgroundImage,
+          backgroundSize: style.pattern.backgroundSize,
+          opacity: style.patternOpacity,
+        }}
+      />
+      <span
+        className="relative z-10 px-4"
+        style={{
+          fontSize: `${style.fontSize}rem`,
+          letterSpacing: `${style.letterSpacing}rem`,
+        }}
+      >
+        {style.display}
+      </span>
+    </div>
+  );
+}
+
 export default function Home() {
   const router = useRouter();
   const { selectedStation, setSelectedStation, stations, queue, nowPlaying, isPlaying, setIsPlaying, setPlayingStation, playingStation } = useStation();
@@ -144,9 +212,7 @@ export default function Home() {
                   selectedStation === station.id ? 'ring-2 ring-spotify-green' : ''
                 }`}
               >
-                <div className="w-full aspect-square rounded-md bg-gradient-to-br from-spotify-green to-spotify-green-hover shadow-lg mb-4 flex items-center justify-center text-black font-bold text-2xl">
-                  {station.name.charAt(0).toUpperCase()}
-                </div>
+                <StationCover name={station.name} />
                 <h3 className="font-bold text-spotify-text truncate">{station.name}</h3>
                 <p className="text-sm text-spotify-subdued">AI Radio</p>
               </button>
