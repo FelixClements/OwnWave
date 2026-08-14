@@ -108,8 +108,10 @@ function StationCover({ name }: { name: string }) {
     const angle = Math.abs((seed * 13) % 360);
     const patternIdx = Math.abs(seed % STATION_PATTERNS.length);
     const patternOpacity = 0.08 + (Math.abs(seed) % 6) * 0.05;
-    const fontSize = Math.max(1.1, 3.6 - display.length * 0.16);
-    const letterSpacing = Math.max(0, 0.08 - display.length * 0.005);
+    const words = display.trim().split(/\s+/);
+    const shrink = words.length > 1 ? 0.12 : 0.16;
+    const fontSize = Math.max(1.25, 3.8 - display.length * shrink);
+    const letterSpacing = Math.max(-0.02, 0.08 - display.length * 0.005);
     const pattern = STATION_PATTERNS[patternIdx];
     return { hue1, hue2, angle, patternIdx, patternOpacity, fontSize, letterSpacing, display, pattern };
   }, [name]);
