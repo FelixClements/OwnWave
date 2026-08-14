@@ -102,14 +102,14 @@ function hashString(s: string) {
 function StationCover({ name }: { name: string }) {
   const style = useMemo(() => {
     const seed = hashString(name);
+    const display = name.replace(/ Radio$/i, '');
     const hue1 = Math.abs(seed % 360);
     const hue2 = Math.abs((seed * 17 + 120) % 360);
     const angle = Math.abs((seed * 13) % 360);
     const patternIdx = Math.abs(seed % STATION_PATTERNS.length);
     const patternOpacity = 0.08 + (Math.abs(seed) % 6) * 0.05;
-    const fontSize = 2.2 + (Math.abs(seed) % 5) * 0.4;
+    const fontSize = Math.max(1.25, 3.8 - display.length * 0.12);
     const letterSpacing = 0.02 + (Math.abs(seed) % 7) / 100;
-    const display = name.replace(/ Radio$/i, '');
     const pattern = STATION_PATTERNS[patternIdx];
     return { hue1, hue2, angle, patternIdx, patternOpacity, fontSize, letterSpacing, display, pattern };
   }, [name]);
