@@ -158,11 +158,58 @@ export default function Home() {
 
   const utils = trpc.useContext();
   const recordFeedback = trpc.recordFeedback.useMutation({
+    onMutate: async (input) => {
+      if (!selectedStation) return {};
+      await utils.queue.cancel({ id: selectedStation });
+      const previous = utils.queue.getData({ id: selectedStation });
+      utils.queue.setData({ id: selectedStation }, (old) => {
+        if (!old) return old;
+        if (input.feedback === 'like') {
+          return old.map((t) => (t.id === input.id ? { ...t, liked: true } : t));
+        }
+        if (input.feedback === 'skip') {
+          const idx = old.findIndex((t) => t.id === input.id);
+          if (idx === -1) return old;
+          const moved = old[idx];
+          const rest = old.filter((_, i) => i !== idx);
+          return [...rest, moved];
+        }
+        if (input.feedback === 'ban') {
+          return old.filter((t) => t.id !== input.id);
+        }
+        return old;
+      });
+      return { previous };
+    },
+    onError: (err, input, context) => {
+      if (!selectedStation) return;
+      const previous = (context as any)?.previous;
+      if (previous) {
+        utils.queue.setData({ id: selectedStation }, previous);
+      }
+    },
     onSuccess: () => {
       if (selectedStation) utils.queue.invalidate({ id: selectedStation });
     },
   });
   const removeFeedback = trpc.removeFeedback.useMutation({
+    onMutate: async (input) => {
+      if (input.feedback !== 'like' || !selectedStation) return {};
+      await utils.queue.cancel({ id: selectedStation });
+      const previous = utils.queue.getData({ id: selectedStation });
+      utils.queue.setData({ id: selectedStation }, (old) => {
+        if (!old) return old;
+        return old.map((t) => (t.id === input.id ? { ...t, liked: false } : t));
+      });
+      return { previous };
+    },
+    onError: (err, input, context) => {
+      if (input.feedback !== 'like' || !selectedStation) return;
+      const previous = (context as any)?.previous;
+      if (previous) {
+        utils.queue.setData({ id: selectedStation }, previous);
+      }
+    },
     onSuccess: () => {
       if (selectedStation) utils.queue.invalidate({ id: selectedStation });
     },

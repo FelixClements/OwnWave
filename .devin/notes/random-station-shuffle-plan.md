@@ -1,83 +1,71 @@
-# Plan: Random station start and shuffle
+# Plan: Random station queue (default and only behaviour)
 
-## User request
-Make OwnWave stations start on a random song and not play the same songs in the same order every time. No code changes yet — this is the plan only.
+## Scope change
 
-## Current behaviour (research findings)
+The user now wants only one behaviour: every OwnWave station must play tracks in a random order from the matching pool, every time the queue is requested. This is the default and only mode. No `smart` or `shuffle` modes, no `mode` column, and the smallest possible change.
 
-### How the queue is built
-- `services/python-analytics/src/station_builder.py` `_smart_queue` builds a deterministic greedy k-NN walk.
-- It starts from a seed track if one is supplied; otherwise it picks a random track only at queue creation time.
-- Once built, the queue is written to `station_tracks` and does not change between listens.
+## Current queue-building and playback flow
 
-### How the queue is stored
-- `database/migrations/001_schema.up.sql` defines `station_tracks` with `position` and `played_at`.
-- `played_at` is currently set but not used for rotation or shuffle.
+### Queue building
 
-### How the queue is played
-- `services/go-api-server/db.go` `GetStationQueue` returns tracks by feedback priority (`like`, neutral, `skip`) then by `position`.
-- `apps/t3-web-frontend/components/Player.tsx` plays the queue sequentially from the start, so the same song starts every time.
+- `services/python-analytics/src/station_builder.py` `build_station` (lines 30–59) loads all analysed tracks, applies the seed filter, excludes banned tracks, and calls `_smart_queue`.
+- `_apply_filter` (lines 66–121) and `_exclude_banned` (lines 62–63) define the matching track pool.
+- `_smart_queue` (lines 124–165) performs a deterministic greedy k-NN walk through that pool, occasionally using novelty jumps, and produces a fixed order.
+- `insert_station_tracks` is called on line 57 to persist the resulting track ids in `station_tracks`.
 
-## Recommended approach: Option 1 — persistent station mode
+### Storage
 
-Add a `mode` column to the `stations` table with three values:
+- `database/migrations/001_schema.up.sql` (lines 58–64) defines `station_tracks` with `station_id`, `track_id`, `position`, and `played_at`. The primary key is `(station_id, position)`. `played_at` is currently populated but not used to order or rotate playback.
 
-- `smart` — current k-NN walk (default, unchanged)
-- `shuffle` — random order of the same filtered track pool
-- `random` — completely random selection each time, respecting filters
+### Queue serving
 
-This is the recommended option because the preference belongs to the station, not to each playback request.
+- `services/go-api-server/db.go` `GetStationQueue` (lines 230–280) joins `station_tracks` to `tracks` and `audio_features`, excludes `ban` feedback, and orders the result first by a `skip` penalty and then by `st.position`.
+- `services/go-api-server/handlers.go` `GetQueue` (lines 363–372) exposes this as `GET /stations/{id}/queue`. `StationCrossfadeStream` (lines 646–682) also calls `GetStationQueue`.
 
-### Backend changes
+### Frontend playback
 
-1. **Database migration**
-   - Add `mode TEXT NOT NULL DEFAULT 'smart'` to the `stations` table.
+- `apps/t3-web-frontend/lib/station.tsx` (lines 33–36) fetches the queue via `trpc.queue.useQuery` with a 5-second refetch interval.
+- `apps/t3-web-frontend/components/Player.tsx` copies `queueProp` into `queueRef.current` (lines 52–56) whenever the station matches, and starts playback at `currentIndexRef.current = 0` (lines 224–226), then advances sequentially. Because the queue order is currently fixed, the same song starts every time.
 
-2. **Python analytics queue building**
-   - Update `build_station` and `_smart_queue` in `services/python-analytics/src/station_builder.py` to respect the station `mode`.
-   - For `shuffle`: generate the filtered track pool, then shuffle it and store it.
-   - For `random`: pick tracks randomly from the filtered pool (with or without replacement depending on desired behaviour).
+## Proposed change
 
-3. **Go API queue serving**
-   - Update `GetStationQueue` in `services/go-api-server/db.go` to optionally return a shuffled order.
-   - Keep the existing feedback/ban logic.
-   - Use `played_at` to optionally de-prioritize recently played tracks.
+Make `GetStationQueue` return a new random order on every call. The player starts at index 0 of this already-shuffled queue, so both the starting track and the full order are random each time. No modes, no schema columns, and no new API parameters are introduced.
 
-4. **Queue endpoint**
-   - Allow `GET /stations/{id}/queue?mode=shuffle` to override the stored mode for one request.
+## Implementation steps
 
-### Frontend changes
+1. **Python analytics — keep the pool, drop reliance on order**
+   - `services/python-analytics/src/station_builder.py` can still populate `station_tracks` on line 57, but the output of `_smart_queue` (lines 124–165) is now only a pool of eligible track ids. The stored `position` values no longer determine playback order.
+   - The smallest option is to leave the queue-building code as-is and let the Go API randomise at request time. A later cleanup could replace `_smart_queue` with a simple random sample of the filtered pool, but that is not required for this scope.
 
-1. **Station creation / editing**
-   - Add a `Mode` selector in `StationManager.tsx` when creating or editing a station.
-   - Persist `mode` in `CreateStationRequest` / `UpdateStationRequest`.
+2. **Go API — randomise at queue request**
+   - In `services/go-api-server/db.go` `GetStationQueue` (lines 230–280), remove the deterministic `ORDER BY` on `st.position`.
+   - After the rows are scanned into the `queue` slice, shuffle the slice in place before returning. This makes every `GET /stations/{id}/queue` call return a different order.
+   - Keep the existing `ban` exclusion so banned tracks remain out of the pool.
 
-2. **Player**
-   - Add a shuffle toggle that calls the queue endpoint with `mode=shuffle` or `mode=random`.
-   - Keep the toggle state in the player store if it is per-session.
+3. **Avoiding recently played tracks (optional)**
+   - `database/migrations/001_schema.up.sql` already provides `station_tracks.played_at` (line 62), and `MarkTrackPlayed` in `services/go-api-server/db.go` (lines 283–290) already updates it.
+   - Before shuffling, either:
+     - Exclude tracks whose `played_at` is within the last N hours, or
+     - Sort by least-recently-played first, then shuffle only the tracks that are not very recent.
+   - If the pool becomes empty after filtering, fall back to the full matching pool.
 
-### Avoiding the same songs in a row
+4. **Frontend — player starting point and queue refresh**
+   - `apps/t3-web-frontend/components/Player.tsx` already starts at `currentIndexRef.current = 0` (lines 224–226). With a shuffled queue, index 0 is a random starting track.
+   - The queue currently refetches every 5 seconds (`apps/t3-web-frontend/lib/station.tsx`, lines 33–36) and `Player.tsx` updates `queueRef.current` from `queueProp` (lines 52–56). This can overwrite the in-memory queue with a new random order while a track is playing, causing a jump or an invalid index.
+   - Add a guard so `queueRef` is not overwritten while the same station is already playing. Alternatively, disable the 5-second refetch while playing and only refetch when the selected station changes.
 
-- `played_at` can be used to skip or de-prioritize tracks played in the last N hours.
-- For `shuffle` mode, the queue should be re-shuffled when it ends or on demand, not repeated from the same starting point.
-- `banned` tracks must remain excluded in all modes.
+5. **Database / schema**
+   - No migration is required. Do **not** add a `mode` column.
+   - `station_tracks.position` can remain because it is part of the primary key; it simply no longer drives playback order.
+   - `station_tracks.played_at` is reused for the optional recently-played exclusion.
 
-## Alternative (not recommended as the main path)
+6. **API surface**
+   - `GET /stations/{id}/queue` (`services/go-api-server/handlers.go`, lines 363–372) keeps the same request and response shape; only the returned order changes.
+   - No new query parameters are added.
 
-### Option 2: query parameter only
-- Add `?mode=shuffle` to `GET /stations/{id}/queue`.
-- Simpler, but the preference is not stored with the station and must be set every time.
+## Rationale
 
-### Option 3: hybrid
-- Store `mode` on the station and also allow the query parameter to override it.
-- This is the most flexible and is a good future step after Option 1.
-
-## Suggested implementation order
-
-1. Add `mode` migration.
-2. Support `mode` in `build_station` and `_smart_queue`.
-3. Update `GetStationQueue` in Go to respect stored `mode` and support `?mode=...` override.
-4. Add tRPC/types support.
-5. Add `StationManager` mode selector.
-6. Add shuffle button/toggle in the player.
-7. Use `played_at` to avoid recently played tracks.
+- Fulfils the request with the smallest footprint: the core change is in `GetStationQueue`, plus a small frontend guard.
+- Reuses the existing pool-building and feedback filtering pipeline.
+- Uses the existing `played_at` column rather than adding schema.
+- No modes to support, test, or migrate; random is the only and default behaviour.

@@ -32,7 +32,7 @@ export function StationProvider({ children }: { children: React.ReactNode }) {
   const { data: stations } = trpc.stations.useQuery();
   const { data: queue } = trpc.queue.useQuery(
     { id: selectedStation || '' },
-    { enabled: !!selectedStation, refetchInterval: 5000 }
+    { enabled: !!selectedStation, refetchOnWindowFocus: false, refetchInterval: false }
   );
 
   useEffect(() => {

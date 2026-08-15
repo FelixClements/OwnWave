@@ -64,13 +64,55 @@ export function Player({ queue: queueProp }: { queue: QueueTrack[] }) {
   const recordPlay = trpc.recordPlay.useMutation();
   const utils = trpc.useContext();
   const recordFeedback = trpc.recordFeedback.useMutation({
-    onSuccess: () => {
-      if (playingStation) {
-        utils.queue.invalidate({ id: playingStation });
+    onMutate: async (input) => {
+      if (!playingStation) return {};
+      await utils.queue.cancel({ id: playingStation });
+      const previous = utils.queue.getData({ id: playingStation });
+      utils.queue.setData({ id: playingStation }, (old) => {
+        if (!old) return old;
+        if (input.feedback === 'like') {
+          return old.map((t) => (t.id === input.id ? { ...t, liked: true } : t));
+        }
+        if (input.feedback === 'skip') {
+          const idx = old.findIndex((t) => t.id === input.id);
+          if (idx === -1) return old;
+          const moved = old[idx];
+          const rest = old.filter((_, i) => i !== idx);
+          return [...rest, moved];
+        }
+        if (input.feedback === 'ban') {
+          return old.filter((t) => t.id !== input.id);
+        }
+        return old;
+      });
+      return { previous };
+    },
+    onError: (err, input, context) => {
+      if (!playingStation) return;
+      const previous = (context as any)?.previous;
+      if (previous) {
+        utils.queue.setData({ id: playingStation }, previous);
       }
     },
   });
   const removeFeedback = trpc.removeFeedback.useMutation({
+    onMutate: async (input) => {
+      if (input.feedback !== 'like' || !playingStation) return {};
+      await utils.queue.cancel({ id: playingStation });
+      const previous = utils.queue.getData({ id: playingStation });
+      utils.queue.setData({ id: playingStation }, (old) => {
+        if (!old) return old;
+        return old.map((t) => (t.id === input.id ? { ...t, liked: false } : t));
+      });
+      return { previous };
+    },
+    onError: (err, input, context) => {
+      if (input.feedback !== 'like' || !playingStation) return;
+      const previous = (context as any)?.previous;
+      if (previous) {
+        utils.queue.setData({ id: playingStation }, previous);
+      }
+    },
     onSuccess: () => {
       if (playingStation) {
         utils.queue.invalidate({ id: playingStation });

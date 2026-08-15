@@ -23,20 +23,25 @@ import (
 )
 
 type Handler struct {
-	db         *DB
-	jwtSecret  []byte
-	musicDir   string
-	ffmpegPath string
-	pythonURL  string
+	db          *DB
+	jwtSecret   []byte
+	musicDir    string
+	ffmpegPath  string
+	pythonURL   string
+	recentHours int
 }
 
-func NewHandler(pool *pgxpool.Pool, jwtSecret []byte, musicDir, ffmpegPath, pythonURL string) *Handler {
+func NewHandler(pool *pgxpool.Pool, jwtSecret []byte, musicDir, ffmpegPath, pythonURL string, recentHours int) *Handler {
+	if recentHours <= 0 {
+		recentHours = 24
+	}
 	return &Handler{
-		db:         NewDB(pool),
-		jwtSecret:  jwtSecret,
-		musicDir:   musicDir,
-		ffmpegPath: ffmpegPath,
-		pythonURL:  strings.TrimRight(pythonURL, "/"),
+		db:          NewDB(pool),
+		jwtSecret:   jwtSecret,
+		musicDir:    musicDir,
+		ffmpegPath:  ffmpegPath,
+		pythonURL:   strings.TrimRight(pythonURL, "/"),
+		recentHours: recentHours,
 	}
 }
 
@@ -362,7 +367,7 @@ func (h *Handler) DeleteStation(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) GetQueue(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
-	queue, err := h.db.GetStationQueue(r.Context(), id)
+	queue, err := h.db.GetStationQueue(r.Context(), id, h.recentHours)
 	if err != nil {
 		http.Error(w, err.Error(), 500)
 		return
@@ -659,7 +664,7 @@ func (h *Handler) StationCrossfadeStream(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	queue, err := h.db.GetStationQueue(r.Context(), stationID)
+	queue, err := h.db.GetStationQueue(r.Context(), stationID, h.recentHours)
 	if err != nil {
 		http.Error(w, err.Error(), 500)
 		return

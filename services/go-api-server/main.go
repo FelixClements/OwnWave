@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"strconv"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -74,7 +75,14 @@ func main() {
 		pythonURL = "http://localhost:8000"
 	}
 
-	h := NewHandler(db, jwtSecret, musicDir, ffmpegPath, pythonURL)
+	recentHours := 24
+	if v := os.Getenv("STATION_RECENT_HOURS"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			recentHours = n
+		}
+	}
+
+	h := NewHandler(db, jwtSecret, musicDir, ffmpegPath, pythonURL, recentHours)
 
 	r := chi.NewRouter()
 	r.Use(middleware.Logger)

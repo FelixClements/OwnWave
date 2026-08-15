@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"fmt"
+	"math/rand/v2"
 	"strings"
 	"time"
 
@@ -227,8 +229,32 @@ func (db *DB) DeleteStation(ctx context.Context, stationID string) error {
 	return tx.Commit(ctx)
 }
 
-func (db *DB) GetStationQueue(ctx context.Context, stationID string) ([]TrackWithFeatures, error) {
-	rows, err := db.pool.Query(ctx, `
+func (db *DB) GetStationQueue(ctx context.Context, stationID string, recentHours int) ([]TrackWithFeatures, error) {
+	// Try to avoid tracks played in the last recentHours.
+	queue, err := db.queryStationQueue(ctx, stationID, recentHours)
+	if err != nil {
+		return nil, err
+	}
+	// If the recent-filter emptied the pool, fall back to the full pool.
+	if len(queue) == 0 {
+		queue, err = db.queryStationQueue(ctx, stationID, 0)
+		if err != nil {
+			return nil, err
+		}
+	}
+	rand.Shuffle(len(queue), func(i, j int) { queue[i], queue[j] = queue[j], queue[i] })
+	return queue, nil
+}
+
+func (db *DB) queryStationQueue(ctx context.Context, stationID string, recentHours int) ([]TrackWithFeatures, error) {
+	recentFilter := ""
+	args := []any{stationID}
+	if recentHours > 0 {
+		recentFilter = " AND (st.played_at IS NULL OR st.played_at < NOW() - INTERVAL '1 hour' * $2)"
+		args = append(args, recentHours)
+	}
+
+	query := fmt.Sprintf(`
 		SELECT t.id::text, t.title, a.name, al.title, t.path, t.track_number,
 		       t.duration_seconds, t.sample_rate, t.channels,
 		       af.bpm, af.key, af.energy, af.valence, af.loudness,
@@ -242,13 +268,10 @@ func (db *DB) GetStationQueue(ctx context.Context, stationID string) ([]TrackWit
 		LEFT JOIN artists a ON t.artist_id = a.id
 		LEFT JOIN albums al ON t.album_id = al.id
 		LEFT JOIN track_feedback f ON t.id = f.track_id AND f.feedback = 'ban'
-		WHERE st.station_id = $1 AND f.track_id IS NULL
-		ORDER BY CASE
-			WHEN EXISTS (SELECT 1 FROM track_feedback WHERE track_id = t.id AND feedback = 'like') THEN 0
-			WHEN EXISTS (SELECT 1 FROM track_feedback WHERE track_id = t.id AND feedback = 'skip') THEN 2
-			ELSE 1
-		END, st.position
-	`, stationID)
+		WHERE st.station_id = $1 AND f.track_id IS NULL%s
+	`, recentFilter)
+
+	rows, err := db.pool.Query(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
