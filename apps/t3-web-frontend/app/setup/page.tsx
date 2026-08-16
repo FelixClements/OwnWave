@@ -47,8 +47,7 @@ export default function SetupPage() {
   });
   const setupComplete = trpc.setupComplete.useMutation({
     onSuccess: () => {
-      utils.setupStatus.invalidate();
-      router.push('/');
+      window.location.href = '/';
     },
   });
 

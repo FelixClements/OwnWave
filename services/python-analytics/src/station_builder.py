@@ -245,7 +245,7 @@ def rebuild_genre_stations(
     for main_genre, info in main_counts.items():
         if info["total"] < min_tracks:
             continue
-        name = f"Genre: {main_genre}"
+        name = _title_case_name(main_genre)
         valid_names.add(name)
         seed = {"type": "genre", "main_genre": main_genre}
         upsert_auto_station(conn, name, seed, source="genre")
@@ -255,7 +255,7 @@ def rebuild_genre_stations(
     for g in genres:
         if g["track_count"] < min_tracks or g["main_genre"] == g["sub_genre"]:
             continue
-        name = f"Genre: {g['main_genre']} / {g['sub_genre']}"
+        name = f"{_title_case_name(g['main_genre'])} / {_title_case_name(g['sub_genre'])}"
         valid_names.add(name)
         seed = {"type": "sub_genre", "main_genre": g["main_genre"], "sub_genre": g["sub_genre"]}
         upsert_auto_station(conn, name, seed, source="genre")

@@ -8,7 +8,7 @@ export function RequireAuth({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth();
   const router = useRouter();
   const path = usePathname() ?? '';
-  const publicPaths = ['/login'];
+  const publicPaths = ['/login', '/setup'];
 
   useEffect(() => {
     if (!loading && !user && !publicPaths.includes(path)) {

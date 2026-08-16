@@ -6,7 +6,7 @@ import { Shell } from '@/components/Shell';
 
 export function RootShell({ children }: { children: React.ReactNode }) {
   const path = usePathname() ?? '';
-  const publicPaths = ['/login'];
+  const publicPaths = ['/login', '/setup'];
 
   if (publicPaths.includes(path)) {
     return <>{children}</>;
