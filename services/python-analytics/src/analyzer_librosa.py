@@ -1,3 +1,7 @@
+import os
+import subprocess
+import tempfile
+
 import librosa
 import numpy as np
 import soundfile as sf
@@ -20,7 +24,7 @@ class LibrosaAnalyzer:
     def analyze(self, path: str) -> AudioFeatures:
         # Load with soundfile, then resample/mono with librosa to avoid the
         # deprecated audioread fallback.
-        y, sr = sf.read(path, dtype="float32")
+        y, sr = self._load(path)
         if y.ndim > 1:
             # soundfile returns (samples, channels); downmix to mono.
             y = np.mean(y, axis=1)
@@ -88,6 +92,31 @@ class LibrosaAnalyzer:
             spectral_centroid=round(sc_mean, 2),
             mfcc=mfcc_mean.tolist(),
         )
+
+
+    @staticmethod
+    def _load(path: str):
+        """Load audio with soundfile, falling back to an ffmpeg WAV conversion."""
+        try:
+            return sf.read(path, dtype="float32")
+        except Exception:
+            # Some FLACs have non-seekable frames; convert through ffmpeg.
+            with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
+                tmp_path = tmp.name
+            try:
+                ffmpeg = os.environ.get("FFMPEG_PATH", "ffmpeg")
+                subprocess.run(
+                    [ffmpeg, "-y", "-i", path, tmp_path],
+                    check=True,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
+                return sf.read(tmp_path, dtype="float32")
+            finally:
+                try:
+                    os.remove(tmp_path)
+                except OSError:
+                    pass
 
 
 def _detect_key(chroma_mean: np.ndarray) -> str:
