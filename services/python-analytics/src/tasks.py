@@ -16,22 +16,23 @@ from scanner import SUPPORTED_EXTS
 @celery_app.task(bind=True, max_retries=3, default_retry_delay=5)
 def process_audio_folder(self, folder_path: str, master_job_id: str, force: bool = False) -> dict:
     """Import one music folder and update its scan job."""
+    job_id = UUID(self.request.id)
+
     with db.get_conn() as conn:
-        job_id = db.create_scan_job(conn, folder_path)
+        db.create_scan_job(conn, folder_path, job_id=job_id)
+        db.update_scan_job(conn, job_id, "running")
         conn.commit()
 
     try:
-        db.wait_for_db()
-        with db.get_conn() as conn:
-            db.update_scan_job(conn, job_id, "running")
-            conn.commit()
+        result = import_folder(
+            folder_path,
+            job_id=job_id,
+            master_job_id=UUID(master_job_id),
+            analyze=True,
+            force=force,
+        )
 
-        result = import_folder(folder_path, analyze=True, force=force)
-
         with db.get_conn() as conn:
-            db.upsert_scan_job_progress(
-                conn, job_id, UUID(master_job_id), result
-            )
             db.update_scan_job(conn, job_id, "completed")
             conn.commit()
 

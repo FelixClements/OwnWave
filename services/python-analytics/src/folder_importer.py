@@ -14,6 +14,7 @@ from db import (
     get_or_create_artist,
     get_track_stats_by_paths,
     upsert_audio_features_batch,
+    upsert_scan_job_progress,
     upsert_tracks_batch,
     upsert_track_genres,
 )
@@ -46,14 +47,14 @@ def _file_changed(
     )
 
 
-def import_folder(folder_path: str, analyze: bool = True, force: bool = False) -> ScanResult:
-    """Import a single music folder with batch database upserts.
-
-    Performs incremental updates: files whose size/mtime have not changed
-    since the last scan are skipped unless `force=True`. Missing audio
-    features are filled in for unchanged files. Tracks that have disappeared
-    from the folder are deleted from the database.
-    """
+def import_folder(
+    folder_path: str,
+    job_id: Optional[UUID] = None,
+    master_job_id: Optional[UUID] = None,
+    analyze: bool = True,
+    force: bool = False,
+) -> ScanResult:
+    """Import a single music folder and update progress after each song."""
     folder = Path(folder_path).expanduser().resolve()
     if not folder.exists():
         raise FileNotFoundError(f"Music path does not exist: {folder}")
@@ -66,13 +67,15 @@ def import_folder(folder_path: str, analyze: bool = True, force: bool = False) -
     if not files:
         with get_conn() as conn:
             _remove_deleted_tracks(conn, folder, set())
+            if job_id:
+                upsert_scan_job_progress(conn, job_id, master_job_id, result)
             conn.commit()
         return result
 
     analyzers = get_analyzers() if analyze else None
     track_records: List[dict] = []
     feature_records: List[dict] = []
-    genre_records: List[List[GenrePrediction]] = []
+    genre_records: List[tuple] = []
     processed_ids: List[UUID] = []
     artist_cache: Dict[str, UUID] = {}
     album_cache: Dict[tuple, UUID] = {}
@@ -80,17 +83,26 @@ def import_folder(folder_path: str, analyze: bool = True, force: bool = False) -
     with get_conn() as conn:
         existing_stats = get_track_stats_by_paths(conn, [str(f) for f in files])
 
+        if job_id:
+            upsert_scan_job_progress(conn, job_id, master_job_id, result)
+            conn.commit()
+
         try:
             for file_path in files:
+                result_changed = False
+                track_rec = None
+                feature_rec = None
+                predictions: List[GenrePrediction] = []
+                tag_genres: List[GenrePrediction] = []
+
                 try:
                     path_str = str(file_path)
                     stats = existing_stats.get(path_str, {})
 
                     if not _file_changed(file_path, stats, force):
                         if analyzers and not stats.get("has_features"):
-                            # Metadata is up to date but features are missing;
-                            # analyze and backfill without rebuilding the track row.
                             result.scanned += 1
+                            result_changed = True
                             feature_rec, predictions, error = _build_feature_record(
                                 conn, file_path, path_str, analyzers
                             )
@@ -108,69 +120,61 @@ def import_folder(folder_path: str, analyze: bool = True, force: bool = False) -
                         # Always backfill tag-based genres for existing tracks.
                         tag_genres = extract_genres_from_tags(read_tags(path_str))
                         if tag_genres:
-                            upsert_track_genres(conn, stats["id"], tag_genres)
-                        continue
+                            genre_records.append((path_str, tag_genres))
+                    else:
+                        track_rec, feature_rec, predictions, tag_genres, feature_error = _build_record(
+                            conn,
+                            file_path,
+                            analyzers,
+                            artist_cache,
+                            album_cache,
+                            force=force,
+                        )
+                        if track_rec:
+                            track_records.append(track_rec)
+                            result.imported += 1
+                            result_changed = True
+                            if tag_genres:
+                                genre_records.append((track_rec["path"], tag_genres))
+                        if analyzers:
+                            result.scanned += 1
+                            result_changed = True
+                        if feature_rec:
+                            feature_records.append(feature_rec)
+                            result.features += 1
+                        if predictions:
+                            genre_records.append((track_rec["path"], predictions))
+                            result.model_success += 1
+                        elif ENABLE_GENRE_ANALYSIS and not feature_error:
+                            result.model_failed += 1
+                            result.failed_paths.append(
+                                FailedPath(path_str, "genre analysis produced no predictions")
+                            )
 
-                    track_rec, feature_rec, predictions, tag_genres, feature_error = _build_record(
-                        conn,
-                        file_path,
-                        analyzers,
-                        artist_cache,
-                        album_cache,
-                        force=force,
-                    )
-                    if track_rec:
-                        track_records.append(track_rec)
-                        result.imported += 1
-                        if tag_genres:
-                            genre_records.append((track_rec["path"], tag_genres))
-                    if analyzers:
-                        result.scanned += 1
-                    if feature_rec:
-                        feature_records.append(feature_rec)
-                        result.features += 1
-                    if predictions:
-                        genre_records.append((track_rec["path"], predictions))
-                        result.model_success += 1
-                    elif ENABLE_GENRE_ANALYSIS and not feature_error:
-                        # Audio features succeeded but model produced no predictions.
-                        result.model_failed += 1
-                        result.failed_paths.append(FailedPath(path_str, "genre analysis produced no predictions"))
-
-                    if feature_error:
-                        result.failed_paths.append(FailedPath(path_str, feature_error))
+                        if feature_error:
+                            result.failed_paths.append(FailedPath(path_str, feature_error))
                 except Exception as e:
                     reason = str(e)
                     print(f"Error processing {file_path}: {e}")
                     result.failed_paths.append(FailedPath(str(file_path), reason))
-                    continue
+                    result_changed = True
 
-            if track_records:
-                upsert_tracks_batch(conn, track_records)
+                if track_records or feature_records or genre_records or result_changed:
+                    _flush_file(
+                        conn,
+                        result,
+                        track_records,
+                        feature_records,
+                        genre_records,
+                        existing_stats,
+                        processed_ids,
+                    )
+                    if job_id:
+                        upsert_scan_job_progress(conn, job_id, master_job_id, result)
+                    conn.commit()
 
-            # Build a path -> track_id map for feature upserts, combining
-            # newly upserted tracks with tracks that already existed.
-            new_paths = [r["path"] for r in track_records]
-            new_stats = get_track_stats_by_paths(conn, new_paths) if new_paths else {}
-            path_to_id = {**{p: s["id"] for p, s in existing_stats.items()}, **{p: s["id"] for p, s in new_stats.items()}}
-
-            if feature_records:
-                upsert_audio_features_batch(conn, feature_records, path_to_id)
-
-            for path_str, predictions in genre_records:
-                track_id = path_to_id.get(path_str)
-                if track_id:
-                    upsert_track_genres(conn, track_id, predictions)
-
-            # Delete database rows for files that no longer exist in this folder.
             _remove_deleted_tracks(conn, folder, {str(f) for f in files})
-
             conn.commit()
-
-            for rec in track_records:
-                track_id = path_to_id.get(rec["path"])
-                if track_id:
-                    processed_ids.append(track_id)
 
             result.track_ids = processed_ids
 
@@ -179,6 +183,45 @@ def import_folder(folder_path: str, analyze: bool = True, force: bool = False) -
             raise
 
     return result
+
+
+def _flush_file(
+    conn: psycopg.Connection,
+    result: ScanResult,
+    track_records: List[dict],
+    feature_records: List[dict],
+    genre_records: List[tuple],
+    existing_stats: dict,
+    processed_ids: List[UUID],
+) -> None:
+    """Commit the current song's data and clear the per-file buffers."""
+    if track_records:
+        upsert_tracks_batch(conn, track_records)
+        new_paths = [r["path"] for r in track_records]
+        new_stats = get_track_stats_by_paths(conn, new_paths)
+        for rec in track_records:
+            track_id = new_stats.get(rec["path"], {}).get("id")
+            if track_id:
+                processed_ids.append(track_id)
+    else:
+        new_stats = {}
+
+    path_to_id = {
+        **{p: s["id"] for p, s in existing_stats.items()},
+        **{p: s["id"] for p, s in new_stats.items()},
+    }
+
+    if feature_records:
+        upsert_audio_features_batch(conn, feature_records, path_to_id)
+
+    for path_str, predictions in genre_records:
+        track_id = path_to_id.get(path_str)
+        if track_id:
+            upsert_track_genres(conn, track_id, predictions)
+
+    track_records.clear()
+    feature_records.clear()
+    genre_records.clear()
 
 
 def _build_record(

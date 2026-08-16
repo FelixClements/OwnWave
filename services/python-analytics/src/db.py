@@ -175,12 +175,26 @@ def get_track_by_path(conn: psycopg.Connection, path: str) -> Optional[UUID]:
         return row[0] if row else None
 
 
-def create_scan_job(conn: psycopg.Connection, path: str) -> UUID:
+def create_scan_job(
+    conn: psycopg.Connection,
+    path: str,
+    job_id: Optional[UUID] = None,
+) -> UUID:
     with conn.cursor() as cur:
-        cur.execute(
-            "INSERT INTO scan_jobs (path) VALUES (%s) RETURNING id",
-            (path,),
-        )
+        if job_id:
+            cur.execute(
+                """
+                INSERT INTO scan_jobs (id, path) VALUES (%s, %s)
+                ON CONFLICT (id) DO UPDATE SET path = EXCLUDED.path
+                RETURNING id
+                """,
+                (job_id, path),
+            )
+        else:
+            cur.execute(
+                "INSERT INTO scan_jobs (path) VALUES (%s) RETURNING id",
+                (path,),
+            )
         return cur.fetchone()[0]
 
 
