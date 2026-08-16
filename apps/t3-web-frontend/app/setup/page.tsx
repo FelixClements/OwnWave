@@ -137,8 +137,8 @@ export default function SetupPage() {
   }
 
   return (
-    <div className="min-h-screen bg-spotify-bg text-spotify-text p-4 md:p-6">
-      <div className="max-w-2xl mx-auto space-y-6">
+    <div className="h-screen overflow-y-auto bg-spotify-bg text-spotify-text p-4 md:p-6">
+      <div className="max-w-2xl mx-auto space-y-6 pb-20">
         <h1 className="text-2xl font-bold">OwnWave Setup</h1>
 
         {step === 1 && (
