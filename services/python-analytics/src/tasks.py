@@ -170,8 +170,16 @@ def rebuild_clusters(n_clusters: Optional[int] = None) -> dict:
 @celery_app.task
 def rebuild_track_genres(path: str, force: bool = False) -> dict:
     """Batch backfill genre predictions for a path."""
-    import genre_analyzer
-    from scanner import SUPPORTED_EXTS
+    from audio_metadata import SUPPORTED_EXTS
+    from config import ENABLE_GENRE_ANALYSIS
+    from genre_sources import get_genre_sources
+
+    if not ENABLE_GENRE_ANALYSIS:
+        return {"updated": 0, "skipped": 0}
+
+    ml_sources = [s for s in get_genre_sources() if s.source_id == "discogs400"]
+    if not ml_sources:
+        return {"updated": 0, "skipped": 0}
 
     root = Path(path).expanduser().resolve()
     if not root.exists():
@@ -194,7 +202,9 @@ def rebuild_track_genres(path: str, force: bool = False) -> dict:
                     skipped += 1
                     continue
             try:
-                predictions = genre_analyzer.analyze(path_str)
+                predictions = []
+                for source in ml_sources:
+                    predictions.extend(source.predict(path_str))
                 if predictions:
                     db.upsert_track_genres(conn, track_id, predictions)
                     updated += 1

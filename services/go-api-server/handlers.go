@@ -20,10 +20,13 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"golang.org/x/crypto/bcrypt"
+
+	"ownwave/api/internal/playback"
 )
 
 type Handler struct {
 	db          *DB
+	playback    *playback.Service
 	jwtSecret   []byte
 	musicDir    string
 	ffmpegPath  string
@@ -37,6 +40,7 @@ func NewHandler(pool *pgxpool.Pool, jwtSecret []byte, musicDir, ffmpegPath, pyth
 	}
 	return &Handler{
 		db:          NewDB(pool),
+		playback:    playback.NewService(pool),
 		jwtSecret:   jwtSecret,
 		musicDir:    musicDir,
 		ffmpegPath:  ffmpegPath,
@@ -148,7 +152,7 @@ func (h *Handler) RecordPlay(w http.ResponseWriter, r *http.Request) {
 		StationID string `json:"station_id"`
 	}
 	_ = json.NewDecoder(r.Body).Decode(&req)
-	if err := h.db.RecordPlay(r.Context(), trackID, req.StationID); err != nil {
+	if err := h.playback.Record(r.Context(), trackID, req.StationID); err != nil {
 		http.Error(w, err.Error(), 500)
 		return
 	}
@@ -272,88 +276,26 @@ func (h *Handler) GetStation(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) UpdateStation(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
-	var req struct {
-		Name       *string  `json:"name"`
-		Length     *int     `json:"length"`
-		MinBPM     *float64 `json:"min_bpm"`
-		MaxBPM     *float64 `json:"max_bpm"`
-		MinEnergy  *float64 `json:"min_energy"`
-		MaxEnergy  *float64 `json:"max_energy"`
-		MinValence *float64 `json:"min_valence"`
-		MaxValence *float64 `json:"max_valence"`
-		SeedType   *string  `json:"seed_type"`
-		TrackID    *string  `json:"track_id"`
-		ArtistID   *string  `json:"artist_id"`
-		AlbumID    *string  `json:"album_id"`
-		ClusterID  *int     `json:"cluster_id"`
-		MainGenre  *string  `json:"main_genre"`
-		SubGenre   *string  `json:"sub_genre"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
 		http.Error(w, err.Error(), 400)
 		return
 	}
-	if req.Name == nil || *req.Name == "" {
-		http.Error(w, "name required", 400)
-		return
-	}
-
-	filters := map[string]interface{}{}
-	if req.Length != nil {
-		filters["length"] = *req.Length
-	}
-	if req.MinBPM != nil {
-		filters["min_bpm"] = *req.MinBPM
-	}
-	if req.MaxBPM != nil {
-		filters["max_bpm"] = *req.MaxBPM
-	}
-	if req.MinEnergy != nil {
-		filters["min_energy"] = *req.MinEnergy
-	}
-	if req.MaxEnergy != nil {
-		filters["max_energy"] = *req.MaxEnergy
-	}
-	if req.MinValence != nil {
-		filters["min_valence"] = *req.MinValence
-	}
-	if req.MaxValence != nil {
-		filters["max_valence"] = *req.MaxValence
-	}
-	if req.SeedType != nil && *req.SeedType != "" {
-		filters["seed_type"] = *req.SeedType
-	}
-	if req.TrackID != nil && *req.TrackID != "" {
-		filters["track_id"] = *req.TrackID
-	}
-	if req.ArtistID != nil && *req.ArtistID != "" {
-		filters["artist_id"] = *req.ArtistID
-	}
-	if req.AlbumID != nil && *req.AlbumID != "" {
-		filters["album_id"] = *req.AlbumID
-	}
-	if req.ClusterID != nil {
-		filters["cluster_id"] = *req.ClusterID
-	}
-	if req.MainGenre != nil && *req.MainGenre != "" {
-		filters["main_genre"] = *req.MainGenre
-	}
-	if req.SubGenre != nil && *req.SubGenre != "" {
-		filters["sub_genre"] = *req.SubGenre
-	}
-
-	var seedFeatures string
-	if len(filters) > 0 {
-		b, _ := json.Marshal(filters)
-		seedFeatures = string(b)
-	}
-
-	if err := h.db.UpdateStation(r.Context(), id, *req.Name, seedFeatures); err != nil {
+	req, err := http.NewRequest(http.MethodPatch, h.pythonURL+"/stations/"+id, bytes.NewReader(body))
+	if err != nil {
 		http.Error(w, err.Error(), 500)
 		return
 	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		http.Error(w, err.Error(), 500)
+		return
+	}
+	defer resp.Body.Close()
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"ok": "ok"})
+	w.WriteHeader(resp.StatusCode)
+	io.Copy(w, resp.Body)
 }
 
 func (h *Handler) DeleteStation(w http.ResponseWriter, r *http.Request) {
@@ -367,7 +309,7 @@ func (h *Handler) DeleteStation(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) GetQueue(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
-	queue, err := h.db.GetStationQueue(r.Context(), id, h.recentHours)
+	queue, err := h.playback.BuildQueue(r.Context(), id, h.recentHours)
 	if err != nil {
 		http.Error(w, err.Error(), 500)
 		return
@@ -664,7 +606,7 @@ func (h *Handler) StationCrossfadeStream(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	queue, err := h.db.GetStationQueue(r.Context(), stationID, h.recentHours)
+	queue, err := h.playback.BuildQueue(r.Context(), stationID, h.recentHours)
 	if err != nil {
 		http.Error(w, err.Error(), 500)
 		return

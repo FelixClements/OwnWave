@@ -121,7 +121,7 @@ export const appRouter = t.router({
         max_energy: z.number().optional(),
         min_valence: z.number().optional(),
         max_valence: z.number().optional(),
-        seed_type: z.enum(['track', 'artist', 'album', 'cluster', 'mood', 'genre', 'sub_genre']).optional(),
+        seed_type: z.enum(['track', 'artist', 'album', 'cluster', 'mood', 'genre', 'sub_genre', 'uncategorized']).optional(),
         track_id: z.string().optional(),
         artist_id: z.string().optional(),
         album_id: z.string().optional(),
@@ -144,7 +144,7 @@ export const appRouter = t.router({
         max_energy: z.number().optional(),
         min_valence: z.number().optional(),
         max_valence: z.number().optional(),
-        seed_type: z.enum(['track', 'artist', 'album', 'cluster', 'mood', 'genre', 'sub_genre']).optional(),
+        seed_type: z.enum(['track', 'artist', 'album', 'cluster', 'mood', 'genre', 'sub_genre', 'uncategorized']).optional(),
         track_id: z.string().optional(),
         artist_id: z.string().optional(),
         album_id: z.string().optional(),
@@ -153,7 +153,10 @@ export const appRouter = t.router({
         sub_genre: z.string().optional(),
       })
     )
-    .mutation(async ({ input }) => api.updateStation(input.id, input)),
+    .mutation(async ({ input }) => {
+      const { id, ...body } = input;
+      return api.updateStation(id, body);
+    }),
 
   deleteStation: t.procedure
     .input(z.object({ id: z.string() }))

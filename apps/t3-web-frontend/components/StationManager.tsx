@@ -1,6 +1,13 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import type { Station } from '@/lib/api';
+import {
+  emptyStationFilterForm,
+  parseStationSeed,
+  seedToFilterForm,
+  type StationFilterForm,
+} from '@/lib/station-seed';
 import { trpc } from '@/lib/trpc/client';
 import { useStation } from '@/lib/station';
 
@@ -12,33 +19,19 @@ export function StationManager() {
   const [showCreate, setShowCreate] = useState(false);
   const [createError, setCreateError] = useState('');
 
-  const [createFilters, setCreateFilters] = useState({
-    min_bpm: '',
-    max_bpm: '',
-    min_energy: '',
-    max_energy: '',
-    min_valence: '',
-    max_valence: '',
-    seed_type: '',
-    main_genre: '',
-    sub_genre: '',
-  });
-  const [editFilters, setEditFilters] = useState({
-    min_bpm: '',
-    max_bpm: '',
-    min_energy: '',
-    max_energy: '',
-    min_valence: '',
-    max_valence: '',
-    seed_type: '',
-    main_genre: '',
-    sub_genre: '',
-  });
+  const [createFilters, setCreateFilters] = useState<StationFilterForm>(emptyStationFilterForm());
+  const [editFilters, setEditFilters] = useState<StationFilterForm>(emptyStationFilterForm());
+
+  const [updateMessage, setUpdateMessage] = useState<string | null>(null);
 
   const utils = trpc.useContext();
   const { selectedStation, setSelectedStation, setIsPlaying } = useStation();
   const { data: stations } = trpc.stations.useQuery();
   const { data: genres } = trpc.genres.useQuery();
+  const { data: editingStation } = trpc.station.useQuery(
+    { id: editing ?? '' },
+    { enabled: !!editing },
+  );
   const { data: queue } = trpc.queue.useQuery(
     { id: previewId || '' },
     { enabled: !!previewId }
@@ -47,27 +40,27 @@ export function StationManager() {
   const create = trpc.createStation.useMutation({
     onSuccess: () => {
       setName('');
-      setCreateFilters({
-        min_bpm: '',
-        max_bpm: '',
-        min_energy: '',
-        max_energy: '',
-        min_valence: '',
-        max_valence: '',
-        seed_type: '',
-        main_genre: '',
-        sub_genre: '',
-      });
+      setCreateFilters(emptyStationFilterForm());
       setShowCreate(false);
       utils.stations.invalidate();
     },
   });
 
   const update = trpc.updateStation.useMutation({
-    onSuccess: () => {
+    onSuccess: (data, variables) => {
       setEditing(null);
       setEditName('');
+      setUpdateMessage(`Saved "${data.name}" (${data.track_count} tracks in queue)`);
       utils.stations.invalidate();
+      utils.station.invalidate({ id: variables.id });
+      utils.queue.invalidate({ id: variables.id });
+      if (previewId === variables.id) {
+        utils.queue.invalidate({ id: previewId });
+      }
+    },
+    onError: (err) => {
+      console.error('update station failed', err);
+      alert('Failed to update station: ' + err.message);
     },
   });
 
@@ -124,21 +117,16 @@ export function StationManager() {
     });
   };
 
-  const startEdit = (id: string, currentName: string) => {
-    setEditing(id);
-    setEditName('');
-    setEditFilters({
-      min_bpm: '',
-      max_bpm: '',
-      min_energy: '',
-      max_energy: '',
-      min_valence: '',
-      max_valence: '',
-      seed_type: '',
-      main_genre: '',
-      sub_genre: '',
-    });
+  const startEdit = (station: Station) => {
+    setUpdateMessage(null);
+    setEditing(station.id);
   };
+
+  useEffect(() => {
+    if (!editing || !editingStation || editingStation.id !== editing) return;
+    setEditName(editingStation.name);
+    setEditFilters(seedToFilterForm(parseStationSeed(editingStation.seed_features)));
+  }, [editing, editingStation]);
 
   function toNum(value: string) {
     const n = parseFloat(value);
@@ -156,6 +144,10 @@ export function StationManager() {
           {showCreate ? 'Cancel' : 'New Station'}
         </button>
       </div>
+
+      {updateMessage && (
+        <p className="text-sm text-spotify-green">{updateMessage}</p>
+      )}
 
       {showCreate && (
         <form onSubmit={handleCreate} className="space-y-3 p-4 rounded bg-spotify-card">
@@ -192,6 +184,7 @@ export function StationManager() {
                 <option value="mood">Mood</option>
                 <option value="genre">Genre</option>
                 <option value="sub_genre">Sub-genre</option>
+                <option value="uncategorized">Uncategorized</option>
               </select>
             </div>
             {['genre', 'sub_genre'].includes(createFilters.seed_type) && (
@@ -447,6 +440,7 @@ export function StationManager() {
                       <option value="mood">Mood</option>
                       <option value="genre">Genre</option>
                       <option value="sub_genre">Sub-genre</option>
+                      <option value="uncategorized">Uncategorized</option>
                     </select>
                   </div>
                   {['genre', 'sub_genre'].includes(editFilters.seed_type) && (
@@ -487,10 +481,11 @@ export function StationManager() {
                   )}
                 </div>
                 <div className="flex gap-2 justify-end">
-                  <button
-                    type="submit"
-                    className="px-3 py-1 rounded bg-spotify-green text-black text-sm font-semibold"
-                  >
+                    <button
+                      type="submit"
+                      disabled={update.isLoading}
+                      className="px-3 py-1 rounded bg-spotify-green text-black text-sm font-semibold disabled:opacity-50"
+                    >
                     Save
                   </button>
                   <button
@@ -519,7 +514,7 @@ export function StationManager() {
                     {previewId === station.id ? 'Close Preview' : 'Preview'}
                   </button>
                   <button
-                    onClick={() => startEdit(station.id, station.name)}
+                    onClick={() => startEdit(station)}
                     className="px-3 py-1 rounded bg-spotify-elevated text-spotify-text text-sm hover:bg-spotify-card-hover transition"
                   >
                     Edit

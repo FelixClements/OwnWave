@@ -89,7 +89,7 @@ func main() {
 	r.Use(prometheusMiddleware)
 	r.Use(cors.New(cors.Options{
 		AllowedOrigins: []string{"*"},
-		AllowedMethods: []string{"GET", "POST", "OPTIONS"},
+		AllowedMethods: []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
 		AllowedHeaders: []string{"*"},
 	}).Handler)
 

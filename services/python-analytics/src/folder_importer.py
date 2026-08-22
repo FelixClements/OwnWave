@@ -1,4 +1,3 @@
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set
 from uuid import UUID
@@ -7,6 +6,7 @@ import psycopg
 
 from analyzers import analyze_file, get_analyzers
 from config import ENABLE_GENRE_ANALYSIS
+from tags import extract_genres_from_tags, read_tags
 from db import (
     delete_tracks,
     get_conn,
@@ -20,18 +20,14 @@ from db import (
 )
 from feature_vector import build_feature_vector
 from models import AudioFeatures, FailedPath, GenrePrediction, ScanResult
-from scanner import SUPPORTED_EXTS, _get_duration, _parse_int
-from tags import extract_genres_from_tags, read_tags
-
-if ENABLE_GENRE_ANALYSIS:
-    import genre_analyzer
-
-
-def _get_file_stats(path: Path) -> tuple:
-    stat = path.stat()
-    mtime = datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc)
-    return stat.st_size, mtime
-
+from audio_metadata import (
+    SUPPORTED_EXTS,
+    get_duration,
+    get_file_stats,
+    get_sample_info,
+    parse_int_tag,
+)
+from genre_sources import get_genre_sources
 
 def _file_changed(
     file_path: Path,
@@ -40,7 +36,7 @@ def _file_changed(
 ) -> bool:
     if force:
         return True
-    size, mtime = _get_file_stats(file_path)
+    size, mtime = get_file_stats(file_path)
     return (
         stats.get("file_size") != size
         or stats.get("file_mtime") != mtime
@@ -243,15 +239,15 @@ def _build_record(
     album_title = tags.get("album") or "Unknown Album"
     album_key = (artist_id, album_title)
     if album_key not in album_cache:
-        year = _parse_int(tags.get("date"))
+        year = parse_int_tag(tags.get("date"))
         album_cache[album_key] = get_or_create_album(conn, album_title, artist_id, year)
     album_id = album_cache[album_key]
 
-    track_number = _parse_int(tags.get("tracknumber"))
-    duration = _get_duration(path_str)
-    sample_rate, channels = _get_sample_info(path_str)
+    track_number = parse_int_tag(tags.get("tracknumber"))
+    duration = get_duration(path_str)
+    sample_rate, channels = get_sample_info(path_str)
     title = tags.get("title") or file_path.stem
-    file_size, file_mtime = _get_file_stats(file_path)
+    file_size, file_mtime = get_file_stats(file_path)
 
     track_rec = {
         "path": path_str,
@@ -302,9 +298,13 @@ def _build_feature_record(conn: psycopg.Connection, file_path: Path, path_str: s
         return None, [], error
 
     predictions = []
-    if ENABLE_GENRE_ANALYSIS:
+    ml_source = next(
+        (s for s in get_genre_sources() if getattr(s, "source_id", "") == "discogs400"),
+        None,
+    )
+    if ml_source is not None:
         try:
-            predictions = genre_analyzer.analyze(path_str)
+            predictions = ml_source.predict(path_str)
         except Exception as exc:
             error = f"genre analysis failed: {exc}"
             print(f"[folder_importer] genre analysis failed for {path_str}: {exc}")
@@ -340,13 +340,3 @@ def _remove_deleted_tracks(
     to_delete = [row[0] for row in rows if row[1] not in current_files]
     if to_delete:
         delete_tracks(conn, to_delete)
-
-
-def _get_sample_info(path: str) -> tuple:
-    try:
-        from mutagen import File as MutagenFile
-
-        info = MutagenFile(path).info
-        return getattr(info, "sample_rate", None), getattr(info, "channels", None)
-    except Exception:
-        return None, None

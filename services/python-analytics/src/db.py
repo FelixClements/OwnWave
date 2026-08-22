@@ -323,6 +323,21 @@ def create_station(
         return cur.fetchone()[0]
 
 
+def get_station_by_id(conn: psycopg.Connection, station_id: UUID) -> Optional[dict]:
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT id, name, seed_features FROM stations WHERE id = %s",
+            (station_id,),
+        )
+        row = cur.fetchone()
+        if not row:
+            return None
+        seed_features = row[2]
+        if seed_features is not None and not isinstance(seed_features, dict):
+            seed_features = dict(seed_features)
+        return {"id": row[0], "name": row[1], "seed_features": seed_features}
+
+
 def insert_station_tracks(
     conn: psycopg.Connection,
     station_id: UUID,

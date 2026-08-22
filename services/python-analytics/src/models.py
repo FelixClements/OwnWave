@@ -63,6 +63,17 @@ class Analyzer(Protocol):
         ...
 
 
+class GenreSource(Protocol):
+    """Pluggable genre prediction from a single origin."""
+
+    @property
+    def source_id(self) -> str:
+        ...
+
+    def predict(self, path: str) -> List[GenrePrediction]:
+        ...
+
+
 def merge_features(base: AudioFeatures, extra: Optional[AudioFeatures]) -> AudioFeatures:
     """Use extra (e.g. essentia) to fill any gaps, otherwise keep base."""
     if not extra:

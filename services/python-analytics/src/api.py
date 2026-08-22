@@ -8,9 +8,12 @@ from pydantic import BaseModel
 import db
 from celery_app import celery_app
 from config import CELERY_BROKER_URL, MUSIC_DIR
-from scanner import scan_path
+from library_scan import scan_library
+from library_scan.options import ScanJobContext, ScanOptions
 from similarity import get_similar_tracks
 from station_builder import build_station, setup_main_genre_stations
+from station.seed import seed_from_request
+from station.service import recompile_station
 
 app = FastAPI(title="OwnWave Analytics")
 
@@ -106,46 +109,39 @@ async def get_job(job_id: UUID):
 
 @app.post("/stations")
 async def create_station(req: StationRequest):
-    filters = _seed_filter(req)
+    filters = seed_from_request(req)
 
     with _db_conn() as conn:
         station_id = build_station(conn, req.name, seed_filter=filters or None, length=req.length)
         return {"station_id": str(station_id)}
 
 
-def _seed_filter(req: StationRequest) -> dict:
-    """Convert API request into the seed filter used by station_builder."""
-    if req.seed_type == "track" and req.track_id:
-        return {"type": "track", "track_id": str(req.track_id)}
-    if req.seed_type == "artist" and req.artist_id:
-        return {"type": "artist", "artist_id": str(req.artist_id)}
-    if req.seed_type == "album" and req.album_id:
-        return {"type": "album", "album_id": str(req.album_id)}
-    if req.seed_type == "cluster" and req.cluster_id is not None:
-        return {"type": "cluster", "cluster_id": req.cluster_id}
-    if req.seed_type == "mood":
-        return {
-            "type": "mood",
-            "min_energy": req.min_energy,
-            "max_energy": req.max_energy,
-            "min_valence": req.min_valence,
-            "max_valence": req.max_valence,
-        }
-    if req.seed_type == "genre" and req.main_genre:
-        return {"type": "genre", "main_genre": req.main_genre}
-    if req.seed_type == "sub_genre" and req.main_genre and req.sub_genre:
-        return {"type": "sub_genre", "main_genre": req.main_genre, "sub_genre": req.sub_genre}
-
-    filters = {}
-    if req.min_bpm is not None:
-        filters["min_bpm"] = req.min_bpm
-    if req.max_bpm is not None:
-        filters["max_bpm"] = req.max_bpm
-    if req.min_energy is not None:
-        filters["min_energy"] = req.min_energy
-    if req.max_energy is not None:
-        filters["max_energy"] = req.max_energy
-    return filters
+@app.patch("/stations/{station_id}")
+async def update_station(station_id: UUID, req: StationRequest):
+    filters = seed_from_request(req)
+    has_seed = bool(req.seed_type) or any(
+        getattr(req, field) is not None
+        for field in (
+            "min_bpm",
+            "max_bpm",
+            "min_energy",
+            "max_energy",
+            "min_valence",
+            "max_valence",
+        )
+    )
+    try:
+        with _db_conn() as conn:
+            result = recompile_station(
+                conn,
+                station_id,
+                name=req.name,
+                seed=filters if has_seed else None,
+                length=req.length,
+            )
+            return result
+    except ValueError as exc:
+        raise HTTPException(status_code=404 if "not found" in str(exc) else 400, detail=str(exc))
 
 
 @app.get("/tracks/{track_id}/similar")
@@ -261,7 +257,12 @@ def _run_scan(job_id: UUID, path: str, force: bool):
         db.update_scan_job(conn, job_id, "running")
         conn.commit()
         try:
-            result = scan_path(path, force=force)
+            result = scan_library(
+                path,
+                options=ScanOptions(force=force),
+                job=ScanJobContext(job_id=job_id),
+                conn=conn,
+            )
             db.upsert_scan_job_progress(conn, job_id, None, result)
             db.update_scan_job(conn, job_id, "completed")
             conn.commit()

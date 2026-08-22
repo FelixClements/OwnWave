@@ -2,12 +2,12 @@ package main
 
 import (
 	"context"
-	"fmt"
-	"math/rand/v2"
 	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"ownwave/api/internal/playback"
 )
 
 type DB struct {
@@ -18,32 +18,9 @@ func NewDB(pool *pgxpool.Pool) *DB {
 	return &DB{pool: pool}
 }
 
-type Track struct {
-	ID              string   `json:"id"`
-	Title           string   `json:"title"`
-	Artist          *string  `json:"artist,omitempty"`
-	Album           *string  `json:"album,omitempty"`
-	Path            string   `json:"path"`
-	TrackNumber     *int     `json:"track_number,omitempty"`
-	DurationSeconds *float64 `json:"duration_seconds,omitempty"`
-	SampleRate      *int     `json:"sample_rate,omitempty"`
-	Channels        *int     `json:"channels,omitempty"`
-	Loudness        *float64 `json:"loudness,omitempty"`
-}
+type Track = playback.Track
 
-type TrackWithFeatures struct {
-	Track
-	BPM                   float64 `json:"bpm"`
-	Key                   string  `json:"key"`
-	Energy                float64 `json:"energy"`
-	Valence               float64 `json:"valence"`
-	OutroStartSeconds     float64 `json:"outro_start_seconds"`
-	IdealCrossfadeSeconds float64 `json:"ideal_crossfade_seconds"`
-	IntroStartSeconds     float64 `json:"intro_start_seconds"`
-	OutroEndSeconds       float64 `json:"outro_end_seconds"`
-	Position              int     `json:"position"`
-	Liked                 bool    `json:"liked"`
-}
+type TrackWithFeatures = playback.TrackWithFeatures
 
 type Station struct {
 	ID           string  `json:"id"`
@@ -227,90 +204,6 @@ func (db *DB) DeleteStation(ctx context.Context, stationID string) error {
 	}
 
 	return tx.Commit(ctx)
-}
-
-func (db *DB) GetStationQueue(ctx context.Context, stationID string, recentHours int) ([]TrackWithFeatures, error) {
-	// Try to avoid tracks played in the last recentHours.
-	queue, err := db.queryStationQueue(ctx, stationID, recentHours)
-	if err != nil {
-		return nil, err
-	}
-	// If the recent-filter emptied the pool, fall back to the full pool.
-	if len(queue) == 0 {
-		queue, err = db.queryStationQueue(ctx, stationID, 0)
-		if err != nil {
-			return nil, err
-		}
-	}
-	rand.Shuffle(len(queue), func(i, j int) { queue[i], queue[j] = queue[j], queue[i] })
-	return queue, nil
-}
-
-func (db *DB) queryStationQueue(ctx context.Context, stationID string, recentHours int) ([]TrackWithFeatures, error) {
-	recentFilter := ""
-	args := []any{stationID}
-	if recentHours > 0 {
-		recentFilter = " AND (st.played_at IS NULL OR st.played_at < NOW() - INTERVAL '1 hour' * $2)"
-		args = append(args, recentHours)
-	}
-
-	query := fmt.Sprintf(`
-		SELECT t.id::text, t.title, a.name, al.title, t.path, t.track_number,
-		       t.duration_seconds, t.sample_rate, t.channels,
-		       af.bpm, af.key, af.energy, af.valence, af.loudness,
-		       COALESCE(af.outro_start_seconds, 0), COALESCE(af.ideal_crossfade_seconds, 0),
-		       COALESCE(af.intro_start_seconds, 0), COALESCE(af.outro_end_seconds, 0),
-		       st.position,
-		       EXISTS (SELECT 1 FROM track_feedback WHERE track_id = t.id AND feedback = 'like') AS liked
-		FROM station_tracks st
-		JOIN tracks t ON st.track_id = t.id
-		JOIN audio_features af ON t.id = af.track_id
-		LEFT JOIN artists a ON t.artist_id = a.id
-		LEFT JOIN albums al ON t.album_id = al.id
-		LEFT JOIN track_feedback f ON t.id = f.track_id AND f.feedback = 'ban'
-		WHERE st.station_id = $1 AND f.track_id IS NULL%s
-	`, recentFilter)
-
-	rows, err := db.pool.Query(ctx, query, args...)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	queue := make([]TrackWithFeatures, 0)
-	seen := make(map[string]bool)
-	for rows.Next() {
-		var q TrackWithFeatures
-		if err := rows.Scan(&q.ID, &q.Title, &q.Artist, &q.Album, &q.Path,
-			&q.TrackNumber, &q.DurationSeconds, &q.SampleRate, &q.Channels,
-			&q.BPM, &q.Key, &q.Energy, &q.Valence,
-			&q.Loudness,
-			&q.OutroStartSeconds, &q.IdealCrossfadeSeconds,
-			&q.IntroStartSeconds, &q.OutroEndSeconds,
-			&q.Position, &q.Liked); err != nil {
-			return nil, err
-		}
-		artist := ""
-		if q.Artist != nil {
-			artist = *q.Artist
-		}
-		key := strings.ToLower(strings.TrimSpace(q.Title) + "|" + strings.TrimSpace(artist))
-		if seen[key] {
-			continue
-		}
-		seen[key] = true
-		queue = append(queue, q)
-	}
-	return queue, rows.Err()
-}
-
-func (db *DB) MarkTrackPlayed(ctx context.Context, stationID, trackID string) error {
-	_, err := db.pool.Exec(ctx, `
-		UPDATE station_tracks
-		SET played_at = NOW()
-		WHERE station_id = $1 AND track_id = $2
-	`, stationID, trackID)
-	return err
 }
 
 type User struct {
@@ -499,14 +392,6 @@ type HistoryEntry struct {
 	Album     *string   `json:"album"`
 	StationID *string   `json:"station_id"`
 	PlayedAt  time.Time `json:"played_at"`
-}
-
-func (db *DB) RecordPlay(ctx context.Context, trackID, stationID string) error {
-	_, err := db.pool.Exec(ctx, `
-		INSERT INTO listening_history (track_id, station_id)
-		VALUES ($1, NULLIF($2, '')::uuid)
-	`, trackID, stationID)
-	return err
 }
 
 func (db *DB) RecordFeedback(ctx context.Context, trackID, feedback string) error {

@@ -36,6 +36,7 @@ export type Track = {
 export type Station = {
   id: string;
   name: string;
+  seed_features?: string | Record<string, unknown> | null;
 };
 
 export type QueueTrack = Track & {
@@ -120,7 +121,7 @@ export type CreateStationRequest = {
   max_energy?: number;
   min_valence?: number;
   max_valence?: number;
-  seed_type?: 'track' | 'artist' | 'album' | 'cluster' | 'mood' | 'genre' | 'sub_genre';
+  seed_type?: 'track' | 'artist' | 'album' | 'cluster' | 'mood' | 'genre' | 'sub_genre' | 'uncategorized';
   track_id?: string;
   artist_id?: string;
   album_id?: string;
@@ -138,7 +139,7 @@ export type UpdateStationRequest = {
   max_energy?: number;
   min_valence?: number;
   max_valence?: number;
-  seed_type?: 'track' | 'artist' | 'album' | 'cluster' | 'mood' | 'genre' | 'sub_genre';
+  seed_type?: 'track' | 'artist' | 'album' | 'cluster' | 'mood' | 'genre' | 'sub_genre' | 'uncategorized';
   track_id?: string;
   artist_id?: string;
   album_id?: string;
@@ -305,11 +306,14 @@ export class OwnWaveAPI {
   }
 
   updateStation(id: string, body: UpdateStationRequest) {
-    return this.request<void>(`/stations/${encodeURIComponent(id)}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    });
+    return this.request<{ station_id: string; name: string; track_count: number }>(
+      `/stations/${encodeURIComponent(id)}`,
+      {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      },
+    );
   }
 
   deleteStation(id: string) {
