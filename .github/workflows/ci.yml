@@ -39,10 +39,11 @@ jobs:
           fi
           go vet ./...
 
-      - name: Test Go
-        run: |
-          cd services/go-api-server
-          go test ./...
+      - name: Test Go (unit)
+        run: cd services/go-api-server && go test ./...
+
+      - name: Test Go (integration)
+        run: cd services/go-api-server && go test -tags=integration ./internal/playback/...
 
       - name: Build frontend
         run: |
