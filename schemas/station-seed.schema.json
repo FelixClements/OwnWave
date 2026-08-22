@@ -1,0 +1,49 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://ownwave.local/schemas/station-seed.json",
+  "title": "StationSeed",
+  "description": "Canonical station seed filter stored in stations.seed_features",
+  "type": "object",
+  "properties": {
+    "type": {
+      "type": "string",
+      "enum": [
+        "track",
+        "artist",
+        "album",
+        "cluster",
+        "mood",
+        "genre",
+        "sub_genre",
+        "uncategorized"
+      ]
+    },
+    "seed_type": {
+      "type": "string",
+      "enum": [
+        "track",
+        "artist",
+        "album",
+        "cluster",
+        "mood",
+        "genre",
+        "sub_genre",
+        "uncategorized"
+      ],
+      "description": "Legacy alias for type; normalized to type on read"
+    },
+    "track_id": { "type": "string", "format": "uuid" },
+    "artist_id": { "type": "string", "format": "uuid" },
+    "album_id": { "type": "string", "format": "uuid" },
+    "cluster_id": { "type": "integer" },
+    "main_genre": { "type": "string", "minLength": 1 },
+    "sub_genre": { "type": "string", "minLength": 1 },
+    "min_bpm": { "type": "number", "minimum": 0 },
+    "max_bpm": { "type": "number", "minimum": 0 },
+    "min_energy": { "type": "number", "minimum": 0, "maximum": 1 },
+    "max_energy": { "type": "number", "minimum": 0, "maximum": 1 },
+    "min_valence": { "type": "number", "minimum": 0, "maximum": 1 },
+    "max_valence": { "type": "number", "minimum": 0, "maximum": 1 }
+  },
+  "additionalProperties": false
+}

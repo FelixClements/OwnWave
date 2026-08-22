@@ -76,6 +76,10 @@ func (c *HTTPClient) SetupStations(body io.Reader) (*Response, error) {
 	return c.post("/setup/stations", "application/json", body)
 }
 
+func (c *HTTPClient) GetStationTracklist(stationID string) (*Response, error) {
+	return c.get("/stations/" + stationID + "/tracklist")
+}
+
 func (c *HTTPClient) get(path string) (*Response, error) {
 	resp, err := c.httpClient.Get(c.baseURL + path)
 	if err != nil {

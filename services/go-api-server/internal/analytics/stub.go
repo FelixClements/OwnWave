@@ -72,6 +72,10 @@ func (s *Stub) SetupStations(body io.Reader) (*Response, error) {
 	return s.call("SetupStations")
 }
 
+func (s *Stub) GetStationTracklist(stationID string) (*Response, error) {
+	return s.call("GetStationTracklist:" + stationID)
+}
+
 func (s *Stub) call(name string) (*Response, error) {
 	s.Calls = append(s.Calls, name)
 	if err := s.Errors[name]; err != nil {

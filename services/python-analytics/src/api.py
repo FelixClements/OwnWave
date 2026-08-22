@@ -156,8 +156,8 @@ async def similar_tracks(track_id: UUID, limit: int = 20):
         }
 
 
-@app.get("/stations/{station_id}/queue")
-async def station_queue(station_id: UUID):
+@app.get("/stations/{station_id}/tracklist")
+async def station_tracklist(station_id: UUID):
     with _db_conn() as conn:
         queue = db.get_queue(conn, station_id)
         return {

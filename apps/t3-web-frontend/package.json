@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "generate:station-seed": "json2ts ../../schemas/station-seed.schema.json > lib/station-seed.generated.ts"
   },
   "dependencies": {
     "@tanstack/react-query": "^4.36.1",
@@ -26,6 +27,7 @@
     "@types/react-dom": "^18.0.0",
     "@vitest/coverage-v8": "^4.1.11",
     "autoprefixer": "^10.4.0",
+    "json-schema-to-typescript": "^15.0.4",
     "postcss": "^8.4.0",
     "typescript": "^5.0.0",
     "vitest": "^4.1.11"

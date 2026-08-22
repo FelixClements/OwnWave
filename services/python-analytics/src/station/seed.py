@@ -1,5 +1,8 @@
+from pathlib import Path
 from typing import Any, Optional
 from uuid import UUID
+
+SCHEMA_PATH = Path(__file__).resolve().parents[4] / "schemas" / "station-seed.schema.json"
 
 SEED_TYPES = frozenset(
     {"track", "artist", "album", "mood", "cluster", "genre", "sub_genre", "uncategorized"}

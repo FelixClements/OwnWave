@@ -18,4 +18,5 @@ type Client interface {
 	RebuildGenreStations() (*Response, error)
 	SetupSummary() (*Response, error)
 	SetupStations(body io.Reader) (*Response, error)
+	GetStationTracklist(stationID string) (*Response, error)
 }

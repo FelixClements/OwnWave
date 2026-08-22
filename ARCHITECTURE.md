@@ -80,27 +80,29 @@ The v1 architecture is split into four layers:
 - `src/analyzer_librosa.py` — default analyzer.
 - `src/analyzer_essentia.py` — optional analyzer.
 - `src/scanner.py` — directory walker and tag reader.
-- `src/station_builder.py` — groups tracks into station profiles.
-- `src/db.py` — PostgreSQL persistence.
-- `src/api.py` — small HTTP API for scan jobs.
+- `src/station/` — station seed parsing, filtering, and queue compiler.
+- `src/api.py` — small HTTP API for scan jobs and station management.
 - `src/main.py` — CLI entry point.
 
 ### Go API server (`services/go-api-server`)
 
-- `main.go` — HTTP server setup.
-- `handlers/` — REST handlers for tracks, stations, queue, admin.
+- `main.go` — HTTP server setup and routing.
+- `handler.go` — shared `Handler` struct and helpers.
+- `handlers_*.go` — REST handlers split by seam (tracks, stations, streaming, auth, admin, setup).
+- `internal/analytics/` — Python analytics `Client` (HTTP + stub adapters).
+- `internal/playback/` — playback recording and queue rotation.
 - `streaming.go` — FLAC/MP3 streaming with optional `ffmpeg`.
-- `queue.go` — queue scheduler and crossfade marker logic.
 - `db.go` — database access.
-- `auth.go` — signed URL validation.
+
+Python analytics exposes compiled station track lists at `GET /stations/{id}/tracklist`. Go serves the playback queue at `GET /stations/{id}/queue`.
 
 ### Next.js web frontend (`apps/t3-web-frontend`)
 
 - `app/page.tsx` — station browser.
 - `app/player/page.tsx` or embedded player.
 - `server/routers/app.ts` — tRPC router.
-- `components/Player.tsx` — Web Audio crossfade player.
-- `lib/api.ts` — Go REST client for the tRPC proxy.
+- `lib/playback/` — Web Audio crossfade engine and React hook.
+- `lib/station-seed.ts` — station seed helpers; types generated from `schemas/station-seed.schema.json`.
 
 ## Technology Stack
 

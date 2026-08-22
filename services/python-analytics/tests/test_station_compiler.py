@@ -81,3 +81,16 @@ def test_apply_numeric_filter_limits_bpm():
     ]
     filtered = apply_numeric_filter(tracks, {"min_bpm": 100, "max_bpm": 130})
     assert [t["id"] for t in filtered] == [2]
+
+
+def test_seed_types_match_json_schema():
+    import json
+
+    from station.seed import SCHEMA_PATH, SEED_TYPES
+
+    if not SCHEMA_PATH.is_file():
+        pytest.skip("schema file not available in this environment")
+
+    schema = json.loads(SCHEMA_PATH.read_text())
+    schema_types = set(schema["properties"]["type"]["enum"])
+    assert schema_types == set(SEED_TYPES)

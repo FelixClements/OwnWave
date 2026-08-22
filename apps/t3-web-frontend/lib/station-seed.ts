@@ -1,19 +1,8 @@
-export type StationSeed = {
-  type?: string;
-  seed_type?: string;
-  min_bpm?: number;
-  max_bpm?: number;
-  min_energy?: number;
-  max_energy?: number;
-  min_valence?: number;
-  max_valence?: number;
-  main_genre?: string;
-  sub_genre?: string;
-  track_id?: string;
-  artist_id?: string;
-  album_id?: string;
-  cluster_id?: number;
-};
+import type { StationSeed } from './station-seed.generated';
+import { STATION_SEED_TYPES, type StationSeedType } from './station-seed-types';
+
+export type { StationSeed, StationSeedType };
+export { STATION_SEED_TYPES };
 
 export type StationFilterForm = {
   min_bpm: string;

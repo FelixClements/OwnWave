@@ -15,7 +15,7 @@ export class WebAudioCrossfadeEngine {
   private active: Deck = 'A';
   private currentIndex = 0;
   private crossfading = false;
-  private crossfadeTimer: ReturnType<typeof setTimeout> | null = null;
+  private crossfadeRaf: number | null = null;
 
   constructor(
     private readonly resolver: StreamResolver,
@@ -49,10 +49,7 @@ export class WebAudioCrossfadeEngine {
     this.queue = queue;
     this.currentIndex = startIndex;
     this.crossfading = false;
-    if (this.crossfadeTimer) {
-      clearTimeout(this.crossfadeTimer);
-      this.crossfadeTimer = null;
-    }
+    this.cancelCrossfadeSchedule();
     await this.loadAndPlay(startIndex, 'A');
   }
 
@@ -76,7 +73,7 @@ export class WebAudioCrossfadeEngine {
 
   dispose() {
     this.pause();
-    if (this.crossfadeTimer) clearTimeout(this.crossfadeTimer);
+    this.cancelCrossfadeSchedule();
     this.ctx?.close();
     this.ctx = null;
   }
@@ -226,7 +223,8 @@ export class WebAudioCrossfadeEngine {
     nextGain.gain.setValueAtTime(0, now);
     nextGain.gain.linearRampToValueAtTime(1, now + crossfade);
 
-    this.crossfadeTimer = setTimeout(() => {
+    const endTime = now + crossfade;
+    this.scheduleAtContextTime(ctx, endTime, () => {
       currentAudio.pause();
       currentAudio.src = '';
       currentAudio.ontimeupdate = null;
@@ -240,7 +238,26 @@ export class WebAudioCrossfadeEngine {
       this.active = nextTarget;
       this.currentIndex = nextIndex;
       this.crossfading = false;
-      this.crossfadeTimer = null;
-    }, crossfade * 1000);
+    });
+  }
+
+  private cancelCrossfadeSchedule() {
+    if (this.crossfadeRaf != null) {
+      cancelAnimationFrame(this.crossfadeRaf);
+      this.crossfadeRaf = null;
+    }
+  }
+
+  private scheduleAtContextTime(ctx: AudioContext, endTime: number, onComplete: () => void) {
+    this.cancelCrossfadeSchedule();
+    const tick = () => {
+      if (ctx.currentTime >= endTime) {
+        this.crossfadeRaf = null;
+        onComplete();
+        return;
+      }
+      this.crossfadeRaf = requestAnimationFrame(tick);
+    };
+    this.crossfadeRaf = requestAnimationFrame(tick);
   }
 }

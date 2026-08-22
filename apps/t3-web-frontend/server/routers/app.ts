@@ -2,6 +2,9 @@ import { initTRPC } from '@trpc/server';
 import { z } from 'zod';
 import superjson from 'superjson';
 import { OwnWaveAPI } from '@/lib/api';
+import { STATION_SEED_TYPES } from '@/lib/station-seed-types';
+
+const stationSeedTypeSchema = z.enum(STATION_SEED_TYPES);
 
 const GO_API_URL = process.env.GO_API_URL || 'http://localhost:8080';
 const api = new OwnWaveAPI(GO_API_URL);
@@ -121,7 +124,7 @@ export const appRouter = t.router({
         max_energy: z.number().optional(),
         min_valence: z.number().optional(),
         max_valence: z.number().optional(),
-        seed_type: z.enum(['track', 'artist', 'album', 'cluster', 'mood', 'genre', 'sub_genre', 'uncategorized']).optional(),
+        seed_type: stationSeedTypeSchema.optional(),
         track_id: z.string().optional(),
         artist_id: z.string().optional(),
         album_id: z.string().optional(),
@@ -144,7 +147,7 @@ export const appRouter = t.router({
         max_energy: z.number().optional(),
         min_valence: z.number().optional(),
         max_valence: z.number().optional(),
-        seed_type: z.enum(['track', 'artist', 'album', 'cluster', 'mood', 'genre', 'sub_genre', 'uncategorized']).optional(),
+        seed_type: stationSeedTypeSchema.optional(),
         track_id: z.string().optional(),
         artist_id: z.string().optional(),
         album_id: z.string().optional(),
