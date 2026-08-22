@@ -5,13 +5,13 @@ import (
 	"fmt"
 	"net/http"
 	"os/exec"
-	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/golang-jwt/jwt/v5"
 )
+
 func (h *Handler) StreamURL(w http.ResponseWriter, r *http.Request) {
 	trackID := chi.URLParam(r, "id")
 	format := r.URL.Query().Get("format")
@@ -57,10 +57,7 @@ func (h *Handler) StreamTrack(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	fullPath := track.Path
-	if !filepath.IsAbs(fullPath) {
-		fullPath = filepath.Join(h.musicDir, fullPath)
-	}
+	fullPath := h.stream.ResolvePath(track.Path)
 	if strings.ToLower(format) != "flac" {
 		if _, err := exec.LookPath(h.ffmpegPath); err != nil {
 			http.Error(w, "ffmpeg not available", 500)
@@ -72,9 +69,9 @@ func (h *Handler) StreamTrack(w http.ResponseWriter, r *http.Request) {
 
 	switch strings.ToLower(format) {
 	case "flac":
-		h.serveFLAC(w, r, fullPath)
+		h.stream.ServeFLAC(w, r, fullPath)
 	case "mp3", "opus", "aac":
-		h.serveTranscoded(w, r, fullPath, format, track.Loudness, normalize)
+		h.stream.ServeTranscoded(w, r, fullPath, format, track.Loudness, normalize)
 	default:
 		http.Error(w, "unsupported format", 400)
 	}
@@ -165,7 +162,7 @@ func (h *Handler) StationCrossfadeStream(w http.ResponseWriter, r *http.Request)
 	gapless := r.URL.Query().Get("gapless") == "true"
 	normalize := r.URL.Query().Get("normalize") != "false"
 	bitrate := r.URL.Query().Get("bitrate")
-	h.serveCrossfaded(w, r, queue, format, bitrate, gapless, normalize)
+	h.stream.ServeCrossfaded(w, r, queue, format, bitrate, gapless, normalize)
 }
 func (h *Handler) signStationStreamToken(stationID, format string) (string, error) {
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{

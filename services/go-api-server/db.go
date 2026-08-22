@@ -20,8 +20,6 @@ func NewDB(pool *pgxpool.Pool) *DB {
 
 type Track = playback.Track
 
-type TrackWithFeatures = playback.TrackWithFeatures
-
 type Station struct {
 	ID           string  `json:"id"`
 	Name         string  `json:"name"`

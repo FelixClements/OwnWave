@@ -1,4 +1,4 @@
-package main
+package streaming
 
 import "testing"
 
@@ -16,9 +16,9 @@ func TestNormalizeBitrate(t *testing.T) {
 		{"", "192k", "192k"},
 	}
 	for _, c := range cases {
-		got := normalizeBitrate(c.input, c.fallback)
+		got := NormalizeBitrate(c.input, c.fallback)
 		if got != c.want {
-			t.Errorf("normalizeBitrate(%q, %q) = %q, want %q", c.input, c.fallback, got, c.want)
+			t.Errorf("NormalizeBitrate(%q, %q) = %q, want %q", c.input, c.fallback, got, c.want)
 		}
 	}
 }
@@ -38,9 +38,9 @@ func TestVolumeGainDb(t *testing.T) {
 		{ptrFloat64(-8.0), false, 0},
 	}
 	for _, c := range cases {
-		got := volumeGainDb(c.loudness, c.normalize)
+		got := VolumeGainDb(c.loudness, c.normalize)
 		if got != c.want {
-			t.Errorf("volumeGainDb(%v, %v) = %v, want %v", c.loudness, c.normalize, got, c.want)
+			t.Errorf("VolumeGainDb(%v, %v) = %v, want %v", c.loudness, c.normalize, got, c.want)
 		}
 	}
 }

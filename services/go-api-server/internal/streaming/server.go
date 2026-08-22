@@ -1,4 +1,4 @@
-package main
+package streaming
 
 import (
 	"fmt"
@@ -7,11 +7,36 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strconv"
 	"strings"
+
+	"ownwave/api/internal/playback"
 )
 
-func (h *Handler) serveFLAC(w http.ResponseWriter, r *http.Request, path string) {
+type Config struct {
+	MusicDir   string
+	FFmpegPath string
+}
+
+type Server struct {
+	musicDir   string
+	ffmpegPath string
+}
+
+func New(cfg Config) *Server {
+	return &Server{
+		musicDir:   cfg.MusicDir,
+		ffmpegPath: cfg.FFmpegPath,
+	}
+}
+
+func (s *Server) ResolvePath(path string) string {
+	if filepath.IsAbs(path) {
+		return path
+	}
+	return filepath.Join(s.musicDir, path)
+}
+
+func (s *Server) ServeFLAC(w http.ResponseWriter, r *http.Request, path string) {
 	f, err := os.Open(path)
 	if err != nil {
 		http.Error(w, "file not found", 404)
@@ -29,7 +54,7 @@ func (h *Handler) serveFLAC(w http.ResponseWriter, r *http.Request, path string)
 	http.ServeContent(w, r, filepath.Base(path), stat.ModTime(), f)
 }
 
-func (h *Handler) serveTranscoded(w http.ResponseWriter, r *http.Request, path string, format string, loudness *float64, normalize bool) {
+func (s *Server) ServeTranscoded(w http.ResponseWriter, r *http.Request, path string, format string, loudness *float64, normalize bool) {
 	format = strings.ToLower(format)
 
 	var (
@@ -64,13 +89,13 @@ func (h *Handler) serveTranscoded(w http.ResponseWriter, r *http.Request, path s
 	if bitrate == "" {
 		bitrate = defaultRate
 	} else {
-		bitrate = normalizeBitrate(bitrate, defaultRate)
+		bitrate = NormalizeBitrate(bitrate, defaultRate)
 	}
 
 	w.Header().Set("Content-Type", contentType)
 	w.Header().Set("Transfer-Encoding", "chunked")
 
-	gainDb := volumeGainDb(loudness, normalize)
+	gainDb := VolumeGainDb(loudness, normalize)
 
 	args := []string{
 		"-hide_banner",
@@ -88,7 +113,7 @@ func (h *Handler) serveTranscoded(w http.ResponseWriter, r *http.Request, path s
 		"-",
 	)
 
-	cmd := exec.Command(h.ffmpegPath, args...)
+	cmd := exec.Command(s.ffmpegPath, args...)
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		http.Error(w, err.Error(), 500)
@@ -107,46 +132,13 @@ func (h *Handler) serveTranscoded(w http.ResponseWriter, r *http.Request, path s
 	_, _ = io.Copy(w, stdout)
 }
 
-func normalizeBitrate(input, defaultRate string) string {
-	input = strings.ToLower(strings.TrimSpace(input))
-	input = strings.TrimSuffix(input, "k")
-	kbps, err := strconv.Atoi(input)
-	if err != nil || kbps <= 0 {
-		return defaultRate
-	}
-	return fmt.Sprintf("%dk", kbps)
-}
-
-const (
-	targetLoudness = -14.0
-	maxGainDb      = 20.0
-	minGainDb      = -20.0
-)
-
-func volumeGainDb(loudness *float64, normalize bool) float64 {
-	if !normalize || loudness == nil || *loudness == 0 {
-		return 0
-	}
-	gain := targetLoudness - *loudness
-	if gain > maxGainDb {
-		return maxGainDb
-	}
-	if gain < minGainDb {
-		return minGainDb
-	}
-	return gain
-}
-
-func (h *Handler) serveCrossfaded(w http.ResponseWriter, r *http.Request, queue []TrackWithFeatures, format, bitrate string, gapless, normalize bool) {
+func (s *Server) ServeCrossfaded(w http.ResponseWriter, r *http.Request, queue []playback.TrackWithFeatures, format, bitrate string, gapless, normalize bool) {
 	if len(queue) == 1 {
-		fullPath := queue[0].Path
-		if !filepath.IsAbs(fullPath) {
-			fullPath = filepath.Join(h.musicDir, fullPath)
-		}
+		fullPath := s.ResolvePath(queue[0].Path)
 		if format == "flac" {
-			h.serveFLAC(w, r, fullPath)
+			s.ServeFLAC(w, r, fullPath)
 		} else {
-			h.serveTranscoded(w, r, fullPath, format, queue[0].Loudness, normalize)
+			s.ServeTranscoded(w, r, fullPath, format, queue[0].Loudness, normalize)
 		}
 		return
 	}
@@ -193,7 +185,7 @@ func (h *Handler) serveCrossfaded(w http.ResponseWriter, r *http.Request, queue 
 		intros[i] = intro
 		outroStarts[i] = outroStart
 		outroEnds[i] = outroEnd
-		gains[i] = volumeGainDb(q.Loudness, normalize)
+		gains[i] = VolumeGainDb(q.Loudness, normalize)
 	}
 
 	if gapless {
@@ -229,10 +221,7 @@ func (h *Handler) serveCrossfaded(w http.ResponseWriter, r *http.Request, queue 
 
 	args := []string{"-hide_banner", "-loglevel", "error"}
 	for i, q := range queue {
-		fullPath := q.Path
-		if !filepath.IsAbs(fullPath) {
-			fullPath = filepath.Join(h.musicDir, fullPath)
-		}
+		fullPath := s.ResolvePath(q.Path)
 		if intros[i] > 0 {
 			args = append(args, "-ss", fmt.Sprintf("%f", intros[i]))
 		}
@@ -260,7 +249,7 @@ func (h *Handler) serveCrossfaded(w http.ResponseWriter, r *http.Request, queue 
 		if bitrate == "" {
 			bitrate = defaultRate
 		} else {
-			bitrate = normalizeBitrate(bitrate, defaultRate)
+			bitrate = NormalizeBitrate(bitrate, defaultRate)
 		}
 	}
 
@@ -302,7 +291,7 @@ func (h *Handler) serveCrossfaded(w http.ResponseWriter, r *http.Request, queue 
 		args = append(args, "-c:a", encoder, "-b:a", bitrate, "-f", container, "-")
 	}
 
-	cmd := exec.Command(h.ffmpegPath, args...)
+	cmd := exec.Command(s.ffmpegPath, args...)
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		http.Error(w, err.Error(), 500)

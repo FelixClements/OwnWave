@@ -14,11 +14,13 @@ import (
 
 	"ownwave/api/internal/analytics"
 	"ownwave/api/internal/playback"
+	"ownwave/api/internal/streaming"
 )
 
 type Handler struct {
 	db          *DB
 	playback    *playback.Service
+	stream      *streaming.Server
 	analytics   analytics.Client
 	jwtSecret   []byte
 	musicDir    string
@@ -33,6 +35,7 @@ func NewHandler(pool *pgxpool.Pool, jwtSecret []byte, musicDir, ffmpegPath, pyth
 	return &Handler{
 		db:          NewDB(pool),
 		playback:    playback.NewService(pool),
+		stream:      streaming.New(streaming.Config{MusicDir: musicDir, FFmpegPath: ffmpegPath}),
 		analytics:   analytics.NewHTTPClient(pythonURL),
 		jwtSecret:   jwtSecret,
 		musicDir:    musicDir,
