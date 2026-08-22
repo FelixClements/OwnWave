@@ -5,5 +5,7 @@ node_modules
 __pycache__
 *.pyc
 .DS_Store
+services/go-api-server/api
+apps/t3-web-frontend/tsconfig.tsbuildinfo
 music/**
 !music/.gitkeep

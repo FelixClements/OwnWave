@@ -21,16 +21,17 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"golang.org/x/crypto/bcrypt"
 
+	"ownwave/api/internal/analytics"
 	"ownwave/api/internal/playback"
 )
 
 type Handler struct {
 	db          *DB
 	playback    *playback.Service
+	analytics   analytics.Client
 	jwtSecret   []byte
 	musicDir    string
 	ffmpegPath  string
-	pythonURL   string
 	recentHours int
 }
 
@@ -41,12 +42,20 @@ func NewHandler(pool *pgxpool.Pool, jwtSecret []byte, musicDir, ffmpegPath, pyth
 	return &Handler{
 		db:          NewDB(pool),
 		playback:    playback.NewService(pool),
+		analytics:   analytics.NewHTTPClient(pythonURL),
 		jwtSecret:   jwtSecret,
 		musicDir:    musicDir,
 		ffmpegPath:  ffmpegPath,
-		pythonURL:   strings.TrimRight(pythonURL, "/"),
 		recentHours: recentHours,
 	}
+}
+
+func proxyAnalytics(w http.ResponseWriter, resp *analytics.Response, err error) {
+	if err != nil {
+		http.Error(w, err.Error(), 500)
+		return
+	}
+	resp.WriteJSON(w)
 }
 
 func (h *Handler) Health(w http.ResponseWriter, r *http.Request) {
@@ -106,15 +115,8 @@ func (h *Handler) GetSimilarTracks(w http.ResponseWriter, r *http.Request) {
 	if limit == "" {
 		limit = "20"
 	}
-	resp, err := http.Get(h.pythonURL + "/tracks/" + id + "/similar?limit=" + limit)
-	if err != nil {
-		http.Error(w, err.Error(), 500)
-		return
-	}
-	defer resp.Body.Close()
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(resp.StatusCode)
-	io.Copy(w, resp.Body)
+	resp, err := h.analytics.GetSimilarTracks(id, limit)
+	proxyAnalytics(w, resp, err)
 }
 
 func (h *Handler) Rescan(w http.ResponseWriter, r *http.Request) {
@@ -122,28 +124,14 @@ func (h *Handler) Rescan(w http.ResponseWriter, r *http.Request) {
 		"path":  h.musicDir,
 		"force": false,
 	})
-	resp, err := http.Post(h.pythonURL+"/scan", "application/json", bytes.NewReader(payload))
-	if err != nil {
-		http.Error(w, err.Error(), 500)
-		return
-	}
-	defer resp.Body.Close()
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(resp.StatusCode)
-	io.Copy(w, resp.Body)
+	resp, err := h.analytics.Scan(payload)
+	proxyAnalytics(w, resp, err)
 }
 
 func (h *Handler) ScanStatus(w http.ResponseWriter, r *http.Request) {
 	jobID := chi.URLParam(r, "id")
-	resp, err := http.Get(h.pythonURL + "/jobs/" + jobID)
-	if err != nil {
-		http.Error(w, err.Error(), 500)
-		return
-	}
-	defer resp.Body.Close()
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(resp.StatusCode)
-	io.Copy(w, resp.Body)
+	resp, err := h.analytics.GetJob(jobID)
+	proxyAnalytics(w, resp, err)
 }
 
 func (h *Handler) RecordPlay(w http.ResponseWriter, r *http.Request) {
@@ -281,21 +269,8 @@ func (h *Handler) UpdateStation(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), 400)
 		return
 	}
-	req, err := http.NewRequest(http.MethodPatch, h.pythonURL+"/stations/"+id, bytes.NewReader(body))
-	if err != nil {
-		http.Error(w, err.Error(), 500)
-		return
-	}
-	req.Header.Set("Content-Type", "application/json")
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		http.Error(w, err.Error(), 500)
-		return
-	}
-	defer resp.Body.Close()
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(resp.StatusCode)
-	io.Copy(w, resp.Body)
+	resp, err := h.analytics.UpdateStation(id, body)
+	proxyAnalytics(w, resp, err)
 }
 
 func (h *Handler) DeleteStation(w http.ResponseWriter, r *http.Request) {
@@ -324,15 +299,8 @@ func (h *Handler) CreateStation(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), 400)
 		return
 	}
-	resp, err := http.Post(h.pythonURL+"/stations", "application/json", bytes.NewReader(body))
-	if err != nil {
-		http.Error(w, err.Error(), 500)
-		return
-	}
-	defer resp.Body.Close()
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(resp.StatusCode)
-	io.Copy(w, resp.Body)
+	resp, err := h.analytics.CreateStation(body)
+	proxyAnalytics(w, resp, err)
 }
 
 func (h *Handler) TriggerScan(w http.ResponseWriter, r *http.Request) {
@@ -348,15 +316,8 @@ func (h *Handler) TriggerScan(w http.ResponseWriter, r *http.Request) {
 	}
 
 	payload, _ := json.Marshal(req)
-	resp, err := http.Post(h.pythonURL+"/scan", "application/json", bytes.NewReader(payload))
-	if err != nil {
-		http.Error(w, err.Error(), 500)
-		return
-	}
-	defer resp.Body.Close()
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(resp.StatusCode)
-	io.Copy(w, resp.Body)
+	resp, err := h.analytics.Scan(payload)
+	proxyAnalytics(w, resp, err)
 }
 
 func (h *Handler) AdminHealth(w http.ResponseWriter, r *http.Request) {
@@ -369,16 +330,13 @@ func (h *Handler) AdminHealth(w http.ResponseWriter, r *http.Request) {
 	if err := h.db.pool.Ping(r.Context()); err != nil {
 		status["db"] = "error: " + err.Error()
 	}
-	resp, err := http.Get(h.pythonURL + "/health")
+	resp, err := h.analytics.Health()
 	if err != nil {
 		status["python"] = "error: " + err.Error()
+	} else if resp.StatusCode == 200 {
+		status["python"] = "ok"
 	} else {
-		defer resp.Body.Close()
-		if resp.StatusCode == 200 {
-			status["python"] = "ok"
-		} else {
-			status["python"] = "error: " + resp.Status
-		}
+		status["python"] = "error: status " + strconv.Itoa(resp.StatusCode)
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(status)
@@ -395,76 +353,34 @@ func (h *Handler) AdminStations(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) AdminRebuildVectors(w http.ResponseWriter, r *http.Request) {
-	resp, err := http.Post(h.pythonURL+"/rebuild-vectors", "application/json", nil)
-	if err != nil {
-		http.Error(w, err.Error(), 500)
-		return
-	}
-	defer resp.Body.Close()
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(resp.StatusCode)
-	io.Copy(w, resp.Body)
+	resp, err := h.analytics.RebuildVectors()
+	proxyAnalytics(w, resp, err)
 }
 
 func (h *Handler) AdminRebuildClusters(w http.ResponseWriter, r *http.Request) {
-	resp, err := http.Post(h.pythonURL+"/rebuild-clusters", "application/json", nil)
-	if err != nil {
-		http.Error(w, err.Error(), 500)
-		return
-	}
-	defer resp.Body.Close()
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(resp.StatusCode)
-	io.Copy(w, resp.Body)
+	resp, err := h.analytics.RebuildClusters()
+	proxyAnalytics(w, resp, err)
 }
 
 func (h *Handler) ListGenres(w http.ResponseWriter, r *http.Request) {
-	resp, err := http.Get(h.pythonURL + "/genres")
-	if err != nil {
-		http.Error(w, err.Error(), 500)
-		return
-	}
-	defer resp.Body.Close()
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(resp.StatusCode)
-	io.Copy(w, resp.Body)
+	resp, err := h.analytics.ListGenres()
+	proxyAnalytics(w, resp, err)
 }
 
 func (h *Handler) GetTrackGenres(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
-	resp, err := http.Get(h.pythonURL + "/tracks/" + id + "/genres")
-	if err != nil {
-		http.Error(w, err.Error(), 500)
-		return
-	}
-	defer resp.Body.Close()
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(resp.StatusCode)
-	io.Copy(w, resp.Body)
+	resp, err := h.analytics.GetTrackGenres(id)
+	proxyAnalytics(w, resp, err)
 }
 
 func (h *Handler) AdminRebuildGenres(w http.ResponseWriter, r *http.Request) {
-	resp, err := http.Post(h.pythonURL+"/rebuild-genres", "application/json", nil)
-	if err != nil {
-		http.Error(w, err.Error(), 500)
-		return
-	}
-	defer resp.Body.Close()
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(resp.StatusCode)
-	io.Copy(w, resp.Body)
+	resp, err := h.analytics.RebuildGenres()
+	proxyAnalytics(w, resp, err)
 }
 
 func (h *Handler) AdminRebuildGenreStations(w http.ResponseWriter, r *http.Request) {
-	resp, err := http.Post(h.pythonURL+"/rebuild-genre-stations", "application/json", nil)
-	if err != nil {
-		http.Error(w, err.Error(), 500)
-		return
-	}
-	defer resp.Body.Close()
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(resp.StatusCode)
-	io.Copy(w, resp.Body)
+	resp, err := h.analytics.RebuildGenreStations()
+	proxyAnalytics(w, resp, err)
 }
 
 func (h *Handler) StreamURL(w http.ResponseWriter, r *http.Request) {
@@ -844,27 +760,13 @@ func (h *Handler) SetupComplete(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) SetupSummary(w http.ResponseWriter, r *http.Request) {
-	resp, err := http.Get(h.pythonURL + "/setup/summary")
-	if err != nil {
-		http.Error(w, err.Error(), 500)
-		return
-	}
-	defer resp.Body.Close()
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(resp.StatusCode)
-	io.Copy(w, resp.Body)
+	resp, err := h.analytics.SetupSummary()
+	proxyAnalytics(w, resp, err)
 }
 
 func (h *Handler) SetupStations(w http.ResponseWriter, r *http.Request) {
-	resp, err := http.Post(h.pythonURL+"/setup/stations", "application/json", r.Body)
-	if err != nil {
-		http.Error(w, err.Error(), 500)
-		return
-	}
-	defer resp.Body.Close()
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(resp.StatusCode)
-	io.Copy(w, resp.Body)
+	resp, err := h.analytics.SetupStations(r.Body)
+	proxyAnalytics(w, resp, err)
 }
 
 func (h *Handler) ChangePassword(w http.ResponseWriter, r *http.Request) {
