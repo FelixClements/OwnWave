@@ -6,10 +6,8 @@ import (
 	"net/http"
 	"os/exec"
 	"strings"
-	"time"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/golang-jwt/jwt/v5"
 )
 
 func (h *Handler) StreamURL(w http.ResponseWriter, r *http.Request) {
@@ -20,7 +18,7 @@ func (h *Handler) StreamURL(w http.ResponseWriter, r *http.Request) {
 	}
 	bitrate := r.URL.Query().Get("bitrate")
 	normalize := r.URL.Query().Get("normalize") != "false"
-	token, err := h.signStreamToken(trackID, format)
+	token, err := h.streamTokens.SignTrack(trackID, format)
 	if err != nil {
 		http.Error(w, err.Error(), 500)
 		return
@@ -46,7 +44,7 @@ func (h *Handler) StreamTrack(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "missing token", 401)
 		return
 	}
-	if _, _, err := h.validateStreamToken(token); err != nil {
+	if _, _, err := h.streamTokens.ValidateTrack(token); err != nil {
 		http.Error(w, "unauthorized", 401)
 		return
 	}
@@ -76,30 +74,6 @@ func (h *Handler) StreamTrack(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "unsupported format", 400)
 	}
 }
-func (h *Handler) signStreamToken(trackID, format string) (string, error) {
-	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
-		"track_id": trackID,
-		"format":   format,
-		"exp":      time.Now().Add(10 * time.Minute).Unix(),
-	})
-	return token.SignedString(h.jwtSecret)
-}
-func (h *Handler) validateStreamToken(tokenString string) (string, string, error) {
-	token, err := jwt.Parse(tokenString, func(t *jwt.Token) (interface{}, error) {
-		if _, ok := t.Method.(*jwt.SigningMethodHMAC); !ok {
-			return nil, fmt.Errorf("unexpected signing method")
-		}
-		return h.jwtSecret, nil
-	})
-	if err != nil || !token.Valid {
-		return "", "", fmt.Errorf("invalid token")
-	}
-	claims, ok := token.Claims.(jwt.MapClaims)
-	if !ok {
-		return "", "", fmt.Errorf("invalid claims")
-	}
-	return getString(claims, "track_id"), getString(claims, "format"), nil
-}
 func (h *Handler) StationCrossfadeURL(w http.ResponseWriter, r *http.Request) {
 	stationID := chi.URLParam(r, "id")
 	format := r.URL.Query().Get("format")
@@ -109,7 +83,7 @@ func (h *Handler) StationCrossfadeURL(w http.ResponseWriter, r *http.Request) {
 	bitrate := r.URL.Query().Get("bitrate")
 	gapless := r.URL.Query().Get("gapless") == "true"
 	normalize := r.URL.Query().Get("normalize") != "false"
-	token, err := h.signStationStreamToken(stationID, format)
+	token, err := h.streamTokens.SignStation(stationID, format)
 	if err != nil {
 		http.Error(w, err.Error(), 500)
 		return
@@ -138,7 +112,7 @@ func (h *Handler) StationCrossfadeStream(w http.ResponseWriter, r *http.Request)
 		http.Error(w, "missing token", 401)
 		return
 	}
-	if _, _, err := h.validateStationStreamToken(token); err != nil {
+	if _, _, err := h.streamTokens.ValidateStation(token); err != nil {
 		http.Error(w, "unauthorized", 401)
 		return
 	}
@@ -163,28 +137,4 @@ func (h *Handler) StationCrossfadeStream(w http.ResponseWriter, r *http.Request)
 	normalize := r.URL.Query().Get("normalize") != "false"
 	bitrate := r.URL.Query().Get("bitrate")
 	h.stream.ServeCrossfaded(w, r, queue, format, bitrate, gapless, normalize)
-}
-func (h *Handler) signStationStreamToken(stationID, format string) (string, error) {
-	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
-		"station_id": stationID,
-		"format":     format,
-		"exp":        time.Now().Add(10 * time.Minute).Unix(),
-	})
-	return token.SignedString(h.jwtSecret)
-}
-func (h *Handler) validateStationStreamToken(tokenString string) (string, string, error) {
-	token, err := jwt.Parse(tokenString, func(t *jwt.Token) (interface{}, error) {
-		if _, ok := t.Method.(*jwt.SigningMethodHMAC); !ok {
-			return nil, fmt.Errorf("unexpected signing method")
-		}
-		return h.jwtSecret, nil
-	})
-	if err != nil || !token.Valid {
-		return "", "", fmt.Errorf("invalid token")
-	}
-	claims, ok := token.Claims.(jwt.MapClaims)
-	if !ok {
-		return "", "", fmt.Errorf("invalid claims")
-	}
-	return getString(claims, "station_id"), getString(claims, "format"), nil
 }

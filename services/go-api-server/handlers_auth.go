@@ -1,14 +1,16 @@
 package main
 
 import (
-	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strings"
-	"time"
 
 	"golang.org/x/crypto/bcrypt"
+
+	"ownwave/api/internal/auth"
 )
+
 func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Username string `json:"username"`
@@ -23,20 +25,12 @@ func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	hash, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
+	token, user, err := h.auth.Register(r.Context(), req.Username, req.Password)
 	if err != nil {
-		http.Error(w, err.Error(), 500)
-		return
-	}
-
-	userID, err := h.db.CreateUser(r.Context(), req.Username, string(hash))
-	if err != nil {
-		http.Error(w, "username taken", 409)
-		return
-	}
-
-	token, err := h.createSession(r.Context(), userID)
-	if err != nil {
+		if errors.Is(err, auth.ErrUsernameTaken) {
+			http.Error(w, "username taken", 409)
+			return
+		}
 		http.Error(w, err.Error(), 500)
 		return
 	}
@@ -45,8 +39,8 @@ func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"token": token,
 		"user": map[string]string{
-			"id":       userID,
-			"username": req.Username,
+			"id":       user.ID,
+			"username": user.Username,
 		},
 	})
 }
@@ -64,18 +58,12 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	user, err := h.db.GetUserByUsername(r.Context(), req.Username)
+	token, user, err := h.auth.Login(r.Context(), req.Username, req.Password)
 	if err != nil {
-		http.Error(w, "invalid credentials", 401)
-		return
-	}
-	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(req.Password)); err != nil {
-		http.Error(w, "invalid credentials", 401)
-		return
-	}
-
-	token, err := h.createSession(r.Context(), user.ID)
-	if err != nil {
+		if errors.Is(err, auth.ErrInvalidCredentials) {
+			http.Error(w, "invalid credentials", 401)
+			return
+		}
 		http.Error(w, err.Error(), 500)
 		return
 	}
@@ -90,17 +78,17 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 	})
 }
 func (h *Handler) Logout(w http.ResponseWriter, r *http.Request) {
-	auth := r.Header.Get("Authorization")
-	if !strings.HasPrefix(auth, "Bearer ") {
+	authHeader := r.Header.Get("Authorization")
+	if !strings.HasPrefix(authHeader, "Bearer ") {
 		http.Error(w, "unauthorized", 401)
 		return
 	}
-	if _, ok := h.authUser(r); !ok {
+	if _, ok := h.auth.UserFromRequest(r); !ok {
 		http.Error(w, "unauthorized", 401)
 		return
 	}
-	token := strings.TrimPrefix(auth, "Bearer ")
-	if err := h.db.DeleteSession(r.Context(), hashToken(token)); err != nil {
+	token := strings.TrimPrefix(authHeader, "Bearer ")
+	if err := h.auth.Logout(r.Context(), token); err != nil {
 		http.Error(w, err.Error(), 500)
 		return
 	}
@@ -108,7 +96,7 @@ func (h *Handler) Logout(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 }
 func (h *Handler) Me(w http.ResponseWriter, r *http.Request) {
-	user, ok := h.authUser(r)
+	user, ok := h.auth.UserFromRequest(r)
 	if !ok {
 		http.Error(w, "unauthorized", 401)
 		return
@@ -123,7 +111,7 @@ func (h *Handler) Me(w http.ResponseWriter, r *http.Request) {
 	})
 }
 func (h *Handler) UpdateProfile(w http.ResponseWriter, r *http.Request) {
-	user, ok := h.authUser(r)
+	user, ok := h.auth.UserFromRequest(r)
 	if !ok {
 		http.Error(w, "unauthorized", 401)
 		return
@@ -156,7 +144,7 @@ func (h *Handler) UpdateProfile(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 }
 func (h *Handler) ChangePassword(w http.ResponseWriter, r *http.Request) {
-	user, ok := h.authUser(r)
+	user, ok := h.auth.UserFromRequest(r)
 	if !ok {
 		http.Error(w, "unauthorized", 401)
 		return
@@ -193,30 +181,4 @@ func (h *Handler) ChangePassword(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
-}
-func (h *Handler) authUser(r *http.Request) (User, bool) {
-	auth := r.Header.Get("Authorization")
-	if !strings.HasPrefix(auth, "Bearer ") {
-		return User{}, false
-	}
-	token := strings.TrimPrefix(auth, "Bearer ")
-	if token == "" {
-		return User{}, false
-	}
-	user, err := h.db.GetUserByTokenHash(r.Context(), hashToken(token))
-	if err != nil {
-		return User{}, false
-	}
-	return user, true
-}
-func (h *Handler) createSession(ctx context.Context, userID string) (string, error) {
-	token, err := generateSessionToken()
-	if err != nil {
-		return "", err
-	}
-	expiresAt := time.Now().Add(7 * 24 * time.Hour)
-	if _, err := h.db.CreateSession(ctx, userID, hashToken(token), expiresAt); err != nil {
-		return "", err
-	}
-	return token, nil
 }

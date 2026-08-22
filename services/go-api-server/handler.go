@@ -1,31 +1,28 @@
 package main
 
 import (
-	"crypto/rand"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
-	"io"
 	"net/http"
-	"strconv"
 
-	"github.com/golang-jwt/jwt/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"ownwave/api/internal/analytics"
+	"ownwave/api/internal/auth"
 	"ownwave/api/internal/playback"
+	"ownwave/api/internal/streamauth"
 	"ownwave/api/internal/streaming"
 )
 
 type Handler struct {
-	db          *DB
-	playback    *playback.Service
-	stream      *streaming.Server
-	analytics   analytics.Client
-	jwtSecret   []byte
-	musicDir    string
-	ffmpegPath  string
-	recentHours int
+	db           *DB
+	auth         *auth.Service
+	streamTokens *streamauth.StreamTokens
+	playback     *playback.Service
+	stream       *streaming.Server
+	analytics    analytics.Client
+	musicDir     string
+	ffmpegPath   string
+	recentHours  int
 }
 
 func NewHandler(pool *pgxpool.Pool, jwtSecret []byte, musicDir, ffmpegPath, pythonURL string, recentHours int) *Handler {
@@ -33,14 +30,15 @@ func NewHandler(pool *pgxpool.Pool, jwtSecret []byte, musicDir, ffmpegPath, pyth
 		recentHours = 24
 	}
 	return &Handler{
-		db:          NewDB(pool),
-		playback:    playback.NewService(pool),
-		stream:      streaming.New(streaming.Config{MusicDir: musicDir, FFmpegPath: ffmpegPath}),
-		analytics:   analytics.NewHTTPClient(pythonURL),
-		jwtSecret:   jwtSecret,
-		musicDir:    musicDir,
-		ffmpegPath:  ffmpegPath,
-		recentHours: recentHours,
+		db:           NewDB(pool),
+		auth:         auth.NewService(pool),
+		streamTokens: streamauth.New(jwtSecret),
+		playback:     playback.NewService(pool),
+		stream:       streaming.New(streaming.Config{MusicDir: musicDir, FFmpegPath: ffmpegPath}),
+		analytics:    analytics.NewHTTPClient(pythonURL),
+		musicDir:     musicDir,
+		ffmpegPath:   ffmpegPath,
+		recentHours:  recentHours,
 	}
 }
 
@@ -54,27 +52,4 @@ func proxyAnalytics(w http.ResponseWriter, resp *analytics.Response, err error) 
 
 func (h *Handler) Health(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
-}
-
-func generateSessionToken() (string, error) {
-	b := make([]byte, 32)
-	if _, err := io.ReadFull(rand.Reader, b); err != nil {
-		return "", err
-	}
-	return hex.EncodeToString(b), nil
-}
-
-func hashToken(token string) string {
-	sum := sha256.Sum256([]byte(token))
-	return hex.EncodeToString(sum[:])
-}
-
-func getString(claims jwt.MapClaims, key string) string {
-	if v, ok := claims[key].(string); ok {
-		return v
-	}
-	if v, ok := claims[key].(float64); ok {
-		return strconv.FormatFloat(v, 'f', -1, 64)
-	}
-	return ""
 }
