@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
 import { trpc } from '@/lib/trpc/client';
-import { getCoverUrl } from '@/lib/api';
+import { CoverImage } from '@/components/CoverImage';
 
 type Tab = 'tracks' | 'albums' | 'artists';
 
@@ -17,8 +17,8 @@ function Cover({ id, title, className }: { id: string; title: string; className?
     );
   }
   return (
-    <img
-      src={getCoverUrl(id)}
+    <CoverImage
+      id={id}
       alt=""
       className={className}
       onError={() => setError(true)}

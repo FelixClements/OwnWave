@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { QueueTrack } from '@/server/routers/app';
-import { getCoverUrl } from '@/lib/api';
+import { useCoverUrl } from '@/components/CoverImage';
 import { useStation } from '@/lib/station';
 import { trpc } from '@/lib/trpc/client';
 import { usePlayback } from '@/lib/playback/use-playback';
@@ -50,7 +50,7 @@ function PauseIcon({ className }: { className?: string }) {
 export function Player({ queue: queueProp }: { queue: QueueTrack[] }) {
   const { nowPlaying, setNowPlaying, selectedStation, setPlayingStation, playingStation, isPlaying, setIsPlaying, stations } = useStation();
 
-  const [coverUrl, setCoverUrl] = useState<string | null>(null);
+  const coverUrl = useCoverUrl(nowPlaying?.id);
   const [coverError, setCoverError] = useState(false);
   const [format, setFormat] = useState<StreamFormat>('flac');
   const [bitrate, setBitrate] = useState('320');
@@ -61,7 +61,6 @@ export function Player({ queue: queueProp }: { queue: QueueTrack[] }) {
   const handleTrackChange = useCallback(
     (fullTrack: QueueTrack, _index: number) => {
       const stationId = playingStation ?? selectedStation;
-      setCoverUrl(getCoverUrl(fullTrack.id));
       setCoverError(false);
       recordPlay.mutate({ id: fullTrack.id, stationId: stationId ?? undefined });
       setNowPlaying(fullTrack);

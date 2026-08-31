@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { trpc } from '@/lib/trpc/client';
-import { getCoverUrl } from '@/lib/api';
+import { CoverImage } from '@/components/CoverImage';
 
 type Tab = 'history' | 'liked' | 'skipped' | 'banned';
 
@@ -15,7 +15,7 @@ function Cover({ id, title, className }: { id: string; title: string; className?
       </div>
     );
   }
-  return <img src={getCoverUrl(id)} alt="" className={className} onError={() => setError(true)} />;
+  return <CoverImage id={id} alt="" className={className} onError={() => setError(true)} />;
 }
 
 export default function HistoryPage() {

@@ -4,7 +4,7 @@ import { useState, useEffect, useMemo } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useStation } from '@/lib/station';
-import { getCoverUrl } from '@/lib/api';
+import { CoverImage } from '@/components/CoverImage';
 import { trpc } from '@/lib/trpc/client';
 
 function formatTime(seconds?: number) {
@@ -63,8 +63,8 @@ function Cover({
           {title.charAt(0).toUpperCase()}
         </div>
       ) : (
-        <img
-          src={getCoverUrl(id)}
+        <CoverImage
+          id={id}
           alt={title}
           className="w-full h-full object-cover"
           onError={() => setError(true)}

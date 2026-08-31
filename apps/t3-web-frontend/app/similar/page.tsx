@@ -4,7 +4,7 @@ import { useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { trpc } from '@/lib/trpc/client';
 import { useStation } from '@/lib/station';
-import { getCoverUrl } from '@/lib/api';
+import { CoverImage } from '@/components/CoverImage';
 
 function Cover({ id, title, className }: { id: string; title: string; className?: string }) {
   const [error, setError] = useState(false);
@@ -15,7 +15,7 @@ function Cover({ id, title, className }: { id: string; title: string; className?
       </div>
     );
   }
-  return <img src={getCoverUrl(id)} alt="" className={className} onError={() => setError(true)} />;
+  return <CoverImage id={id} alt="" className={className} onError={() => setError(true)} />;
 }
 
 export default function SimilarPage() {

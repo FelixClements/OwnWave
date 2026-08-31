@@ -22,11 +22,13 @@ Key variables:
 ```env
 OWNWAVE_DOMAIN=ownwave.example.com
 POSTGRES_PASSWORD=<generate-a-strong-password>
-JWT_SECRET=<generate-a-strong-secret>
+JWT_SECRET=<generate-a-strong-secret-at-least-32-chars>
+ALLOWED_ORIGINS=https://ownwave.example.com
+PUBLIC_APP_URL=https://ownwave.example.com
 MUSIC_PATH=/path/to/music
 ```
 
-Generate a strong `JWT_SECRET` and `POSTGRES_PASSWORD` before starting.
+Generate a strong `JWT_SECRET` (at least 32 characters) and `POSTGRES_PASSWORD` before starting. The Go API refuses to start with missing or default JWT secrets.
 
 ## 2. Start the stack
 
@@ -46,7 +48,45 @@ Caddy is configured in `Caddyfile`:
 
 The `web` service uses `NEXT_PUBLIC_GO_API_URL=https://<OWNWAVE_DOMAIN>/api` so the browser calls the same host, and `GO_API_URL=http://go:8080` for server-side requests.
 
-## 4. Backups
+Prometheus metrics are exposed internally on the Go container at port `9090` (`/metrics`) and to authenticated admins at `/api/admin/metrics`. They are not mounted on the public Caddy routes.
+
+## 4. Security model
+
+- All library, station, and streaming URL endpoints require a logged-in session (Bearer token).
+- Stream playback uses short-lived JWT capability tokens minted by authenticated users.
+- Registration is invite-only after the first admin account is created during setup.
+- Admin maintenance endpoints require `is_admin`.
+- Caddy adds standard security headers (HSTS, CSP, frame denial, etc.).
+
+### Post-deploy verification checklist
+
+```bash
+DOMAIN=https://ownwave.example.com
+
+# Should return 401
+curl -s -o /dev/null -w "%{http_code}" "$DOMAIN/api/tracks"
+
+# Should return 401 or 403
+curl -s -o /dev/null -w "%{http_code}" -X POST "$DOMAIN/api/admin/scan"
+
+# Open registration should be forbidden once setup has users
+curl -s -o /dev/null -w "%{http_code}" -X POST "$DOMAIN/api/register" \
+  -H 'Content-Type: application/json' \
+  -d '{"username":"intruder","password":"password123"}'
+
+# Public metrics should not be reachable
+curl -s -o /dev/null -w "%{http_code}" "$DOMAIN/api/metrics"
+```
+
+Expected status codes: `401`, `401` or `403`, `403`, and `404` respectively.
+
+Invite flow:
+
+1. Sign in as admin → Admin → Generate invite link.
+2. Open the invite URL in a private window and create an account.
+3. Confirm the new user can sign in and browse the library.
+
+## 5. Backups
 
 ### Manual backup
 
@@ -64,7 +104,7 @@ Add a cron job on the host:
 0 3 * * * cd /opt/ownwave && ./scripts/backup.sh /var/backups/ownwave
 ```
 
-## 5. Restore
+## 6. Restore
 
 Stop the app consumers, then restore from a backup:
 
@@ -72,7 +112,7 @@ Stop the app consumers, then restore from a backup:
 ./scripts/restore.sh /var/backups/ownwave/ownwave_backup_YYYYMMDD_HHMMSS.sql
 ```
 
-## 6. Updates
+## 7. Updates
 
 Pull the latest code, then rebuild:
 

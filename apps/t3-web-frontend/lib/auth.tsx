@@ -8,7 +8,7 @@ type AuthContextValue = {
   user: User | null;
   loading: boolean;
   login: (username: string, password: string) => Promise<void>;
-  register: (username: string, password: string) => Promise<void>;
+  register: (username: string, password: string, inviteToken?: string) => Promise<void>;
   logout: () => Promise<void>;
 };
 
@@ -49,8 +49,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     await loadUser();
   };
 
-  const register = async (username: string, password: string) => {
-    const data = await registerMutation.mutateAsync({ username, password });
+  const register = async (username: string, password: string, inviteToken?: string) => {
+    const data = await registerMutation.mutateAsync({ username, password, inviteToken });
     setAuthToken(data.token);
     localStorage.setItem('ownwave:token', data.token);
     await loadUser();

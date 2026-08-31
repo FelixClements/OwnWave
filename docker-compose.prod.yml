@@ -8,6 +8,10 @@ services:
   go:
     environment:
       PYTHON_API_URL: http://python:8000
+      JWT_SECRET: ${JWT_SECRET}
+      ALLOWED_ORIGINS: https://${OWNWAVE_DOMAIN:-localhost}
+      PUBLIC_APP_URL: https://${OWNWAVE_DOMAIN:-localhost}
+      OWNWAVE_DOMAIN: ${OWNWAVE_DOMAIN:-localhost}
     ports: []
 
   python:

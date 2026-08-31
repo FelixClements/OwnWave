@@ -7,8 +7,9 @@ import { Shell } from '@/components/Shell';
 export function RootShell({ children }: { children: React.ReactNode }) {
   const path = usePathname() ?? '';
   const publicPaths = ['/login', '/setup'];
+  const isInvitePath = path.startsWith('/invite/');
 
-  if (publicPaths.includes(path)) {
+  if (publicPaths.includes(path) || isInvitePath) {
     return <>{children}</>;
   }
 

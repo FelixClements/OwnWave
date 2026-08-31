@@ -5,9 +5,8 @@ import { useRouter } from 'next/navigation';
 import { useAuth } from '@/lib/auth';
 
 export default function LoginPage() {
-  const { login, register, user } = useAuth();
+  const { login, user } = useAuth();
   const router = useRouter();
-  const [mode, setMode] = useState<'login' | 'register'>('login');
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
@@ -23,14 +22,10 @@ export default function LoginPage() {
     setError('');
     setLoading(true);
     try {
-      if (mode === 'login') {
-        await login(username, password);
-      } else {
-        await register(username, password);
-      }
+      await login(username, password);
       router.push('/');
-    } catch (err: any) {
-      setError(err?.message || 'Something went wrong');
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Something went wrong');
     } finally {
       setLoading(false);
     }
@@ -44,30 +39,7 @@ export default function LoginPage() {
 
       <div className="w-full md:w-1/4 min-h-[50vh] md:min-h-screen bg-black flex flex-col justify-center items-center p-4 md:p-6">
         <div className="w-full max-w-sm">
-          <h2 className="text-2xl font-bold mb-6 text-center md:text-left">
-            {mode === 'login' ? 'Sign in' : 'Create account'}
-          </h2>
-
-          <div className="flex rounded bg-spotify-elevated p-1 mb-6">
-            <button
-              type="button"
-              onClick={() => setMode('login')}
-              className={`flex-1 py-1.5 text-sm font-semibold rounded transition ${
-                mode === 'login' ? 'bg-spotify-card text-spotify-text' : 'text-spotify-subdued'
-              }`}
-            >
-              Login
-            </button>
-            <button
-              type="button"
-              onClick={() => setMode('register')}
-              className={`flex-1 py-1.5 text-sm font-semibold rounded transition ${
-                mode === 'register' ? 'bg-spotify-card text-spotify-text' : 'text-spotify-subdued'
-              }`}
-            >
-              Register
-            </button>
-          </div>
+          <h2 className="text-2xl font-bold mb-6 text-center md:text-left">Sign in</h2>
 
           <form onSubmit={handleSubmit} className="space-y-4">
             <input
@@ -83,6 +55,7 @@ export default function LoginPage() {
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               placeholder="Password"
+              minLength={8}
               className="w-full px-4 py-2 rounded bg-spotify-elevated text-spotify-text placeholder-spotify-subdued border border-spotify-border focus:outline-none focus:border-spotify-green"
               required
             />
@@ -94,10 +67,13 @@ export default function LoginPage() {
               disabled={loading}
               className="w-full px-4 py-2 rounded bg-spotify-green text-black font-semibold hover:bg-spotify-green-hover transition disabled:opacity-50"
             >
-              {loading ? 'Please wait...' : mode === 'login' ? 'Sign in' : 'Create account'}
+              {loading ? 'Please wait...' : 'Sign in'}
             </button>
           </form>
 
+          <p className="mt-6 text-sm text-spotify-subdued text-center md:text-left">
+            New accounts require an invite from an admin.
+          </p>
         </div>
       </div>
     </div>

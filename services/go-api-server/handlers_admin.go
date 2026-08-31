@@ -7,18 +7,19 @@ import (
 
 	"github.com/go-chi/chi/v5"
 )
+
 func (h *Handler) Rescan(w http.ResponseWriter, r *http.Request) {
 	payload, _ := json.Marshal(map[string]interface{}{
 		"path":  h.musicDir,
 		"force": false,
 	})
 	resp, err := h.analytics.Scan(payload)
-	proxyAnalytics(w, resp, err)
+	proxyAnalytics(w, r, resp, err)
 }
 func (h *Handler) ScanStatus(w http.ResponseWriter, r *http.Request) {
 	jobID := chi.URLParam(r, "id")
 	resp, err := h.analytics.GetJob(jobID)
-	proxyAnalytics(w, resp, err)
+	proxyAnalytics(w, r, resp, err)
 }
 func (h *Handler) TriggerScan(w http.ResponseWriter, r *http.Request) {
 	var req struct {
@@ -28,13 +29,11 @@ func (h *Handler) TriggerScan(w http.ResponseWriter, r *http.Request) {
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		req.Path = h.musicDir
 	}
-	if req.Path == "" {
-		req.Path = h.musicDir
-	}
+	req.Path = h.musicDir
 
 	payload, _ := json.Marshal(req)
 	resp, err := h.analytics.Scan(payload)
-	proxyAnalytics(w, resp, err)
+	proxyAnalytics(w, r, resp, err)
 }
 func (h *Handler) AdminHealth(w http.ResponseWriter, r *http.Request) {
 	status := map[string]string{
@@ -60,7 +59,7 @@ func (h *Handler) AdminHealth(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) AdminStations(w http.ResponseWriter, r *http.Request) {
 	stations, err := h.db.ListStationsWithQueueStatus(r.Context())
 	if err != nil {
-		http.Error(w, err.Error(), 500)
+		writeInternalError(w, r, "admin stations", err)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -68,26 +67,26 @@ func (h *Handler) AdminStations(w http.ResponseWriter, r *http.Request) {
 }
 func (h *Handler) AdminRebuildVectors(w http.ResponseWriter, r *http.Request) {
 	resp, err := h.analytics.RebuildVectors()
-	proxyAnalytics(w, resp, err)
+	proxyAnalytics(w, r, resp, err)
 }
 func (h *Handler) AdminRebuildClusters(w http.ResponseWriter, r *http.Request) {
 	resp, err := h.analytics.RebuildClusters()
-	proxyAnalytics(w, resp, err)
+	proxyAnalytics(w, r, resp, err)
 }
 func (h *Handler) ListGenres(w http.ResponseWriter, r *http.Request) {
 	resp, err := h.analytics.ListGenres()
-	proxyAnalytics(w, resp, err)
+	proxyAnalytics(w, r, resp, err)
 }
 func (h *Handler) GetTrackGenres(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	resp, err := h.analytics.GetTrackGenres(id)
-	proxyAnalytics(w, resp, err)
+	proxyAnalytics(w, r, resp, err)
 }
 func (h *Handler) AdminRebuildGenres(w http.ResponseWriter, r *http.Request) {
 	resp, err := h.analytics.RebuildGenres()
-	proxyAnalytics(w, resp, err)
+	proxyAnalytics(w, r, resp, err)
 }
 func (h *Handler) AdminRebuildGenreStations(w http.ResponseWriter, r *http.Request) {
 	resp, err := h.analytics.RebuildGenreStations()
-	proxyAnalytics(w, resp, err)
+	proxyAnalytics(w, r, resp, err)
 }

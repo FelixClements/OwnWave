@@ -1,6 +1,7 @@
 package streaming
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -11,6 +12,8 @@ import (
 
 	"ownwave/api/internal/playback"
 )
+
+var ErrPathOutsideMusicDir = errors.New("path outside music directory")
 
 type Config struct {
 	MusicDir   string
@@ -29,11 +32,19 @@ func New(cfg Config) *Server {
 	}
 }
 
-func (s *Server) ResolvePath(path string) string {
+func (s *Server) ResolvePath(path string) (string, error) {
+	musicDir := filepath.Clean(s.musicDir)
+	var resolved string
 	if filepath.IsAbs(path) {
-		return path
+		resolved = filepath.Clean(path)
+	} else {
+		resolved = filepath.Clean(filepath.Join(musicDir, path))
 	}
-	return filepath.Join(s.musicDir, path)
+	rel, err := filepath.Rel(musicDir, resolved)
+	if err != nil || strings.HasPrefix(rel, "..") {
+		return "", ErrPathOutsideMusicDir
+	}
+	return resolved, nil
 }
 
 func (s *Server) ServeFLAC(w http.ResponseWriter, r *http.Request, path string) {
@@ -134,7 +145,11 @@ func (s *Server) ServeTranscoded(w http.ResponseWriter, r *http.Request, path st
 
 func (s *Server) ServeCrossfaded(w http.ResponseWriter, r *http.Request, queue []playback.TrackWithFeatures, format, bitrate string, gapless, normalize bool) {
 	if len(queue) == 1 {
-		fullPath := s.ResolvePath(queue[0].Path)
+		fullPath, err := s.ResolvePath(queue[0].Path)
+		if err != nil {
+			http.Error(w, "file not found", http.StatusNotFound)
+			return
+		}
 		if format == "flac" {
 			s.ServeFLAC(w, r, fullPath)
 		} else {
@@ -221,7 +236,11 @@ func (s *Server) ServeCrossfaded(w http.ResponseWriter, r *http.Request, queue [
 
 	args := []string{"-hide_banner", "-loglevel", "error"}
 	for i, q := range queue {
-		fullPath := s.ResolvePath(q.Path)
+		fullPath, err := s.ResolvePath(q.Path)
+		if err != nil {
+			http.Error(w, "file not found", http.StatusNotFound)
+			return
+		}
 		if intros[i] > 0 {
 			args = append(args, "-ss", fmt.Sprintf("%f", intros[i]))
 		}

@@ -115,7 +115,10 @@ services:
     environment:
       DATABASE_URL: postgres://${POSTGRES_USER:-ownwave}:${POSTGRES_PASSWORD:-ownwave}@db:5432/${POSTGRES_DB:-ownwave}
       MUSIC_DIR: /music
-      JWT_SECRET: ${JWT_SECRET:-change-me-in-production}
+      JWT_SECRET: ${JWT_SECRET:-local-dev-only-secret-not-for-production-use}
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost:3000,http://127.0.0.1:3000}
+      PUBLIC_APP_URL: ${PUBLIC_APP_URL:-http://localhost:3000}
+      OWNWAVE_DOMAIN: ${OWNWAVE_DOMAIN:-localhost}
       FFMPEG_PATH: ffmpeg
       PYTHON_API_URL: http://python:8000
     volumes:

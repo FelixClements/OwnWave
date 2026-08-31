@@ -4,16 +4,17 @@ import (
 	"encoding/json"
 	"net/http"
 )
+
 func (h *Handler) SetupStatus(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	hasUsers, err := h.db.CountUsers(ctx)
 	if err != nil {
-		http.Error(w, err.Error(), 500)
+		writeInternalError(w, r, "setup status users", err)
 		return
 	}
 	trackCount, err := h.db.CountTracks(ctx)
 	if err != nil {
-		http.Error(w, err.Error(), 500)
+		writeInternalError(w, r, "setup status tracks", err)
 		return
 	}
 	state, _ := h.db.GetAppState(ctx, "setup_completed")
@@ -34,7 +35,7 @@ func (h *Handler) SetupStatus(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) SetupComplete(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	if err := h.db.SetAppState(ctx, "setup_completed", map[string]interface{}{"completed": true}); err != nil {
-		http.Error(w, err.Error(), 500)
+		writeInternalError(w, r, "setup complete", err)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -42,9 +43,9 @@ func (h *Handler) SetupComplete(w http.ResponseWriter, r *http.Request) {
 }
 func (h *Handler) SetupSummary(w http.ResponseWriter, r *http.Request) {
 	resp, err := h.analytics.SetupSummary()
-	proxyAnalytics(w, resp, err)
+	proxyAnalytics(w, r, resp, err)
 }
 func (h *Handler) SetupStations(w http.ResponseWriter, r *http.Request) {
 	resp, err := h.analytics.SetupStations(r.Body)
-	proxyAnalytics(w, resp, err)
+	proxyAnalytics(w, r, resp, err)
 }

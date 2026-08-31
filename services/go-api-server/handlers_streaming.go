@@ -20,7 +20,7 @@ func (h *Handler) StreamURL(w http.ResponseWriter, r *http.Request) {
 	normalize := r.URL.Query().Get("normalize") != "false"
 	token, err := h.streamTokens.SignTrack(trackID, format)
 	if err != nil {
-		http.Error(w, err.Error(), 500)
+		writeInternalError(w, r, "sign stream token", err)
 		return
 	}
 	url := fmt.Sprintf("/stream/%s?format=%s&token=%s", trackID, format, token)
@@ -44,8 +44,9 @@ func (h *Handler) StreamTrack(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "missing token", 401)
 		return
 	}
-	if _, _, err := h.streamTokens.ValidateTrack(token); err != nil {
-		http.Error(w, "unauthorized", 401)
+	claimTrackID, _, err := h.streamTokens.ValidateTrack(token)
+	if err != nil || claimTrackID != trackID {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
 
@@ -55,7 +56,11 @@ func (h *Handler) StreamTrack(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	fullPath := h.stream.ResolvePath(track.Path)
+	fullPath, err := h.stream.ResolvePath(track.Path)
+	if err != nil {
+		http.Error(w, "file not found", http.StatusNotFound)
+		return
+	}
 	if strings.ToLower(format) != "flac" {
 		if _, err := exec.LookPath(h.ffmpegPath); err != nil {
 			http.Error(w, "ffmpeg not available", 500)
@@ -85,7 +90,7 @@ func (h *Handler) StationCrossfadeURL(w http.ResponseWriter, r *http.Request) {
 	normalize := r.URL.Query().Get("normalize") != "false"
 	token, err := h.streamTokens.SignStation(stationID, format)
 	if err != nil {
-		http.Error(w, err.Error(), 500)
+		writeInternalError(w, r, "sign stream token", err)
 		return
 	}
 	url := fmt.Sprintf("/stations/%s/crossfade?format=%s&token=%s", stationID, format, token)
@@ -112,14 +117,15 @@ func (h *Handler) StationCrossfadeStream(w http.ResponseWriter, r *http.Request)
 		http.Error(w, "missing token", 401)
 		return
 	}
-	if _, _, err := h.streamTokens.ValidateStation(token); err != nil {
-		http.Error(w, "unauthorized", 401)
+	claimStationID, _, err := h.streamTokens.ValidateStation(token)
+	if err != nil || claimStationID != stationID {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
 
 	queue, err := h.playback.BuildQueue(r.Context(), stationID, h.recentHours)
 	if err != nil {
-		http.Error(w, err.Error(), 500)
+		writeInternalError(w, r, "build crossfade queue", err)
 		return
 	}
 	if len(queue) == 0 {

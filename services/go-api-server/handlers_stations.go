@@ -7,10 +7,11 @@ import (
 
 	"github.com/go-chi/chi/v5"
 )
+
 func (h *Handler) ListStations(w http.ResponseWriter, r *http.Request) {
 	stations, err := h.db.ListStations(r.Context())
 	if err != nil {
-		http.Error(w, err.Error(), 500)
+		writeInternalError(w, r, "list stations", err)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -34,12 +35,12 @@ func (h *Handler) UpdateStation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	resp, err := h.analytics.UpdateStation(id, body)
-	proxyAnalytics(w, resp, err)
+	proxyAnalytics(w, r, resp, err)
 }
 func (h *Handler) DeleteStation(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	if err := h.db.DeleteStation(r.Context(), id); err != nil {
-		http.Error(w, err.Error(), 500)
+		writeInternalError(w, r, "delete station", err)
 		return
 	}
 	w.WriteHeader(204)
@@ -48,7 +49,7 @@ func (h *Handler) GetQueue(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	queue, err := h.playback.BuildQueue(r.Context(), id, h.recentHours)
 	if err != nil {
-		http.Error(w, err.Error(), 500)
+		writeInternalError(w, r, "build queue", err)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -61,5 +62,5 @@ func (h *Handler) CreateStation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	resp, err := h.analytics.CreateStation(body)
-	proxyAnalytics(w, resp, err)
+	proxyAnalytics(w, r, resp, err)
 }

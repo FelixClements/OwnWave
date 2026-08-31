@@ -334,11 +334,15 @@ export class OwnWaveAPI {
     ).then((r) => r.similar);
   }
 
-  register(username: string, password: string) {
+  register(username: string, password: string, inviteToken?: string) {
     return this.request<AuthResponse>('/register', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username, password }),
+      body: JSON.stringify({
+        username,
+        password,
+        invite_token: inviteToken ?? '',
+      }),
     });
   }
 
@@ -469,6 +473,32 @@ export class OwnWaveAPI {
   setupComplete() {
     return this.request<{ setup_completed: boolean }>('/setup/complete', {
       method: 'POST',
+    });
+  }
+
+  createInvite(username?: string, ttlHours?: number) {
+    return this.request<{ invite_url: string; expires_at: string }>('/admin/invites', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: username || null, ttl_hours: ttlHours }),
+    });
+  }
+
+  createUser(username: string, password: string) {
+    return this.request<{ user: User }>('/admin/users', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, password }),
+    });
+  }
+
+  listUsers() {
+    return this.request<{ users: User[] }>('/admin/users').then((r) => r.users);
+  }
+
+  deleteUser(id: string) {
+    return this.request<void>(`/admin/users/${encodeURIComponent(id)}`, {
+      method: 'DELETE',
     });
   }
 }

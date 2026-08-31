@@ -41,8 +41,16 @@ export const appRouter = t.router({
     .query(async ({ input }) => api.getScanStatus(input.jobId)),
 
   register: t.procedure
-    .input(z.object({ username: z.string(), password: z.string() }))
-    .mutation(async ({ input }) => api.register(input.username, input.password)),
+    .input(
+      z.object({
+        username: z.string(),
+        password: z.string(),
+        inviteToken: z.string().optional(),
+      })
+    )
+    .mutation(async ({ input }) =>
+      api.register(input.username, input.password, input.inviteToken)
+    ),
 
   login: t.procedure
     .input(z.object({ username: z.string(), password: z.string() }))
@@ -184,6 +192,20 @@ export const appRouter = t.router({
     .input(z.object({ selectedMainGenres: z.array(z.string()) }))
     .mutation(async ({ input }) => api.setupStations(input.selectedMainGenres)),
   setupComplete: t.procedure.mutation(async () => api.setupComplete()),
+
+  createInvite: t.procedure
+    .input(z.object({ username: z.string().optional(), ttlHours: z.number().optional() }))
+    .mutation(async ({ input }) => api.createInvite(input.username, input.ttlHours)),
+
+  createUser: t.procedure
+    .input(z.object({ username: z.string(), password: z.string() }))
+    .mutation(async ({ input }) => api.createUser(input.username, input.password)),
+
+  listUsers: t.procedure.query(async () => api.listUsers()),
+
+  deleteUser: t.procedure
+    .input(z.object({ id: z.string() }))
+    .mutation(async ({ input }) => api.deleteUser(input.id)),
 });
 
 export type AppRouter = typeof appRouter;

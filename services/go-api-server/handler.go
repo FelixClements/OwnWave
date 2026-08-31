@@ -42,9 +42,9 @@ func NewHandler(pool *pgxpool.Pool, jwtSecret []byte, musicDir, ffmpegPath, pyth
 	}
 }
 
-func proxyAnalytics(w http.ResponseWriter, resp *analytics.Response, err error) {
+func proxyAnalytics(w http.ResponseWriter, r *http.Request, resp *analytics.Response, err error) {
 	if err != nil {
-		http.Error(w, err.Error(), 500)
+		writeInternalError(w, r, "analytics proxy", err)
 		return
 	}
 	resp.WriteJSON(w)
