@@ -15,13 +15,21 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
+# Genre models are optional (ENABLE_GENRE_ANALYSIS defaults off). essentia.upf.edu
+# is often unreachable from CI, so skip unless DOWNLOAD_GENRE_MODELS=true.
+ARG DOWNLOAD_GENRE_MODELS=false
 RUN mkdir -p /app/models && \
-    curl -fL -o /app/models/discogs-effnet-bs64-1.pb \
+    if [ "$DOWNLOAD_GENRE_MODELS" = "true" ]; then \
+      curl --connect-timeout 15 --max-time 90 --retry 2 -fL \
+        -o /app/models/discogs-effnet-bs64-1.pb \
         https://essentia.upf.edu/models/feature-extractors/discogs-effnet/discogs-effnet-bs64-1.pb && \
-    curl -fL -o /app/models/genre_discogs400-discogs-effnet-1.pb \
+      curl --connect-timeout 15 --max-time 90 --retry 2 -fL \
+        -o /app/models/genre_discogs400-discogs-effnet-1.pb \
         https://essentia.upf.edu/models/classification-heads/genre_discogs400/genre_discogs400-discogs-effnet-1.pb && \
-    curl -fL -o /app/models/genre_discogs400-discogs-effnet-1.json \
-        https://essentia.upf.edu/models/classification-heads/genre_discogs400/genre_discogs400-discogs-effnet-1.json
+      curl --connect-timeout 15 --max-time 90 --retry 2 -fL \
+        -o /app/models/genre_discogs400-discogs-effnet-1.json \
+        https://essentia.upf.edu/models/classification-heads/genre_discogs400/genre_discogs400-discogs-effnet-1.json; \
+    fi
 
 COPY src ./src
 

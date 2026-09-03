@@ -30,7 +30,10 @@ services:
       retries: 10
 
   python:
-    build: ./services/python-analytics
+    build:
+      context: ./services/python-analytics
+      args:
+        DOWNLOAD_GENRE_MODELS: ${DOWNLOAD_GENRE_MODELS:-false}
     platform: linux/amd64
     environment:
       DATABASE_URL: postgres://${POSTGRES_USER:-ownwave}:${POSTGRES_PASSWORD:-ownwave}@db:5432/${POSTGRES_DB:-ownwave}
@@ -57,7 +60,10 @@ services:
         condition: service_healthy
 
   worker:
-    build: ./services/python-analytics
+    build:
+      context: ./services/python-analytics
+      args:
+        DOWNLOAD_GENRE_MODELS: ${DOWNLOAD_GENRE_MODELS:-false}
     platform: linux/amd64
     command: celery -A celery_app worker -P gevent -c 50 --loglevel=info -n worker@%h
     environment:
@@ -85,7 +91,10 @@ services:
         condition: service_healthy
 
   watcher:
-    build: ./services/python-analytics
+    build:
+      context: ./services/python-analytics
+      args:
+        DOWNLOAD_GENRE_MODELS: ${DOWNLOAD_GENRE_MODELS:-false}
     platform: linux/amd64
     command: python -m main watch
     environment:
