@@ -19,8 +19,14 @@ const nextConfig = {
   output: 'standalone',
   basePath,
   assetPrefix,
-  env: {
-    NEXT_PUBLIC_GO_API_URL: process.env.NEXT_PUBLIC_GO_API_URL || 'http://localhost:8080',
+  async rewrites() {
+    const go = process.env.GO_API_URL || 'http://localhost:8080';
+    return [
+      {
+        source: '/api/:path*',
+        destination: `${go}/:path*`,
+      },
+    ];
   },
 };
 

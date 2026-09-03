@@ -83,7 +83,14 @@ def main():
             filters["max_energy"] = args.max_energy
 
         with get_conn() as conn:
-            station_id = build_station(conn, args.name, filters or None, args.length)
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT id FROM users WHERE is_admin ORDER BY created_at ASC LIMIT 1"
+                )
+                row = cur.fetchone()
+            if not row:
+                raise SystemExit("no users; create an account first")
+            station_id = build_station(conn, args.name, row[0], filters or None, args.length)
             print(f"Created station {station_id}")
 
     elif args.command == "serve":

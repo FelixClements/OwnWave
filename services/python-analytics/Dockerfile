@@ -25,12 +25,14 @@ RUN mkdir -p /app/models && \
 
 COPY src ./src
 
+RUN useradd -u 1000 -m ownwave && chown -R ownwave:ownwave /app
+
 ENV PYTHONPATH=/app/src
 ENV PYTHONUNBUFFERED=1
 ENV TF_ENABLE_ONEDNN_OPTS=1
 ENV TF_CPP_MIN_LOG_LEVEL=2
 
-WORKDIR /app/src
+USER ownwave
 
 EXPOSE 8000
 

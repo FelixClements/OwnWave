@@ -1,17 +1,16 @@
-const DEFAULT_BASE_URL =
-  (typeof window === 'undefined' ? process.env.GO_API_URL : undefined) ||
-  process.env.NEXT_PUBLIC_GO_API_URL ||
-  'http://localhost:8080';
-
-let authToken: string | null = null;
-
-export function setAuthToken(token: string | null) {
-  authToken = token;
+function resolveBaseURL() {
+  if (typeof window !== 'undefined') {
+    return process.env.NEXT_PUBLIC_GO_API_URL || '/api';
+  }
+  return process.env.GO_API_URL || 'http://localhost:8080';
 }
 
-export function getAuthToken() {
-  return authToken;
-}
+const DEFAULT_BASE_URL = resolveBaseURL();
+
+export type APIAuth = {
+  cookie?: string;
+  authorization?: string;
+};
 
 export function getStreamBaseUrl() {
   return DEFAULT_BASE_URL;
@@ -26,7 +25,7 @@ export type Track = {
   title: string;
   artist?: string;
   album?: string;
-  path: string;
+  path?: string;
   track_number?: number;
   duration_seconds?: number;
   sample_rate?: number;
@@ -78,7 +77,6 @@ export type User = {
 };
 
 export type AuthResponse = {
-  token: string;
   user: User;
 };
 
@@ -204,17 +202,24 @@ export type SetupStationsResponse = {
 };
 
 export class OwnWaveAPI {
-  constructor(private baseURL: string = DEFAULT_BASE_URL) {}
+  constructor(
+    private baseURL: string = DEFAULT_BASE_URL,
+    private auth: APIAuth = {},
+  ) {}
 
   private async request<T>(path: string, opts?: RequestInit): Promise<T> {
-    const headers: HeadersInit = {
-      ...(opts?.headers || {}),
+    const headers: Record<string, string> = {
+      ...((opts?.headers as Record<string, string>) || {}),
     };
-    if (authToken) {
-      (headers as Record<string, string>)['Authorization'] = `Bearer ${authToken}`;
+    if (this.auth.authorization) {
+      headers.Authorization = this.auth.authorization;
+    }
+    if (this.auth.cookie) {
+      headers.Cookie = this.auth.cookie;
     }
     const res = await fetch(`${this.baseURL}${path}`, {
       ...opts,
+      credentials: 'include',
       headers,
     });
     if (!res.ok) {

@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { getAuthToken, getStreamBaseUrl } from '@/lib/api';
+import { getStreamBaseUrl } from '@/lib/api';
 
 type CoverImageProps = {
   id: string;
@@ -18,13 +18,8 @@ export function CoverImage({ id, alt = '', className, onError }: CoverImageProps
     let cancelled = false;
 
     const load = async () => {
-      const headers: HeadersInit = {};
-      const token = getAuthToken();
-      if (token) {
-        headers.Authorization = `Bearer ${token}`;
-      }
       const res = await fetch(`${getStreamBaseUrl()}/tracks/${encodeURIComponent(id)}/cover`, {
-        headers,
+        credentials: 'include',
       });
       if (!res.ok) {
         onError?.();
@@ -71,13 +66,8 @@ export function useCoverUrl(id: string | null | undefined) {
     let cancelled = false;
 
     const load = async () => {
-      const headers: HeadersInit = {};
-      const token = getAuthToken();
-      if (token) {
-        headers.Authorization = `Bearer ${token}`;
-      }
       const res = await fetch(`${getStreamBaseUrl()}/tracks/${encodeURIComponent(id)}/cover`, {
-        headers,
+        credentials: 'include',
       });
       if (!res.ok) return;
       const blob = await res.blob();

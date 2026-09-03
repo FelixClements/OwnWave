@@ -12,6 +12,7 @@ from db import (
     get_uncovered_tracks,
     insert_station_tracks,
     list_genres,
+    list_user_ids,
     upsert_auto_station,
 )
 from station.compiler import compile_station_queue
@@ -25,13 +26,14 @@ def _title_case_name(name: str) -> str:
 def build_station(
     conn: psycopg.Connection,
     name: str,
+    user_id: UUID,
     seed_filter: Optional[dict] = None,
     length: int = 50,
 ) -> UUID:
     """Build a smart station queue from a seed (filter, track, artist, album, mood, or cluster)."""
     parsed = parse_seed(seed_filter)
-    track_ids = compile_station_queue(conn, parsed, length)
-    station_id = create_station(conn, name, seed_features=parsed)
+    track_ids = compile_station_queue(conn, parsed, length, user_id)
+    station_id = create_station(conn, name, user_id, seed_features=parsed)
     insert_station_tracks(conn, station_id, track_ids)
     conn.commit()
     return station_id
@@ -39,6 +41,7 @@ def build_station(
 
 def rebuild_genre_stations(
     conn: psycopg.Connection,
+    user_id: UUID,
     min_confidence: float = None,
     min_tracks: int = None,
     station_length: int = 50,
@@ -63,8 +66,8 @@ def rebuild_genre_stations(
         name = _title_case_name(main_genre)
         valid_names.add(name)
         seed = {"type": "genre", "main_genre": main_genre}
-        upsert_auto_station(conn, name, seed, source="genre")
-        _build_station_from_seed(conn, name, seed, station_length)
+        upsert_auto_station(conn, name, user_id, seed, source="genre")
+        _build_station_from_seed(conn, user_id, name, seed, station_length)
         created += 1
 
     for g in genres:
@@ -73,21 +76,42 @@ def rebuild_genre_stations(
         name = f"{_title_case_name(g['main_genre'])} / {_title_case_name(g['sub_genre'])}"
         valid_names.add(name)
         seed = {"type": "sub_genre", "main_genre": g["main_genre"], "sub_genre": g["sub_genre"]}
-        upsert_auto_station(conn, name, seed, source="genre")
-        _build_station_from_seed(conn, name, seed, station_length)
+        upsert_auto_station(conn, name, user_id, seed, source="genre")
+        _build_station_from_seed(conn, user_id, name, seed, station_length)
         created += 1
 
-    removed = delete_orphaned_auto_stations(conn, valid_names)
+    removed = delete_orphaned_auto_stations(conn, user_id, valid_names)
     conn.commit()
     return {"created_or_refreshed": created, "removed": removed}
 
 
-def _build_station_from_seed(conn: psycopg.Connection, name: str, seed: dict, length: int) -> None:
+def rebuild_genre_stations_for_users(
+    conn: psycopg.Connection,
+    user_id: Optional[UUID] = None,
+) -> dict:
+    if user_id is not None:
+        return rebuild_genre_stations(conn, user_id)
+    results = []
+    for uid in list_user_ids(conn):
+        results.append(rebuild_genre_stations(conn, uid))
+    return {"users": len(results), "results": results}
+
+
+def _build_station_from_seed(
+    conn: psycopg.Connection,
+    user_id: UUID,
+    name: str,
+    seed: dict,
+    length: int,
+) -> None:
     try:
         parsed = parse_seed(seed)
-        track_ids = compile_station_queue(conn, parsed, length)
+        track_ids = compile_station_queue(conn, parsed, length, user_id)
         with conn.cursor() as cur:
-            cur.execute("SELECT id FROM stations WHERE name = %s", (name,))
+            cur.execute(
+                "SELECT id FROM stations WHERE user_id = %s AND name = %s",
+                (user_id, name),
+            )
             row = cur.fetchone()
         if not row:
             return
@@ -101,6 +125,7 @@ def _build_station_from_seed(conn: psycopg.Connection, name: str, seed: dict, le
 
 def setup_main_genre_stations(
     conn: psycopg.Connection,
+    user_id: UUID,
     selected_main_genres: List[str],
     station_length: int = 50,
 ) -> dict:
@@ -117,9 +142,9 @@ def setup_main_genre_stations(
         seed = {"type": "genre", "main_genre": main_genre}
 
         try:
-            station_id = upsert_auto_station(conn, name, seed, source="setup")
+            station_id = upsert_auto_station(conn, name, user_id, seed, source="setup")
             if len(track_ids) >= 2:
-                _build_station_from_seed(conn, name, seed, station_length)
+                _build_station_from_seed(conn, user_id, name, seed, station_length)
             else:
                 with conn.cursor() as cur:
                     cur.execute("DELETE FROM station_tracks WHERE station_id = %s", (station_id,))
@@ -137,6 +162,7 @@ def setup_main_genre_stations(
         uncategorized_id = upsert_auto_station(
             conn,
             uncategorized_name,
+            user_id,
             seed_features={"type": "uncategorized"},
             source="setup",
         )

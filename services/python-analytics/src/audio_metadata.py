@@ -7,6 +7,10 @@ from typing import Optional, Tuple
 SUPPORTED_EXTS = {".flac", ".mp3"}
 
 
+def is_supported_audio_file(path: Path) -> bool:
+    return not path.is_symlink() and path.is_file() and path.suffix.lower() in SUPPORTED_EXTS
+
+
 def get_file_stats(path: Path) -> Tuple[int, datetime]:
     stat = path.stat()
     mtime = datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc)

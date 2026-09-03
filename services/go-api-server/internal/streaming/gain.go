@@ -10,13 +10,15 @@ const (
 	targetLoudness = -14.0
 	maxGainDb      = 20.0
 	minGainDb      = -20.0
+	minBitrateKbps = 32
+	maxBitrateKbps = 320
 )
 
 func NormalizeBitrate(input, defaultRate string) string {
 	input = strings.ToLower(strings.TrimSpace(input))
 	input = strings.TrimSuffix(input, "k")
 	kbps, err := strconv.Atoi(input)
-	if err != nil || kbps <= 0 {
+	if err != nil || kbps < minBitrateKbps || kbps > maxBitrateKbps {
 		return defaultRate
 	}
 	return fmt.Sprintf("%dk", kbps)

@@ -15,6 +15,8 @@ import (
 
 var ErrPathOutsideMusicDir = errors.New("path outside music directory")
 
+const maxCrossfadeTracks = 20
+
 type Config struct {
 	MusicDir   string
 	FFmpegPath string
@@ -34,17 +36,39 @@ func New(cfg Config) *Server {
 
 func (s *Server) ResolvePath(path string) (string, error) {
 	musicDir := filepath.Clean(s.musicDir)
+	if resolvedMusic, err := filepath.EvalSymlinks(musicDir); err == nil {
+		musicDir = resolvedMusic
+	}
+
 	var resolved string
 	if filepath.IsAbs(path) {
 		resolved = filepath.Clean(path)
 	} else {
 		resolved = filepath.Clean(filepath.Join(musicDir, path))
 	}
-	rel, err := filepath.Rel(musicDir, resolved)
-	if err != nil || strings.HasPrefix(rel, "..") {
-		return "", ErrPathOutsideMusicDir
+	if err := assertUnderMusicDir(musicDir, resolved); err != nil {
+		return "", err
 	}
-	return resolved, nil
+
+	realPath, err := filepath.EvalSymlinks(resolved)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return resolved, nil
+		}
+		return "", err
+	}
+	if err := assertUnderMusicDir(musicDir, realPath); err != nil {
+		return "", err
+	}
+	return realPath, nil
+}
+
+func assertUnderMusicDir(musicDir, path string) error {
+	rel, err := filepath.Rel(musicDir, path)
+	if err != nil || strings.HasPrefix(rel, "..") {
+		return ErrPathOutsideMusicDir
+	}
+	return nil
 }
 
 func (s *Server) ServeFLAC(w http.ResponseWriter, r *http.Request, path string) {
@@ -62,6 +86,7 @@ func (s *Server) ServeFLAC(w http.ResponseWriter, r *http.Request, path string) 
 	}
 
 	w.Header().Set("Content-Type", "audio/flac")
+	w.Header().Set("Cache-Control", "private, no-store")
 	http.ServeContent(w, r, filepath.Base(path), stat.ModTime(), f)
 }
 
@@ -104,6 +129,7 @@ func (s *Server) ServeTranscoded(w http.ResponseWriter, r *http.Request, path st
 	}
 
 	w.Header().Set("Content-Type", contentType)
+	w.Header().Set("Cache-Control", "private, no-store")
 	w.Header().Set("Transfer-Encoding", "chunked")
 
 	gainDb := VolumeGainDb(loudness, normalize)
@@ -124,7 +150,7 @@ func (s *Server) ServeTranscoded(w http.ResponseWriter, r *http.Request, path st
 		"-",
 	)
 
-	cmd := exec.Command(s.ffmpegPath, args...)
+	cmd := exec.CommandContext(r.Context(), s.ffmpegPath, args...)
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		http.Error(w, err.Error(), 500)
@@ -144,6 +170,9 @@ func (s *Server) ServeTranscoded(w http.ResponseWriter, r *http.Request, path st
 }
 
 func (s *Server) ServeCrossfaded(w http.ResponseWriter, r *http.Request, queue []playback.TrackWithFeatures, format, bitrate string, gapless, normalize bool) {
+	if len(queue) > maxCrossfadeTracks {
+		queue = queue[:maxCrossfadeTracks]
+	}
 	if len(queue) == 1 {
 		fullPath, err := s.ResolvePath(queue[0].Path)
 		if err != nil {
@@ -262,6 +291,7 @@ func (s *Server) ServeCrossfaded(w http.ResponseWriter, r *http.Request, queue [
 	}
 
 	w.Header().Set("Content-Type", contentType)
+	w.Header().Set("Cache-Control", "private, no-store")
 	w.Header().Set("Transfer-Encoding", "chunked")
 
 	if format != "flac" {
@@ -310,7 +340,7 @@ func (s *Server) ServeCrossfaded(w http.ResponseWriter, r *http.Request, queue [
 		args = append(args, "-c:a", encoder, "-b:a", bitrate, "-f", container, "-")
 	}
 
-	cmd := exec.Command(s.ffmpegPath, args...)
+	cmd := exec.CommandContext(r.Context(), s.ffmpegPath, args...)
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		http.Error(w, err.Error(), 500)

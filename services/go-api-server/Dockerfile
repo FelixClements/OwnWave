@@ -10,11 +10,15 @@ RUN go build -o server .
 
 FROM alpine:latest
 
-RUN apk add --no-cache ffmpeg ca-certificates
+RUN apk add --no-cache ffmpeg ca-certificates wget \
+    && adduser -D -u 1000 ownwave
 
 WORKDIR /app
 
 COPY --from=builder /app/server .
+RUN chown ownwave:ownwave /app/server
+
+USER ownwave
 
 EXPOSE 8080
 

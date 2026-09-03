@@ -19,8 +19,10 @@ import (
 )
 
 var blockedSecrets = map[string]struct{}{
-	"change-me-in-production":         {},
-	"dev-secret-change-in-production": {},
+	"change-me-in-production":                         {},
+	"dev-secret-change-in-production":                 {},
+	"local-dev-only-secret-not-for-production-use":    {},
+	"replace-me-generate-with-openssl-rand-base64-32": {},
 }
 
 func waitForDB(ctx context.Context, dsn string) (*pgxpool.Pool, error) {
@@ -99,7 +101,7 @@ func main() {
 		log.Fatalf("migrations: %v", err)
 	}
 
-	jwtSecret := loadJWTSecret()
+	loadJWTSecret()
 
 	musicDir := os.Getenv("MUSIC_DIR")
 	if musicDir == "" {
@@ -123,17 +125,18 @@ func main() {
 		}
 	}
 
-	h := NewHandler(db, jwtSecret, musicDir, ffmpegPath, pythonURL, recentHours)
+	h := NewHandler(db, musicDir, ffmpegPath, pythonURL, recentHours)
 
 	r := chi.NewRouter()
-	r.Use(middleware.Logger)
+	r.Use(middleware.RealIP)
+	r.Use(httpAccessLog)
 	r.Use(middleware.Recoverer)
 	r.Use(prometheusMiddleware)
 	r.Use(cors.New(cors.Options{
 		AllowedOrigins:   loadAllowedOrigins(),
 		AllowedMethods:   []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
 		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type"},
-		AllowCredentials: false,
+		AllowCredentials: true,
 	}).Handler)
 
 	r.Get("/health", h.Health)
@@ -155,15 +158,21 @@ func main() {
 		r.Post("/setup/stations", h.SetupStations)
 	})
 
-	r.Get("/stream/{id}", h.StreamTrack)
-	r.Get("/stations/{id}/crossfade", h.StationCrossfadeStream)
-
 	r.Group(func(r chi.Router) {
 		r.Use(h.auth.RequireUser)
 		r.Get("/me", h.Me)
 		r.Put("/me/profile", h.UpdateProfile)
 		r.Post("/logout", h.Logout)
-		r.Post("/me/password", h.ChangePassword)
+		r.Group(func(r chi.Router) {
+			r.Use(httprate.LimitByIP(5, time.Minute))
+			r.Post("/me/password", h.ChangePassword)
+		})
+
+		r.Group(func(r chi.Router) {
+			r.Use(httprate.LimitByIP(60, time.Minute))
+			r.Get("/stream/{id}", h.StreamTrack)
+			r.Get("/stations/{id}/crossfade", h.StationCrossfadeStream)
+		})
 
 		r.Get("/tracks", h.ListTracks)
 		r.Get("/albums", h.ListAlbums)
@@ -210,15 +219,6 @@ func main() {
 			r.Post("/admin/invites", h.CreateInvite)
 		})
 	})
-
-	go func() {
-		metricsMux := http.NewServeMux()
-		metricsMux.Handle("/metrics", metricsHandler())
-		slog.Info("metrics listening", "port", "9090")
-		if err := http.ListenAndServe(":9090", metricsMux); err != nil {
-			slog.Error("metrics server failed", "error", err)
-		}
-	}()
 
 	slog.Info("go-api listening", "port", "8080")
 	if err := http.ListenAndServe(":8080", r); err != nil {

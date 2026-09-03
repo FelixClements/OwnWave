@@ -4,20 +4,34 @@ import (
 	"bytes"
 	"io"
 	"net/http"
+	"os"
 	"strings"
 )
 
 // HTTPClient calls the Python analytics service over HTTP.
 type HTTPClient struct {
 	baseURL    string
+	secret     string
+	userID     string
 	httpClient *http.Client
 }
 
 func NewHTTPClient(baseURL string) *HTTPClient {
+	return NewHTTPClientWithSecret(baseURL, os.Getenv("ANALYTICS_API_SECRET"))
+}
+
+func NewHTTPClientWithSecret(baseURL, secret string) *HTTPClient {
 	return &HTTPClient{
 		baseURL:    strings.TrimRight(baseURL, "/"),
+		secret:     secret,
 		httpClient: http.DefaultClient,
 	}
+}
+
+func (c *HTTPClient) WithUser(userID string) Client {
+	cp := *c
+	cp.userID = userID
+	return &cp
 }
 
 func (c *HTTPClient) GetSimilarTracks(trackID, limit string) (*Response, error) {
@@ -81,7 +95,12 @@ func (c *HTTPClient) GetStationTracklist(stationID string) (*Response, error) {
 }
 
 func (c *HTTPClient) get(path string) (*Response, error) {
-	resp, err := c.httpClient.Get(c.baseURL + path)
+	req, err := http.NewRequest(http.MethodGet, c.baseURL+path, nil)
+	if err != nil {
+		return nil, err
+	}
+	c.setAuth(req)
+	resp, err := c.httpClient.Do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -89,7 +108,15 @@ func (c *HTTPClient) get(path string) (*Response, error) {
 }
 
 func (c *HTTPClient) post(path, contentType string, body io.Reader) (*Response, error) {
-	resp, err := c.httpClient.Post(c.baseURL+path, contentType, body)
+	req, err := http.NewRequest(http.MethodPost, c.baseURL+path, body)
+	if err != nil {
+		return nil, err
+	}
+	if contentType != "" {
+		req.Header.Set("Content-Type", contentType)
+	}
+	c.setAuth(req)
+	resp, err := c.httpClient.Do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -102,9 +129,19 @@ func (c *HTTPClient) patch(path, contentType string, body io.Reader) (*Response,
 		return nil, err
 	}
 	req.Header.Set("Content-Type", contentType)
+	c.setAuth(req)
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
 		return nil, err
 	}
 	return readResponse(resp)
+}
+
+func (c *HTTPClient) setAuth(req *http.Request) {
+	if c.secret != "" {
+		req.Header.Set("X-Internal-Token", c.secret)
+	}
+	if c.userID != "" {
+		req.Header.Set("X-OwnWave-User-Id", c.userID)
+	}
 }

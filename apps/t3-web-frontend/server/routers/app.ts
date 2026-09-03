@@ -6,10 +6,7 @@ import { STATION_SEED_TYPES } from '@/lib/station-seed-types';
 
 const stationSeedTypeSchema = z.enum(STATION_SEED_TYPES);
 
-const GO_API_URL = process.env.GO_API_URL || 'http://localhost:8080';
-const api = new OwnWaveAPI(GO_API_URL);
-
-const t = initTRPC.create({
+const t = initTRPC.context<{ api: OwnWaveAPI }>().create({
   transformer: superjson,
 });
 
@@ -22,23 +19,23 @@ export const appRouter = t.router({
         cursor: z.number().optional(),
       })
     )
-    .query(async ({ input }) =>
-      api.listTracks({
+    .query(async ({ ctx, input }) =>
+      ctx.api.listTracks({
         limit: input.limit,
         offset: input.cursor,
         q: input.q,
       })
     ),
 
-  albums: t.procedure.query(async () => api.listAlbums()),
+  albums: t.procedure.query(async ({ ctx }) => ctx.api.listAlbums()),
 
-  artists: t.procedure.query(async () => api.listArtists()),
+  artists: t.procedure.query(async ({ ctx }) => ctx.api.listArtists()),
 
-  rescan: t.procedure.mutation(async () => api.rescan()),
+  rescan: t.procedure.mutation(async ({ ctx }) => ctx.api.rescan()),
 
   scanStatus: t.procedure
     .input(z.object({ jobId: z.string() }))
-    .query(async ({ input }) => api.getScanStatus(input.jobId)),
+    .query(async ({ ctx, input }) => ctx.api.getScanStatus(input.jobId)),
 
   register: t.procedure
     .input(
@@ -48,78 +45,78 @@ export const appRouter = t.router({
         inviteToken: z.string().optional(),
       })
     )
-    .mutation(async ({ input }) =>
-      api.register(input.username, input.password, input.inviteToken)
+    .mutation(async ({ ctx, input }) =>
+      ctx.api.register(input.username, input.password, input.inviteToken)
     ),
 
   login: t.procedure
     .input(z.object({ username: z.string(), password: z.string() }))
-    .mutation(async ({ input }) => api.login(input.username, input.password)),
+    .mutation(async ({ ctx, input }) => ctx.api.login(input.username, input.password)),
 
-  me: t.procedure.query(async () => api.me()),
+  me: t.procedure.query(async ({ ctx }) => ctx.api.me()),
 
   updateProfile: t.procedure
     .input(z.object({ email: z.string(), fullName: z.string() }))
-    .mutation(async ({ input }) => api.updateProfile(input.email, input.fullName)),
+    .mutation(async ({ ctx, input }) => ctx.api.updateProfile(input.email, input.fullName)),
 
-  logout: t.procedure.mutation(async () => api.logout()),
+  logout: t.procedure.mutation(async ({ ctx }) => ctx.api.logout()),
 
   changePassword: t.procedure
     .input(z.object({ currentPassword: z.string(), newPassword: z.string() }))
-    .mutation(async ({ input }) => api.changePassword(input.currentPassword, input.newPassword)),
+    .mutation(async ({ ctx, input }) => ctx.api.changePassword(input.currentPassword, input.newPassword)),
 
   similar: t.procedure
     .input(z.object({ id: z.string(), limit: z.number().optional() }))
-    .query(async ({ input }) => api.getSimilarTracks(input.id, input.limit ?? 20)),
+    .query(async ({ ctx, input }) => ctx.api.getSimilarTracks(input.id, input.limit ?? 20)),
 
-  adminHealth: t.procedure.query(async () => api.adminHealth()),
-  adminStations: t.procedure.query(async () => api.adminStations()),
+  adminHealth: t.procedure.query(async ({ ctx }) => ctx.api.adminHealth()),
+  adminStations: t.procedure.query(async ({ ctx }) => ctx.api.adminStations()),
   adminScan: t.procedure
     .input(z.object({ path: z.string().optional(), force: z.boolean().optional() }))
-    .mutation(async ({ input }) => api.adminScan(input.path, input.force)),
-  adminRebuildVectors: t.procedure.mutation(async () => api.adminRebuildVectors()),
-  adminRebuildClusters: t.procedure.mutation(async () => api.adminRebuildClusters()),
-  adminRebuildGenres: t.procedure.mutation(async () => api.adminRebuildGenres()),
-  adminRebuildGenreStations: t.procedure.mutation(async () => api.adminRebuildGenreStations()),
+    .mutation(async ({ ctx, input }) => ctx.api.adminScan(input.path, input.force)),
+  adminRebuildVectors: t.procedure.mutation(async ({ ctx }) => ctx.api.adminRebuildVectors()),
+  adminRebuildClusters: t.procedure.mutation(async ({ ctx }) => ctx.api.adminRebuildClusters()),
+  adminRebuildGenres: t.procedure.mutation(async ({ ctx }) => ctx.api.adminRebuildGenres()),
+  adminRebuildGenreStations: t.procedure.mutation(async ({ ctx }) => ctx.api.adminRebuildGenreStations()),
 
-  genres: t.procedure.query(async () => api.getGenres()),
-  trackGenres: t.procedure.input(z.object({ id: z.string() })).query(async ({ input }) => api.getTrackGenres(input.id)),
+  genres: t.procedure.query(async ({ ctx }) => ctx.api.getGenres()),
+  trackGenres: t.procedure.input(z.object({ id: z.string() })).query(async ({ ctx, input }) => ctx.api.getTrackGenres(input.id)),
 
   recordPlay: t.procedure
     .input(z.object({ id: z.string(), stationId: z.string().optional() }))
-    .mutation(async ({ input }) => api.recordPlay(input.id, input.stationId)),
+    .mutation(async ({ ctx, input }) => ctx.api.recordPlay(input.id, input.stationId)),
 
   recordFeedback: t.procedure
     .input(z.object({ id: z.string(), feedback: z.enum(['like', 'skip', 'ban']) }))
-    .mutation(async ({ input }) => api.recordFeedback(input.id, input.feedback)),
+    .mutation(async ({ ctx, input }) => ctx.api.recordFeedback(input.id, input.feedback)),
 
   removeFeedback: t.procedure
     .input(z.object({ id: z.string(), feedback: z.enum(['like', 'skip', 'ban']) }))
-    .mutation(async ({ input }) => api.deleteFeedback(input.id, input.feedback)),
+    .mutation(async ({ ctx, input }) => ctx.api.deleteFeedback(input.id, input.feedback)),
 
-  history: t.procedure.query(async () => api.listHistory()),
+  history: t.procedure.query(async ({ ctx }) => ctx.api.listHistory()),
 
-  liked: t.procedure.query(async () => api.listFeedback('like')),
-  skipped: t.procedure.query(async () => api.listFeedback('skip')),
-  banned: t.procedure.query(async () => api.listFeedback('ban')),
+  liked: t.procedure.query(async ({ ctx }) => ctx.api.listFeedback('like')),
+  skipped: t.procedure.query(async ({ ctx }) => ctx.api.listFeedback('skip')),
+  banned: t.procedure.query(async ({ ctx }) => ctx.api.listFeedback('ban')),
 
   track: t.procedure
     .input(z.object({ id: z.string() }))
-    .query(async ({ input }) => api.getTrack(input.id)),
+    .query(async ({ ctx, input }) => ctx.api.getTrack(input.id)),
 
-  stations: t.procedure.query(async () => api.listStations()),
+  stations: t.procedure.query(async ({ ctx }) => ctx.api.listStations()),
 
   search: t.procedure
     .input(z.object({ q: z.string() }))
-    .query(async ({ input }) => api.search(input.q)),
+    .query(async ({ ctx, input }) => ctx.api.search(input.q)),
 
   queue: t.procedure
     .input(z.object({ id: z.string() }))
-    .query(async ({ input }) => api.getQueue(input.id)),
+    .query(async ({ ctx, input }) => ctx.api.getQueue(input.id)),
 
   station: t.procedure
     .input(z.object({ id: z.string() }))
-    .query(async ({ input }) => api.getStation(input.id)),
+    .query(async ({ ctx, input }) => ctx.api.getStation(input.id)),
 
   createStation: t.procedure
     .input(
@@ -141,7 +138,7 @@ export const appRouter = t.router({
         sub_genre: z.string().optional(),
       })
     )
-    .mutation(async ({ input }) => api.createStation(input)),
+    .mutation(async ({ ctx, input }) => ctx.api.createStation(input)),
 
   updateStation: t.procedure
     .input(
@@ -164,14 +161,14 @@ export const appRouter = t.router({
         sub_genre: z.string().optional(),
       })
     )
-    .mutation(async ({ input }) => {
+    .mutation(async ({ ctx, input }) => {
       const { id, ...body } = input;
-      return api.updateStation(id, body);
+      return ctx.api.updateStation(id, body);
     }),
 
   deleteStation: t.procedure
     .input(z.object({ id: z.string() }))
-    .mutation(async ({ input }) => api.deleteStation(input.id)),
+    .mutation(async ({ ctx, input }) => ctx.api.deleteStation(input.id)),
 
   streamUrl: t.procedure
     .input(
@@ -181,31 +178,29 @@ export const appRouter = t.router({
       })
     )
     .query(async ({ input }) => {
-      const goBase = process.env.NEXT_PUBLIC_GO_API_URL || 'http://localhost:8080';
-      const { url } = await api.getStreamUrl(input.id, { format: input.format });
-      return `${goBase}${url}`;
+      return `/api/stream/${encodeURIComponent(input.id)}?format=${input.format}`;
     }),
 
-  setupStatus: t.procedure.query(async () => api.setupStatus()),
-  setupSummary: t.procedure.query(async () => api.setupSummary()),
+  setupStatus: t.procedure.query(async ({ ctx }) => ctx.api.setupStatus()),
+  setupSummary: t.procedure.query(async ({ ctx }) => ctx.api.setupSummary()),
   setupStations: t.procedure
     .input(z.object({ selectedMainGenres: z.array(z.string()) }))
-    .mutation(async ({ input }) => api.setupStations(input.selectedMainGenres)),
-  setupComplete: t.procedure.mutation(async () => api.setupComplete()),
+    .mutation(async ({ ctx, input }) => ctx.api.setupStations(input.selectedMainGenres)),
+  setupComplete: t.procedure.mutation(async ({ ctx }) => ctx.api.setupComplete()),
 
   createInvite: t.procedure
     .input(z.object({ username: z.string().optional(), ttlHours: z.number().optional() }))
-    .mutation(async ({ input }) => api.createInvite(input.username, input.ttlHours)),
+    .mutation(async ({ ctx, input }) => ctx.api.createInvite(input.username, input.ttlHours)),
 
   createUser: t.procedure
     .input(z.object({ username: z.string(), password: z.string() }))
-    .mutation(async ({ input }) => api.createUser(input.username, input.password)),
+    .mutation(async ({ ctx, input }) => ctx.api.createUser(input.username, input.password)),
 
-  listUsers: t.procedure.query(async () => api.listUsers()),
+  listUsers: t.procedure.query(async ({ ctx }) => ctx.api.listUsers()),
 
   deleteUser: t.procedure
     .input(z.object({ id: z.string() }))
-    .mutation(async ({ input }) => api.deleteUser(input.id)),
+    .mutation(async ({ ctx, input }) => ctx.api.deleteUser(input.id)),
 });
 
 export type AppRouter = typeof appRouter;

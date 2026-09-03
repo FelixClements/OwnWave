@@ -4,6 +4,8 @@ package auth_test
 
 import (
 	"context"
+	"net/http"
+	"net/http/httptest"
 	"path/filepath"
 	"runtime"
 	"testing"
@@ -66,4 +68,57 @@ func TestRegisterFirstAdminAndInviteFlow(t *testing.T) {
 
 	_, _, err = svc.Register(ctx, "carol", "password123", rawInvite)
 	require.ErrorIs(t, err, auth.ErrInvalidInvite)
+}
+
+func TestInviteUsernameMismatchDoesNotBurnInvite(t *testing.T) {
+	pool := setupAuthDB(t)
+	svc := auth.NewService(pool)
+	ctx := context.Background()
+
+	_, admin, err := svc.Register(ctx, "alice", "password123", "")
+	require.NoError(t, err)
+
+	preset := "bob"
+	rawInvite, _, err := svc.CreateInvite(ctx, admin.ID, &preset, 24*time.Hour)
+	require.NoError(t, err)
+
+	_, _, err = svc.Register(ctx, "not-bob", "password123", rawInvite)
+	require.ErrorIs(t, err, auth.ErrInvalidInvite)
+
+	_, invited, err := svc.Register(ctx, "bob", "password123", rawInvite)
+	require.NoError(t, err)
+	require.Equal(t, "bob", invited.Username)
+}
+
+func TestChangePasswordRevokesOtherSessions(t *testing.T) {
+	pool := setupAuthDB(t)
+	svc := auth.NewService(pool)
+	ctx := context.Background()
+
+	token1, user, err := svc.Register(ctx, "alice", "password123", "")
+	require.NoError(t, err)
+
+	token2, _, err := svc.Login(ctx, "alice", "password123")
+	require.NoError(t, err)
+
+	loaded, ok := svc.UserFromRequest(requestWithBearer(token1))
+	require.True(t, ok)
+	require.Equal(t, user.ID, loaded.ID)
+
+	newToken, err := svc.ChangePassword(ctx, loaded, "password123", "password456")
+	require.NoError(t, err)
+	require.NotEmpty(t, newToken)
+
+	_, ok = svc.UserFromRequest(requestWithBearer(token1))
+	require.False(t, ok)
+	_, ok = svc.UserFromRequest(requestWithBearer(token2))
+	require.False(t, ok)
+	_, ok = svc.UserFromRequest(requestWithBearer(newToken))
+	require.True(t, ok)
+}
+
+func requestWithBearer(token string) *http.Request {
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	return req
 }

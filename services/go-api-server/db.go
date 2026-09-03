@@ -5,6 +5,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"ownwave/api/internal/playback"
@@ -114,12 +115,13 @@ func (db *DB) ListArtists(ctx context.Context) ([]Artist, error) {
 	return artists, rows.Err()
 }
 
-func (db *DB) ListStations(ctx context.Context) ([]Station, error) {
+func (db *DB) ListStations(ctx context.Context, userID string) ([]Station, error) {
 	rows, err := db.pool.Query(ctx, `
 		SELECT id::text, name, seed_features::text
 		FROM stations
+		WHERE user_id = $1::uuid
 		ORDER BY created_at DESC
-	`)
+	`, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -142,16 +144,17 @@ type StationQueueStatus struct {
 	PlayedCount int `json:"played_count"`
 }
 
-func (db *DB) ListStationsWithQueueStatus(ctx context.Context) ([]StationQueueStatus, error) {
+func (db *DB) ListStationsWithQueueStatus(ctx context.Context, userID string) ([]StationQueueStatus, error) {
 	rows, err := db.pool.Query(ctx, `
 		SELECT s.id::text, s.name, s.seed_features::text,
 		       COUNT(st.track_id) FILTER (WHERE st.station_id = s.id),
 		       COUNT(st.track_id) FILTER (WHERE st.station_id = s.id AND st.played_at IS NOT NULL)
 		FROM stations s
 		LEFT JOIN station_tracks st ON s.id = st.station_id
+		WHERE s.user_id = $1::uuid
 		GROUP BY s.id, s.name, s.seed_features
 		ORDER BY s.created_at DESC
-	`)
+	`, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -167,38 +170,39 @@ func (db *DB) ListStationsWithQueueStatus(ctx context.Context) ([]StationQueueSt
 	return out, rows.Err()
 }
 
-func (db *DB) GetStationByID(ctx context.Context, stationID string) (Station, error) {
+func (db *DB) GetStationByID(ctx context.Context, userID, stationID string) (Station, error) {
 	var s Station
 	err := db.pool.QueryRow(ctx, `
 		SELECT id::text, name, seed_features::text
 		FROM stations
-		WHERE id = $1
-	`, stationID).Scan(&s.ID, &s.Name, &s.SeedFeatures)
+		WHERE id = $1 AND user_id = $2::uuid
+	`, stationID, userID).Scan(&s.ID, &s.Name, &s.SeedFeatures)
 	return s, err
 }
 
-func (db *DB) UpdateStation(ctx context.Context, stationID, name, seedFeatures string) error {
+func (db *DB) UpdateStation(ctx context.Context, userID, stationID, name, seedFeatures string) error {
 	_, err := db.pool.Exec(ctx, `
 		UPDATE stations
-		SET name = $2,
-		    seed_features = COALESCE(NULLIF($3, '')::jsonb, seed_features)
-		WHERE id = $1
-	`, stationID, name, seedFeatures)
+		SET name = $3,
+		    seed_features = COALESCE(NULLIF($4, '')::jsonb, seed_features)
+		WHERE id = $1 AND user_id = $2::uuid
+	`, stationID, userID, name, seedFeatures)
 	return err
 }
 
-func (db *DB) DeleteStation(ctx context.Context, stationID string) error {
+func (db *DB) DeleteStation(ctx context.Context, userID, stationID string) error {
 	tx, err := db.pool.Begin(ctx)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback(ctx)
 
-	if _, err := tx.Exec(ctx, `DELETE FROM station_tracks WHERE station_id = $1`, stationID); err != nil {
+	tag, err := tx.Exec(ctx, `DELETE FROM stations WHERE id = $1 AND user_id = $2::uuid`, stationID, userID)
+	if err != nil {
 		return err
 	}
-	if _, err := tx.Exec(ctx, `DELETE FROM stations WHERE id = $1`, stationID); err != nil {
-		return err
+	if tag.RowsAffected() == 0 {
+		return pgx.ErrNoRows
 	}
 
 	return tx.Commit(ctx)
@@ -327,24 +331,24 @@ type HistoryEntry struct {
 	PlayedAt  time.Time `json:"played_at"`
 }
 
-func (db *DB) RecordFeedback(ctx context.Context, trackID, feedback string) error {
+func (db *DB) RecordFeedback(ctx context.Context, userID, trackID, feedback string) error {
 	_, err := db.pool.Exec(ctx, `
-		INSERT INTO track_feedback (track_id, feedback)
-		VALUES ($1, $2)
-		ON CONFLICT (track_id, feedback) DO UPDATE SET created_at = NOW()
-	`, trackID, feedback)
+		INSERT INTO track_feedback (user_id, track_id, feedback)
+		VALUES ($1::uuid, $2, $3)
+		ON CONFLICT (user_id, track_id, feedback) DO UPDATE SET created_at = NOW()
+	`, userID, trackID, feedback)
 	return err
 }
 
-func (db *DB) DeleteFeedback(ctx context.Context, trackID, feedback string) error {
+func (db *DB) DeleteFeedback(ctx context.Context, userID, trackID, feedback string) error {
 	_, err := db.pool.Exec(ctx, `
 		DELETE FROM track_feedback
-		WHERE track_id = $1 AND feedback = $2
-	`, trackID, feedback)
+		WHERE user_id = $1::uuid AND track_id = $2 AND feedback = $3
+	`, userID, trackID, feedback)
 	return err
 }
 
-func (db *DB) ListHistory(ctx context.Context, limit int) ([]HistoryEntry, error) {
+func (db *DB) ListHistory(ctx context.Context, userID string, limit int) ([]HistoryEntry, error) {
 	if limit <= 0 {
 		limit = 50
 	}
@@ -354,9 +358,10 @@ func (db *DB) ListHistory(ctx context.Context, limit int) ([]HistoryEntry, error
 		JOIN tracks t ON h.track_id = t.id
 		LEFT JOIN artists a ON t.artist_id = a.id
 		LEFT JOIN albums al ON t.album_id = al.id
+		WHERE h.user_id = $1::uuid
 		ORDER BY h.played_at DESC
-		LIMIT $1
-	`, limit)
+		LIMIT $2
+	`, userID, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -372,7 +377,7 @@ func (db *DB) ListHistory(ctx context.Context, limit int) ([]HistoryEntry, error
 	return entries, rows.Err()
 }
 
-func (db *DB) ListFeedback(ctx context.Context, feedback string, limit int) ([]Track, error) {
+func (db *DB) ListFeedback(ctx context.Context, userID, feedback string, limit int) ([]Track, error) {
 	if limit <= 0 {
 		limit = 100
 	}
@@ -382,10 +387,10 @@ func (db *DB) ListFeedback(ctx context.Context, feedback string, limit int) ([]T
 		JOIN tracks t ON f.track_id = t.id
 		LEFT JOIN artists a ON t.artist_id = a.id
 		LEFT JOIN albums al ON t.album_id = al.id
-		WHERE f.feedback = $1
+		WHERE f.user_id = $1::uuid AND f.feedback = $2
 		ORDER BY f.created_at DESC
-		LIMIT $2
-	`, feedback, limit)
+		LIMIT $3
+	`, userID, feedback, limit)
 	if err != nil {
 		return nil, err
 	}

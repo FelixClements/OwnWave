@@ -4,7 +4,6 @@ import { useState } from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { httpBatchLink } from '@trpc/client';
 import superjson from 'superjson';
-import { getAuthToken } from '@/lib/api';
 import { trpc } from './client';
 
 export function Provider({ children }: { children: React.ReactNode }) {
@@ -15,9 +14,8 @@ export function Provider({ children }: { children: React.ReactNode }) {
       links: [
         httpBatchLink({
           url: '/api/trpc',
-          headers: () => {
-            const token = getAuthToken();
-            return token ? { Authorization: `Bearer ${token}` } : {};
+          fetch(url, opts) {
+            return fetch(url, { ...opts, credentials: 'include' });
           },
         }),
       ],
