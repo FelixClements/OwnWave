@@ -41,10 +41,12 @@ def _user_id_from_request(request: Request) -> UUID:
 
 def _resolved_scan_path(path: str) -> str:
     music = Path(MUSIC_DIR).resolve()
-    resolved = Path(path).resolve()
-    if not resolved.is_relative_to(music):
+    user_path = Path(path)
+    relative_parts = user_path.parts[1:] if user_path.is_absolute() else user_path.parts
+    candidate = music.joinpath(*relative_parts).resolve()
+    if not candidate.is_relative_to(music):
         raise HTTPException(status_code=400, detail="path outside music directory")
-    return str(resolved)
+    return str(candidate)
 
 
 @app.on_event("startup")
