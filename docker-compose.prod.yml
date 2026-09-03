@@ -1,7 +1,6 @@
 services:
   web:
     environment:
-      NEXT_PUBLIC_GO_API_URL: ${NEXT_PUBLIC_GO_API_URL:-https://${OWNWAVE_DOMAIN:-localhost}/api}
       GO_API_URL: ${GO_API_URL:-http://go:8080}
     ports: []
 
@@ -9,6 +8,8 @@ services:
     environment:
       PYTHON_API_URL: http://python:8000
       JWT_SECRET: ${JWT_SECRET}
+      ANALYTICS_API_SECRET: ${ANALYTICS_API_SECRET}
+      OWNWAVE_COOKIE_SECURE: "true"
       ALLOWED_ORIGINS: https://${OWNWAVE_DOMAIN:-localhost}
       PUBLIC_APP_URL: https://${OWNWAVE_DOMAIN:-localhost}
       OWNWAVE_DOMAIN: ${OWNWAVE_DOMAIN:-localhost}

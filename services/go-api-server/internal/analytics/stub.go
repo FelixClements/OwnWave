@@ -16,6 +16,11 @@ func NewStub() *Stub {
 	}
 }
 
+func (s *Stub) WithUser(userID string) Client {
+	s.Calls = append(s.Calls, "WithUser:"+userID)
+	return s
+}
+
 func (s *Stub) GetSimilarTracks(trackID, limit string) (*Response, error) {
 	return s.call("GetSimilarTracks:" + trackID + ":" + limit)
 }

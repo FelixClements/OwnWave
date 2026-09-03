@@ -1,8 +1,7 @@
 'use client';
 
 import { createContext, useContext, useEffect, useState, ReactNode } from 'react';
-import { trpc } from '@/lib/trpc/client';
-import { setAuthToken, getAuthToken, User, api } from '@/lib/api';
+import { api, User } from '@/lib/api';
 
 type AuthContextValue = {
   user: User | null;
@@ -18,41 +17,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
 
-  const loginMutation = trpc.login.useMutation();
-  const registerMutation = trpc.register.useMutation();
-
   useEffect(() => {
-    const token = localStorage.getItem('ownwave:token');
-    if (token) {
-      setAuthToken(token);
-      loadUser().finally(() => setLoading(false));
-    } else {
-      setLoading(false);
-    }
+    loadUser().finally(() => setLoading(false));
   }, []);
 
   const loadUser = async () => {
     const me = await api.me();
-    if (me) {
-      setUser(me);
-    } else {
-      setAuthToken(null);
-      localStorage.removeItem('ownwave:token');
-      setUser(null);
-    }
+    setUser(me);
   };
 
   const login = async (username: string, password: string) => {
-    const data = await loginMutation.mutateAsync({ username, password });
-    setAuthToken(data.token);
-    localStorage.setItem('ownwave:token', data.token);
+    await api.login(username, password);
     await loadUser();
   };
 
   const register = async (username: string, password: string, inviteToken?: string) => {
-    const data = await registerMutation.mutateAsync({ username, password, inviteToken });
-    setAuthToken(data.token);
-    localStorage.setItem('ownwave:token', data.token);
+    await api.register(username, password, inviteToken);
     await loadUser();
   };
 
@@ -60,9 +40,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     try {
       await api.logout();
     } finally {
-      setAuthToken(null);
       setUser(null);
-      localStorage.removeItem('ownwave:token');
     }
   };
 

@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
-	"strings"
 
 	"ownwave/api/internal/auth"
 )
@@ -23,9 +22,7 @@ func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
 	token, user, err := h.auth.Register(r.Context(), req.Username, req.Password, req.InviteToken)
 	if err != nil {
 		switch {
-		case errors.Is(err, auth.ErrUsernameTaken):
-			http.Error(w, "username taken", http.StatusConflict)
-		case errors.Is(err, auth.ErrRegistrationClosed), errors.Is(err, auth.ErrInvalidInvite), errors.Is(err, auth.ErrForbidden):
+		case errors.Is(err, auth.ErrUsernameTaken), errors.Is(err, auth.ErrRegistrationClosed), errors.Is(err, auth.ErrInvalidInvite), errors.Is(err, auth.ErrForbidden):
 			http.Error(w, "forbidden", http.StatusForbidden)
 		case errors.Is(err, auth.ErrWeakPassword), errors.Is(err, auth.ErrInvalidUsername):
 			http.Error(w, err.Error(), http.StatusBadRequest)
@@ -35,15 +32,8 @@ func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
-		"token": token,
-		"user": map[string]interface{}{
-			"id":       user.ID,
-			"username": user.Username,
-			"is_admin": user.IsAdmin,
-		},
-	})
+	auth.WriteSessionCookie(w, token, h.cookieSecure)
+	writeAuthUser(w, user)
 }
 
 func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
@@ -70,28 +60,17 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
-		"token": token,
-		"user": map[string]interface{}{
-			"id":       user.ID,
-			"username": user.Username,
-			"is_admin": user.IsAdmin,
-		},
-	})
+	auth.WriteSessionCookie(w, token, h.cookieSecure)
+	writeAuthUser(w, user)
 }
 
 func (h *Handler) Logout(w http.ResponseWriter, r *http.Request) {
-	authHeader := r.Header.Get("Authorization")
-	if !strings.HasPrefix(authHeader, "Bearer ") {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
-		return
-	}
-	token := strings.TrimPrefix(authHeader, "Bearer ")
+	token := auth.TokenFromRequest(r)
 	if err := h.auth.Logout(r.Context(), token); err != nil {
 		writeInternalError(w, r, "logout", err)
 		return
 	}
+	auth.ClearSessionCookie(w, h.cookieSecure)
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 }
@@ -166,7 +145,8 @@ func (h *Handler) ChangePassword(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := h.auth.ChangePassword(r.Context(), user, req.CurrentPassword, req.NewPassword); err != nil {
+	token, err := h.auth.ChangePassword(r.Context(), user, req.CurrentPassword, req.NewPassword)
+	if err != nil {
 		if errors.Is(err, auth.ErrInvalidCredentials) {
 			http.Error(w, "invalid current password", http.StatusUnauthorized)
 			return
@@ -179,6 +159,18 @@ func (h *Handler) ChangePassword(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	auth.WriteSessionCookie(w, token, h.cookieSecure)
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+}
+
+func writeAuthUser(w http.ResponseWriter, user auth.User) {
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"user": map[string]interface{}{
+			"id":       user.ID,
+			"username": user.Username,
+			"is_admin": user.IsAdmin,
+		},
+	})
 }

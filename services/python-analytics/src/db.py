@@ -310,24 +310,15 @@ def get_scan_status(conn: psycopg.Connection, job_id: UUID) -> Optional[dict]:
     return job
 
 
-def create_station(
+def get_station_by_id(
     conn: psycopg.Connection,
-    name: str,
-    seed_features: Optional[dict] = None,
-) -> UUID:
+    station_id: UUID,
+    user_id: UUID,
+) -> Optional[dict]:
     with conn.cursor() as cur:
         cur.execute(
-            "INSERT INTO stations (name, seed_features) VALUES (%s, %s::jsonb) RETURNING id",
-            (name, Jsonb(seed_features) if seed_features else None),
-        )
-        return cur.fetchone()[0]
-
-
-def get_station_by_id(conn: psycopg.Connection, station_id: UUID) -> Optional[dict]:
-    with conn.cursor() as cur:
-        cur.execute(
-            "SELECT id, name, seed_features FROM stations WHERE id = %s",
-            (station_id,),
+            "SELECT id, name, seed_features FROM stations WHERE id = %s AND user_id = %s",
+            (station_id, user_id),
         )
         row = cur.fetchone()
         if not row:
@@ -351,7 +342,10 @@ def insert_station_tracks(
             )
 
 
-def get_all_tracks_with_features(conn: psycopg.Connection) -> List[dict]:
+def get_all_tracks_with_features(
+    conn: psycopg.Connection,
+    user_id: UUID,
+) -> List[dict]:
     with conn.cursor() as cur:
         cur.execute(
             """
@@ -362,10 +356,11 @@ def get_all_tracks_with_features(conn: psycopg.Connection) -> List[dict]:
             FROM tracks t
             JOIN audio_features af ON t.id = af.track_id
             LEFT JOIN track_clusters tc ON t.id = tc.track_id
-            LEFT JOIN track_feedback f ON t.id = f.track_id
+            LEFT JOIN track_feedback f ON t.id = f.track_id AND f.user_id = %s
             WHERE af.feature_vector IS NOT NULL
             GROUP BY t.id, af.bpm, af.key, af.energy, af.valence, af.feature_vector, tc.cluster_id
-            """
+            """,
+            (user_id,),
         )
         columns = [desc[0] for desc in cur.description]
         rows = cur.fetchall()
@@ -627,6 +622,7 @@ def get_tracks_by_genre(
 def create_station(
     conn: psycopg.Connection,
     name: str,
+    user_id: UUID,
     seed_features: Optional[dict] = None,
     is_auto: bool = False,
     source: Optional[str] = None,
@@ -634,11 +630,11 @@ def create_station(
     with conn.cursor() as cur:
         cur.execute(
             """
-            INSERT INTO stations (name, seed_features, is_auto, source, last_refreshed_at)
-            VALUES (%s, %s::jsonb, %s, %s, NOW())
+            INSERT INTO stations (user_id, name, seed_features, is_auto, source, last_refreshed_at)
+            VALUES (%s, %s, %s::jsonb, %s, %s, NOW())
             RETURNING id
             """,
-            (name, Jsonb(seed_features) if seed_features else None, is_auto, source),
+            (user_id, name, Jsonb(seed_features) if seed_features else None, is_auto, source),
         )
         return cur.fetchone()[0]
 
@@ -646,34 +642,40 @@ def create_station(
 def upsert_auto_station(
     conn: psycopg.Connection,
     name: str,
+    user_id: UUID,
     seed_features: Optional[dict],
     source: str = "genre",
 ) -> UUID:
     with conn.cursor() as cur:
         cur.execute(
             """
-            INSERT INTO stations (name, seed_features, is_auto, source, last_refreshed_at)
-            VALUES (%s, %s::jsonb, TRUE, %s, NOW())
-            ON CONFLICT (name) WHERE is_auto = TRUE DO UPDATE SET
+            INSERT INTO stations (user_id, name, seed_features, is_auto, source, last_refreshed_at)
+            VALUES (%s, %s, %s::jsonb, TRUE, %s, NOW())
+            ON CONFLICT (user_id, name) WHERE is_auto = TRUE DO UPDATE SET
                 seed_features = EXCLUDED.seed_features,
                 is_auto = TRUE,
                 source = EXCLUDED.source,
                 last_refreshed_at = NOW()
             RETURNING id
             """,
-            (name, Jsonb(seed_features) if seed_features else None, source),
+            (user_id, name, Jsonb(seed_features) if seed_features else None, source),
         )
         return cur.fetchone()[0]
 
 
-def delete_orphaned_auto_stations(conn: psycopg.Connection, valid_names: List[str]) -> int:
+def delete_orphaned_auto_stations(
+    conn: psycopg.Connection,
+    user_id: UUID,
+    valid_names: List[str],
+) -> int:
     if not valid_names:
         with conn.cursor() as cur:
             cur.execute(
                 """
                 DELETE FROM stations
-                WHERE is_auto = TRUE AND source = 'genre'
-                """
+                WHERE is_auto = TRUE AND source = 'genre' AND user_id = %s
+                """,
+                (user_id,),
             )
             return cur.rowcount
     with conn.cursor() as cur:
@@ -682,11 +684,18 @@ def delete_orphaned_auto_stations(conn: psycopg.Connection, valid_names: List[st
             DELETE FROM stations
             WHERE is_auto = TRUE
               AND source = 'genre'
+              AND user_id = %s
               AND name <> ALL(%s)
             """,
-            (list(valid_names),),
+            (user_id, list(valid_names)),
         )
         return cur.rowcount
+
+
+def list_user_ids(conn: psycopg.Connection) -> List[UUID]:
+    with conn.cursor() as cur:
+        cur.execute("SELECT id FROM users")
+        return [row[0] for row in cur.fetchall()]
 
 
 def get_app_state(conn: psycopg.Connection, key: str) -> Optional[dict]:

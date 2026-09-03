@@ -21,10 +21,10 @@ from db import (
 from feature_vector import build_feature_vector
 from models import AudioFeatures, FailedPath, GenrePrediction, ScanResult
 from audio_metadata import (
-    SUPPORTED_EXTS,
     get_duration,
     get_file_stats,
     get_sample_info,
+    is_supported_audio_file,
     parse_int_tag,
 )
 from genre_sources import get_genre_sources
@@ -55,9 +55,7 @@ def import_folder(
     if not folder.exists():
         raise FileNotFoundError(f"Music path does not exist: {folder}")
 
-    files = sorted(
-        p for p in folder.rglob("*") if p.is_file() and p.suffix.lower() in SUPPORTED_EXTS
-    )
+    files = sorted(p for p in folder.rglob("*") if is_supported_audio_file(p))
     result = ScanResult(total_files=len(files))
 
     if not files:

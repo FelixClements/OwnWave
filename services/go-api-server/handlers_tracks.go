@@ -15,7 +15,10 @@ func (h *Handler) ListTracks(w http.ResponseWriter, r *http.Request) {
 	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
 	offset, _ := strconv.Atoi(r.URL.Query().Get("offset"))
 	if limit <= 0 {
-		limit = 1000
+		limit = 100
+	}
+	if limit > 200 {
+		limit = 200
 	}
 	tracks, err := h.db.ListTracks(r.Context(), limit, offset, q)
 	if err != nil {
@@ -63,18 +66,26 @@ func (h *Handler) GetSimilarTracks(w http.ResponseWriter, r *http.Request) {
 	proxyAnalytics(w, r, resp, err)
 }
 func (h *Handler) RecordPlay(w http.ResponseWriter, r *http.Request) {
+	user, ok := h.currentUser(w, r)
+	if !ok {
+		return
+	}
 	trackID := chi.URLParam(r, "id")
 	var req struct {
 		StationID string `json:"station_id"`
 	}
 	_ = json.NewDecoder(r.Body).Decode(&req)
-	if err := h.playback.Record(r.Context(), trackID, req.StationID); err != nil {
+	if err := h.playback.Record(r.Context(), user.ID, trackID, req.StationID); err != nil {
 		writeInternalError(w, r, "record play", err)
 		return
 	}
 	w.WriteHeader(204)
 }
 func (h *Handler) RecordFeedback(w http.ResponseWriter, r *http.Request) {
+	user, ok := h.currentUser(w, r)
+	if !ok {
+		return
+	}
 	trackID := chi.URLParam(r, "id")
 	var req struct {
 		Feedback string `json:"feedback"`
@@ -83,13 +94,17 @@ func (h *Handler) RecordFeedback(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "feedback required", 400)
 		return
 	}
-	if err := h.db.RecordFeedback(r.Context(), trackID, req.Feedback); err != nil {
+	if err := h.db.RecordFeedback(r.Context(), user.ID, trackID, req.Feedback); err != nil {
 		writeInternalError(w, r, "record feedback", err)
 		return
 	}
 	w.WriteHeader(204)
 }
 func (h *Handler) DeleteFeedback(w http.ResponseWriter, r *http.Request) {
+	user, ok := h.currentUser(w, r)
+	if !ok {
+		return
+	}
 	trackID := chi.URLParam(r, "id")
 	var req struct {
 		Feedback string `json:"feedback"`
@@ -98,14 +113,18 @@ func (h *Handler) DeleteFeedback(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "feedback required", 400)
 		return
 	}
-	if err := h.db.DeleteFeedback(r.Context(), trackID, req.Feedback); err != nil {
+	if err := h.db.DeleteFeedback(r.Context(), user.ID, trackID, req.Feedback); err != nil {
 		writeInternalError(w, r, "delete feedback", err)
 		return
 	}
 	w.WriteHeader(204)
 }
 func (h *Handler) ListHistory(w http.ResponseWriter, r *http.Request) {
-	entries, err := h.db.ListHistory(r.Context(), 50)
+	user, ok := h.currentUser(w, r)
+	if !ok {
+		return
+	}
+	entries, err := h.db.ListHistory(r.Context(), user.ID, 50)
 	if err != nil {
 		writeInternalError(w, r, "list tracks", err)
 		return
@@ -114,12 +133,16 @@ func (h *Handler) ListHistory(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]interface{}{"history": entries})
 }
 func (h *Handler) ListFeedback(w http.ResponseWriter, r *http.Request) {
+	user, ok := h.currentUser(w, r)
+	if !ok {
+		return
+	}
 	feedback := r.URL.Query().Get("feedback")
 	if feedback == "" {
 		http.Error(w, "feedback param required", 400)
 		return
 	}
-	tracks, err := h.db.ListFeedback(r.Context(), feedback, 100)
+	tracks, err := h.db.ListFeedback(r.Context(), user.ID, feedback, 100)
 	if err != nil {
 		writeInternalError(w, r, "list tracks", err)
 		return
@@ -160,6 +183,6 @@ func (h *Handler) GetTrackCover(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "image/jpeg")
-	w.Header().Set("Cache-Control", "public, max-age=86400")
+	w.Header().Set("Cache-Control", "private, max-age=86400")
 	w.Write(out.Bytes())
 }

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"golang.org/x/crypto/bcrypt"
 )
@@ -24,7 +25,20 @@ var (
 	ErrInvalidUsername    = errors.New("username required")
 )
 
-const minPasswordLen = 8
+const (
+	minPasswordLen = 8
+	registerLockID = int64(0x4F776E01)
+)
+
+var dummyLoginHash []byte
+
+func init() {
+	hash, err := bcrypt.GenerateFromPassword([]byte("timing-dummy-password"), bcrypt.DefaultCost)
+	if err != nil {
+		panic(err)
+	}
+	dummyLoginHash = hash
+}
 
 // User is an authenticated OwnWave account.
 type User struct {
@@ -45,7 +59,12 @@ type Invite struct {
 	CreatedAt time.Time  `json:"created_at"`
 }
 
-// Service handles session Bearer auth (opaque tokens stored hashed in Postgres).
+type querier interface {
+	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
+	Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error)
+}
+
+// Service handles session auth (opaque tokens stored hashed in Postgres).
 type Service struct {
 	pool *pgxpool.Pool
 }
@@ -75,57 +94,62 @@ func (s *Service) Register(ctx context.Context, username, password, inviteToken 
 		return "", User{}, err
 	}
 
-	count, err := s.CountUsers(ctx)
+	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return "", User{}, err
 	}
+	defer tx.Rollback(ctx)
 
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock($1)`, registerLockID); err != nil {
+		return "", User{}, err
+	}
+
+	var count int
+	if err := tx.QueryRow(ctx, `SELECT COUNT(*) FROM users`).Scan(&count); err != nil {
+		return "", User{}, err
+	}
+
+	var token string
+	var user User
 	switch {
 	case count == 0:
-		return s.registerUser(ctx, username, password, true, "")
+		token, user, err = s.registerUser(ctx, tx, username, password, true)
 	case inviteToken == "":
 		return "", User{}, ErrRegistrationClosed
 	default:
-		return s.registerWithInvite(ctx, username, password, inviteToken)
+		token, user, err = s.registerWithInvite(ctx, tx, username, password, inviteToken)
 	}
-}
-
-func (s *Service) RegisterFirstAdmin(ctx context.Context, username, password string) (string, User, error) {
-	count, err := s.CountUsers(ctx)
 	if err != nil {
 		return "", User{}, err
 	}
-	if count > 0 {
-		return "", User{}, ErrForbidden
+	if err := tx.Commit(ctx); err != nil {
+		return "", User{}, err
 	}
-	return s.registerUser(ctx, username, password, true, "")
+	return token, user, nil
 }
 
-func (s *Service) registerWithInvite(ctx context.Context, username, password, inviteToken string) (string, User, error) {
-	inviteID, presetUsername, err := s.consumeInvite(ctx, inviteToken)
+func (s *Service) RegisterFirstAdmin(ctx context.Context, username, password string) (string, User, error) {
+	return s.Register(ctx, username, password, "")
+}
+
+func (s *Service) registerWithInvite(ctx context.Context, q querier, username, password, inviteToken string) (string, User, error) {
+	_, presetUsername, err := s.consumeInvite(ctx, q, inviteToken)
 	if err != nil {
 		return "", User{}, err
 	}
 	if presetUsername != "" && presetUsername != username {
 		return "", User{}, ErrInvalidInvite
 	}
-	_ = inviteID
-	return s.registerUser(ctx, username, password, false, "")
+	return s.registerUser(ctx, q, username, password, false)
 }
 
-func (s *Service) registerUser(ctx context.Context, username, password string, isAdmin bool, passwordHash string) (string, User, error) {
-	var hash []byte
-	var err error
-	if passwordHash == "" {
-		hash, err = bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
-		if err != nil {
-			return "", User{}, err
-		}
-	} else {
-		hash = []byte(passwordHash)
+func (s *Service) registerUser(ctx context.Context, q querier, username, password string, isAdmin bool) (string, User, error) {
+	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	if err != nil {
+		return "", User{}, err
 	}
 
-	userID, err := s.createUser(ctx, username, string(hash), isAdmin)
+	userID, err := s.createUser(ctx, q, username, string(hash), isAdmin)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return "", User{}, ErrUsernameTaken
@@ -133,7 +157,7 @@ func (s *Service) registerUser(ctx context.Context, username, password string, i
 		return "", User{}, err
 	}
 
-	token, err := s.createSession(ctx, userID)
+	token, err := s.createSession(ctx, q, userID)
 	if err != nil {
 		return "", User{}, err
 	}
@@ -149,7 +173,7 @@ func (s *Service) CreateUser(ctx context.Context, adminID, username, password st
 	if err != nil {
 		return User{}, err
 	}
-	userID, err := s.createUser(ctx, username, string(hash), false)
+	userID, err := s.createUser(ctx, s.pool, username, string(hash), false)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return User{}, ErrUsernameTaken
@@ -181,10 +205,10 @@ func (s *Service) CreateInvite(ctx context.Context, adminID string, username *st
 	return token, invite, nil
 }
 
-func (s *Service) consumeInvite(ctx context.Context, rawToken string) (inviteID, presetUsername string, err error) {
+func (s *Service) consumeInvite(ctx context.Context, q querier, rawToken string) (inviteID, presetUsername string, err error) {
 	tokenHash := HashToken(rawToken)
 	var username *string
-	err = s.pool.QueryRow(ctx, `
+	err = q.QueryRow(ctx, `
 		UPDATE user_invites
 		SET used_at = NOW()
 		WHERE token_hash = $1
@@ -242,14 +266,18 @@ func (s *Service) DeleteUser(ctx context.Context, actorID, targetID string) erro
 
 func (s *Service) Login(ctx context.Context, username, password string) (string, User, error) {
 	user, err := s.getUserByUsername(ctx, username)
-	if err != nil {
-		return "", User{}, ErrInvalidCredentials
+	hash := dummyLoginHash
+	found := err == nil
+	if found {
+		hash = []byte(user.PasswordHash)
+	} else if !errors.Is(err, pgx.ErrNoRows) {
+		return "", User{}, err
 	}
-	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(password)); err != nil {
+	if err := bcrypt.CompareHashAndPassword(hash, []byte(password)); err != nil || !found {
 		return "", User{}, ErrInvalidCredentials
 	}
 
-	token, err := s.createSession(ctx, user.ID)
+	token, err := s.createSession(ctx, s.pool, user.ID)
 	if err != nil {
 		return "", User{}, err
 	}
@@ -266,11 +294,7 @@ func (s *Service) Logout(ctx context.Context, rawToken string) error {
 }
 
 func (s *Service) UserFromRequest(r *http.Request) (User, bool) {
-	authHeader := r.Header.Get("Authorization")
-	if !strings.HasPrefix(authHeader, "Bearer ") {
-		return User{}, false
-	}
-	token := strings.TrimPrefix(authHeader, "Bearer ")
+	token := TokenFromRequest(r)
 	if token == "" {
 		return User{}, false
 	}
@@ -281,21 +305,21 @@ func (s *Service) UserFromRequest(r *http.Request) (User, bool) {
 	return user, true
 }
 
-func (s *Service) createSession(ctx context.Context, userID string) (string, error) {
+func (s *Service) createSession(ctx context.Context, q querier, userID string) (string, error) {
 	token, err := GenerateToken()
 	if err != nil {
 		return "", err
 	}
-	expiresAt := time.Now().Add(7 * 24 * time.Hour)
-	if err := s.insertSession(ctx, userID, HashToken(token), expiresAt); err != nil {
+	expiresAt := time.Now().Add(sessionTTL)
+	if err := s.insertSession(ctx, q, userID, HashToken(token), expiresAt); err != nil {
 		return "", err
 	}
 	return token, nil
 }
 
-func (s *Service) createUser(ctx context.Context, username, passwordHash string, isAdmin bool) (string, error) {
+func (s *Service) createUser(ctx context.Context, q querier, username, passwordHash string, isAdmin bool) (string, error) {
 	var id string
-	err := s.pool.QueryRow(ctx, `
+	err := q.QueryRow(ctx, `
 		INSERT INTO users (username, password_hash, is_admin)
 		VALUES ($1, $2, $3)
 		ON CONFLICT (username) DO NOTHING
@@ -314,8 +338,8 @@ func (s *Service) getUserByUsername(ctx context.Context, username string) (User,
 	return u, err
 }
 
-func (s *Service) insertSession(ctx context.Context, userID, tokenHash string, expiresAt time.Time) error {
-	_, err := s.pool.Exec(ctx, `
+func (s *Service) insertSession(ctx context.Context, q querier, userID, tokenHash string, expiresAt time.Time) error {
+	_, err := q.Exec(ctx, `
 		INSERT INTO sessions (user_id, token_hash, expires_at)
 		VALUES ($1::uuid, $2, $3)
 	`, userID, tokenHash, expiresAt)
@@ -341,19 +365,25 @@ func (s *Service) deleteSession(ctx context.Context, tokenHash string) error {
 	return err
 }
 
-func (s *Service) ChangePassword(ctx context.Context, user User, currentPassword, newPassword string) error {
+func (s *Service) ChangePassword(ctx context.Context, user User, currentPassword, newPassword string) (string, error) {
 	if len(newPassword) < minPasswordLen {
-		return ErrWeakPassword
+		return "", ErrWeakPassword
 	}
 	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(currentPassword)); err != nil {
-		return ErrInvalidCredentials
+		return "", ErrInvalidCredentials
 	}
 	hash, err := bcrypt.GenerateFromPassword([]byte(newPassword), bcrypt.DefaultCost)
 	if err != nil {
-		return err
+		return "", err
 	}
 	_, err = s.pool.Exec(ctx, `
 		UPDATE users SET password_hash = $2 WHERE id = $1::uuid
 	`, user.ID, string(hash))
-	return err
+	if err != nil {
+		return "", err
+	}
+	if _, err := s.pool.Exec(ctx, `DELETE FROM sessions WHERE user_id = $1::uuid`, user.ID); err != nil {
+		return "", err
+	}
+	return s.createSession(ctx, s.pool, user.ID)
 }

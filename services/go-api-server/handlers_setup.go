@@ -46,6 +46,10 @@ func (h *Handler) SetupSummary(w http.ResponseWriter, r *http.Request) {
 	proxyAnalytics(w, r, resp, err)
 }
 func (h *Handler) SetupStations(w http.ResponseWriter, r *http.Request) {
-	resp, err := h.analytics.SetupStations(r.Body)
+	user, ok := h.currentUser(w, r)
+	if !ok {
+		return
+	}
+	resp, err := h.analyticsFor(user.ID).SetupStations(r.Body)
 	proxyAnalytics(w, r, resp, err)
 }

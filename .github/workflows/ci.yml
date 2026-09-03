@@ -55,6 +55,11 @@ jobs:
           npm run build
 
       - name: Build Docker images
+        env:
+          # Compose interpolates service.environment even for `build`. Go reads
+          # JWT_SECRET at process start, not image build.
+          JWT_SECRET: ci-compose-build-placeholder-not-used-at-runtime
+          DOWNLOAD_GENRE_MODELS: "false"
         run: docker compose build
 
   publish:

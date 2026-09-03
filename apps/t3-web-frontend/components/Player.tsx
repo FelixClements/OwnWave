@@ -209,8 +209,8 @@ export function Player({ queue: queueProp }: { queue: QueueTrack[] }) {
 
   return (
     <div className="w-full h-full relative flex items-center justify-between gap-2 md:gap-4 px-2 md:px-4">
-      <audio ref={audioARef} crossOrigin="anonymous" className="hidden" />
-      <audio ref={audioBRef} crossOrigin="anonymous" className="hidden" />
+      <audio ref={audioARef} crossOrigin="use-credentials" className="hidden" />
+      <audio ref={audioBRef} crossOrigin="use-credentials" className="hidden" />
 
       {nowPlaying ? (
         <div className="flex items-center gap-2 md:gap-4 w-5/12 md:w-5/12 min-w-0">

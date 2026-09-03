@@ -4,6 +4,7 @@ import "io"
 
 // Client proxies OwnWave Python analytics endpoints.
 type Client interface {
+	WithUser(userID string) Client
 	GetSimilarTracks(trackID, limit string) (*Response, error)
 	Scan(body []byte) (*Response, error)
 	GetJob(jobID string) (*Response, error)

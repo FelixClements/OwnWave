@@ -1,13 +1,15 @@
 from contextlib import contextmanager
+from pathlib import Path
 from typing import List, Optional
 from uuid import UUID
 
-from fastapi import BackgroundTasks, FastAPI, HTTPException
+from fastapi import BackgroundTasks, FastAPI, HTTPException, Request
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 import db
 from celery_app import celery_app
-from config import CELERY_BROKER_URL, MUSIC_DIR
+from config import ANALYTICS_API_SECRET, CELERY_BROKER_URL, MUSIC_DIR
 from library_scan import scan_library
 from library_scan.options import ScanJobContext, ScanOptions
 from similarity import get_similar_tracks
@@ -16,6 +18,35 @@ from station.seed import seed_from_request
 from station.service import recompile_station
 
 app = FastAPI(title="OwnWave Analytics")
+
+
+@app.middleware("http")
+async def require_internal_token(request: Request, call_next):
+    if request.url.path == "/health":
+        return await call_next(request)
+    if not ANALYTICS_API_SECRET or request.headers.get("x-internal-token") != ANALYTICS_API_SECRET:
+        return JSONResponse({"detail": "unauthorized"}, status_code=401)
+    return await call_next(request)
+
+
+def _user_id_from_request(request: Request) -> UUID:
+    raw = request.headers.get("x-ownwave-user-id")
+    if not raw:
+        raise HTTPException(status_code=400, detail="missing user id")
+    try:
+        return UUID(raw)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="invalid user id")
+
+
+def _resolved_scan_path(path: str) -> str:
+    music = Path(MUSIC_DIR).resolve()
+    user_path = Path(path)
+    relative_parts = user_path.parts[1:] if user_path.is_absolute() else user_path.parts
+    candidate = music.joinpath(*relative_parts).resolve()
+    if not candidate.is_relative_to(music):
+        raise HTTPException(status_code=400, detail="path outside music directory")
+    return str(candidate)
 
 
 @app.on_event("startup")
@@ -80,21 +111,22 @@ def _celery_available() -> bool:
 
 @app.post("/scan")
 async def scan(req: ScanRequest, background_tasks: BackgroundTasks):
+    scan_path = _resolved_scan_path(req.path)
     with _db_conn() as conn:
-        job_id = db.create_scan_job(conn, req.path)
+        job_id = db.create_scan_job(conn, scan_path)
         conn.commit()
 
     if _celery_available():
         try:
             from tasks import trigger_library_scan
 
-            trigger_library_scan.delay(str(job_id), req.path, req.force)
+            trigger_library_scan.delay(str(job_id), scan_path, req.force)
             return {"job_id": str(job_id), "status": "queued"}
         except Exception:
             # Redis may be configured but not reachable; fall through.
             pass
 
-    background_tasks.add_task(_run_scan, job_id, req.path, req.force)
+    background_tasks.add_task(_run_scan, job_id, scan_path, req.force)
     return {"job_id": str(job_id), "status": "pending"}
 
 
@@ -108,16 +140,20 @@ async def get_job(job_id: UUID):
 
 
 @app.post("/stations")
-async def create_station(req: StationRequest):
+async def create_station(request: Request, req: StationRequest):
+    user_id = _user_id_from_request(request)
     filters = seed_from_request(req)
 
     with _db_conn() as conn:
-        station_id = build_station(conn, req.name, seed_filter=filters or None, length=req.length)
+        station_id = build_station(
+            conn, req.name, user_id, seed_filter=filters or None, length=req.length
+        )
         return {"station_id": str(station_id)}
 
 
 @app.patch("/stations/{station_id}")
-async def update_station(station_id: UUID, req: StationRequest):
+async def update_station(request: Request, station_id: UUID, req: StationRequest):
+    user_id = _user_id_from_request(request)
     filters = seed_from_request(req)
     has_seed = bool(req.seed_type) or any(
         getattr(req, field) is not None
@@ -135,6 +171,7 @@ async def update_station(station_id: UUID, req: StationRequest):
             result = recompile_station(
                 conn,
                 station_id,
+                user_id,
                 name=req.name,
                 seed=filters if has_seed else None,
                 length=req.length,
@@ -223,13 +260,14 @@ async def rebuild_genres(background_tasks: BackgroundTasks):
 
 
 @app.post("/rebuild-genre-stations")
-async def rebuild_genre_stations(background_tasks: BackgroundTasks):
+async def rebuild_genre_stations(request: Request, background_tasks: BackgroundTasks):
+    user_id = _user_id_from_request(request)
     if _celery_available():
         from tasks import rebuild_genre_stations
 
-        task = rebuild_genre_stations.delay()
+        task = rebuild_genre_stations.delay(str(user_id))
         return {"task_id": task.id, "status": "queued"}
-    background_tasks.add_task(_run_rebuild_genre_stations)
+    background_tasks.add_task(_run_rebuild_genre_stations, user_id)
     return {"status": "pending"}
 
 
@@ -245,11 +283,11 @@ def _run_rebuild_genres():
     rebuild_track_genres(MUSIC_DIR)
 
 
-def _run_rebuild_genre_stations():
+def _run_rebuild_genre_stations(user_id: UUID):
     from station_builder import rebuild_genre_stations
 
     with _db_conn() as conn:
-        rebuild_genre_stations(conn)
+        rebuild_genre_stations(conn, user_id)
 
 
 def _run_scan(job_id: UUID, path: str, force: bool):
@@ -287,7 +325,8 @@ async def setup_summary():
 
 
 @app.post("/setup/stations")
-async def setup_stations(req: SetupStationsRequest):
+async def setup_stations(request: Request, req: SetupStationsRequest):
+    user_id = _user_id_from_request(request)
     with _db_conn() as conn:
-        result = setup_main_genre_stations(conn, req.selected_main_genres)
+        result = setup_main_genre_stations(conn, user_id, req.selected_main_genres)
         return result

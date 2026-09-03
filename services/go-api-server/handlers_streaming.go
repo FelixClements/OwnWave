@@ -2,12 +2,14 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"os/exec"
 	"strings"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5"
 )
 
 func (h *Handler) StreamURL(w http.ResponseWriter, r *http.Request) {
@@ -18,12 +20,7 @@ func (h *Handler) StreamURL(w http.ResponseWriter, r *http.Request) {
 	}
 	bitrate := r.URL.Query().Get("bitrate")
 	normalize := r.URL.Query().Get("normalize") != "false"
-	token, err := h.streamTokens.SignTrack(trackID, format)
-	if err != nil {
-		writeInternalError(w, r, "sign stream token", err)
-		return
-	}
-	url := fmt.Sprintf("/stream/%s?format=%s&token=%s", trackID, format, token)
+	url := fmt.Sprintf("/stream/%s?format=%s", trackID, format)
 	if bitrate != "" {
 		url += "&bitrate=" + bitrate
 	}
@@ -33,21 +30,12 @@ func (h *Handler) StreamURL(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"url": url})
 }
+
 func (h *Handler) StreamTrack(w http.ResponseWriter, r *http.Request) {
 	trackID := chi.URLParam(r, "id")
-	token := r.URL.Query().Get("token")
 	format := r.URL.Query().Get("format")
 	if format == "" {
 		format = "flac"
-	}
-	if token == "" {
-		http.Error(w, "missing token", 401)
-		return
-	}
-	claimTrackID, _, err := h.streamTokens.ValidateTrack(token)
-	if err != nil || claimTrackID != trackID {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
-		return
 	}
 
 	track, err := h.db.GetTrackByID(r.Context(), trackID)
@@ -79,8 +67,21 @@ func (h *Handler) StreamTrack(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "unsupported format", 400)
 	}
 }
+
 func (h *Handler) StationCrossfadeURL(w http.ResponseWriter, r *http.Request) {
+	user, ok := h.currentUser(w, r)
+	if !ok {
+		return
+	}
 	stationID := chi.URLParam(r, "id")
+	if _, err := h.db.GetStationByID(r.Context(), user.ID, stationID); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			http.Error(w, "station not found", http.StatusNotFound)
+			return
+		}
+		writeInternalError(w, r, "get station", err)
+		return
+	}
 	format := r.URL.Query().Get("format")
 	if format == "" {
 		format = "flac"
@@ -88,12 +89,7 @@ func (h *Handler) StationCrossfadeURL(w http.ResponseWriter, r *http.Request) {
 	bitrate := r.URL.Query().Get("bitrate")
 	gapless := r.URL.Query().Get("gapless") == "true"
 	normalize := r.URL.Query().Get("normalize") != "false"
-	token, err := h.streamTokens.SignStation(stationID, format)
-	if err != nil {
-		writeInternalError(w, r, "sign stream token", err)
-		return
-	}
-	url := fmt.Sprintf("/stations/%s/crossfade?format=%s&token=%s", stationID, format, token)
+	url := fmt.Sprintf("/stations/%s/crossfade?format=%s", stationID, format)
 	if bitrate != "" {
 		url += "&bitrate=" + bitrate
 	}
@@ -106,24 +102,27 @@ func (h *Handler) StationCrossfadeURL(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"url": url})
 }
+
 func (h *Handler) StationCrossfadeStream(w http.ResponseWriter, r *http.Request) {
+	user, ok := h.currentUser(w, r)
+	if !ok {
+		return
+	}
 	stationID := chi.URLParam(r, "id")
-	token := r.URL.Query().Get("token")
+	if _, err := h.db.GetStationByID(r.Context(), user.ID, stationID); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			http.Error(w, "station not found", http.StatusNotFound)
+			return
+		}
+		writeInternalError(w, r, "get station", err)
+		return
+	}
 	format := r.URL.Query().Get("format")
 	if format == "" {
 		format = "flac"
 	}
-	if token == "" {
-		http.Error(w, "missing token", 401)
-		return
-	}
-	claimStationID, _, err := h.streamTokens.ValidateStation(token)
-	if err != nil || claimStationID != stationID {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
-		return
-	}
 
-	queue, err := h.playback.BuildQueue(r.Context(), stationID, h.recentHours)
+	queue, err := h.playback.BuildQueue(r.Context(), user.ID, stationID, h.recentHours)
 	if err != nil {
 		writeInternalError(w, r, "build crossfade queue", err)
 		return

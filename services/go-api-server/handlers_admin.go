@@ -57,7 +57,11 @@ func (h *Handler) AdminHealth(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(status)
 }
 func (h *Handler) AdminStations(w http.ResponseWriter, r *http.Request) {
-	stations, err := h.db.ListStationsWithQueueStatus(r.Context())
+	user, ok := h.currentUser(w, r)
+	if !ok {
+		return
+	}
+	stations, err := h.db.ListStationsWithQueueStatus(r.Context(), user.ID)
 	if err != nil {
 		writeInternalError(w, r, "admin stations", err)
 		return
@@ -87,6 +91,10 @@ func (h *Handler) AdminRebuildGenres(w http.ResponseWriter, r *http.Request) {
 	proxyAnalytics(w, r, resp, err)
 }
 func (h *Handler) AdminRebuildGenreStations(w http.ResponseWriter, r *http.Request) {
-	resp, err := h.analytics.RebuildGenreStations()
+	user, ok := h.currentUser(w, r)
+	if !ok {
+		return
+	}
+	resp, err := h.analyticsFor(user.ID).RebuildGenreStations()
 	proxyAnalytics(w, r, resp, err)
 }

@@ -8,22 +8,11 @@ import (
 )
 
 func (h *Handler) setupOpen(ctx context.Context) bool {
-	hasUsers, err := h.db.CountUsers(ctx)
+	count, err := h.db.CountUsers(ctx)
 	if err != nil {
 		return false
 	}
-	if hasUsers == 0 {
-		return true
-	}
-	state, err := h.db.GetAppState(ctx, "setup_completed")
-	if err != nil {
-		return true
-	}
-	if state == nil {
-		return true
-	}
-	completed, _ := state["completed"].(bool)
-	return !completed
+	return count == 0
 }
 
 func (h *Handler) requireSetupAccess(next http.Handler) http.Handler {

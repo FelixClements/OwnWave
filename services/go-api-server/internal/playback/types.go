@@ -5,7 +5,7 @@ type Track struct {
 	Title           string   `json:"title"`
 	Artist          *string  `json:"artist,omitempty"`
 	Album           *string  `json:"album,omitempty"`
-	Path            string   `json:"path"`
+	Path            string   `json:"-"`
 	TrackNumber     *int     `json:"track_number,omitempty"`
 	DurationSeconds *float64 `json:"duration_seconds,omitempty"`
 	SampleRate      *int     `json:"sample_rate,omitempty"`

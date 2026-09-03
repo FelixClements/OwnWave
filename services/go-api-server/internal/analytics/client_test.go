@@ -58,12 +58,42 @@ func TestHTTPClientProxiesPath(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewHTTPClient(server.URL)
+	client := NewHTTPClientWithSecret(server.URL, "test-secret")
 	resp, err := client.ListGenres()
 	if err != nil {
 		t.Fatalf("ListGenres() error = %v", err)
 	}
 	if resp.StatusCode != http.StatusOK || string(resp.Body) != "[]" {
 		t.Fatalf("resp = %#v", resp)
+	}
+}
+
+func TestHTTPClientWithUserSendsHeader(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("X-OwnWave-User-Id") != "user-1" {
+			t.Fatalf("user id = %q", r.Header.Get("X-OwnWave-User-Id"))
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	client := NewHTTPClientWithSecret(server.URL, "s3cret").WithUser("user-1")
+	if _, err := client.CreateStation([]byte(`{}`)); err != nil {
+		t.Fatalf("CreateStation() error = %v", err)
+	}
+}
+
+func TestHTTPClientSendsInternalToken(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("X-Internal-Token") != "s3cret" {
+			t.Fatalf("missing internal token: %q", r.Header.Get("X-Internal-Token"))
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	client := NewHTTPClientWithSecret(server.URL, "s3cret")
+	if _, err := client.Health(); err != nil {
+		t.Fatalf("Health() error = %v", err)
 	}
 }

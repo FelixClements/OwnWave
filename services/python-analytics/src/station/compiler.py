@@ -17,9 +17,10 @@ def compile_station_queue(
     conn: psycopg.Connection,
     seed: Optional[dict],
     length: int,
+    user_id: UUID,
 ) -> List[UUID]:
     """Build an ordered track list for a station from a seed filter."""
-    tracks = get_all_tracks_with_features(conn)
+    tracks = get_all_tracks_with_features(conn, user_id)
     if not tracks:
         raise ValueError("No analyzed tracks found")
 

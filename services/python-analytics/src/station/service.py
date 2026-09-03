@@ -12,13 +12,14 @@ from station.seed import parse_seed
 def recompile_station(
     conn: psycopg.Connection,
     station_id: UUID,
+    user_id: UUID,
     *,
     name: Optional[str] = None,
     seed: Optional[dict] = None,
     length: int = 50,
 ) -> dict:
     """Update station metadata and rebuild its track queue from the seed."""
-    existing = get_station_by_id(conn, station_id)
+    existing = get_station_by_id(conn, station_id, user_id)
     if not existing:
         raise ValueError("station not found")
 
@@ -28,7 +29,7 @@ def recompile_station(
     else:
         effective_seed = parse_seed(existing.get("seed_features"))
 
-    track_ids = compile_station_queue(conn, effective_seed, length)
+    track_ids = compile_station_queue(conn, effective_seed, length, user_id)
 
     with conn.cursor() as cur:
         cur.execute(
@@ -36,9 +37,9 @@ def recompile_station(
             UPDATE stations
             SET name = %s,
                 seed_features = %s::jsonb
-            WHERE id = %s
+            WHERE id = %s AND user_id = %s
             """,
-            (effective_name, Jsonb(effective_seed) if effective_seed else None, station_id),
+            (effective_name, Jsonb(effective_seed) if effective_seed else None, station_id, user_id),
         )
         cur.execute("DELETE FROM station_tracks WHERE station_id = %s", (station_id,))
 

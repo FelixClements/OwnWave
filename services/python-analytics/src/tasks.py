@@ -10,7 +10,7 @@ from celery_app import celery_app
 from config import MUSIC_DIR
 from folder_importer import import_folder
 from models import ScanResult
-from scanner import SUPPORTED_EXTS
+from audio_metadata import is_supported_audio_file
 
 
 @celery_app.task(bind=True, max_retries=3, default_retry_delay=5)
@@ -74,7 +74,7 @@ def trigger_library_scan(master_job_id: Optional[str], path: str, force: bool = 
         # duplicate work when a parent and its children are both scanned.
         music_dirs: List[Path] = []
         for p in root.rglob("*"):
-            if p.is_file() and p.suffix.lower() in SUPPORTED_EXTS:
+            if is_supported_audio_file(p):
                 music_dirs.append(p.parent)
 
         by_depth = sorted(set(music_dirs), key=lambda d: len(d.parts), reverse=True)
@@ -170,7 +170,7 @@ def rebuild_clusters(n_clusters: Optional[int] = None) -> dict:
 @celery_app.task
 def rebuild_track_genres(path: str, force: bool = False) -> dict:
     """Batch backfill genre predictions for a path."""
-    from audio_metadata import SUPPORTED_EXTS
+    from audio_metadata import is_supported_audio_file
     from config import ENABLE_GENRE_ANALYSIS
     from genre_sources import get_genre_sources
 
@@ -185,7 +185,7 @@ def rebuild_track_genres(path: str, force: bool = False) -> dict:
     if not root.exists():
         raise FileNotFoundError(f"Music path does not exist: {root}")
 
-    files = sorted(p for p in root.rglob("*") if p.is_file() and p.suffix.lower() in SUPPORTED_EXTS)
+    files = sorted(p for p in root.rglob("*") if is_supported_audio_file(p))
     updated = 0
     skipped = 0
 
@@ -217,18 +217,18 @@ def rebuild_track_genres(path: str, force: bool = False) -> dict:
 
 
 @celery_app.task
-def rebuild_genre_stations() -> dict:
-    """Refresh auto-generated genre stations."""
-    from station_builder import rebuild_genre_stations
+def rebuild_genre_stations(user_id: Optional[str] = None) -> dict:
+    """Refresh auto-generated genre stations for one user, or all users after a scan."""
+    from station_builder import rebuild_genre_stations_for_users
 
+    uid = UUID(user_id) if user_id else None
     with db.get_conn() as conn:
-        result = rebuild_genre_stations(conn)
-    return result
+        return rebuild_genre_stations_for_users(conn, uid)
 
 
 def _prune_deleted_tracks(root_path: str) -> int:
     """Remove database tracks whose files no longer exist under root_path."""
-    from scanner import SUPPORTED_EXTS
+    from audio_metadata import is_supported_audio_file
 
     root = Path(root_path).expanduser().resolve()
     if not root.exists() or not root.is_dir():
@@ -236,7 +236,7 @@ def _prune_deleted_tracks(root_path: str) -> int:
 
     disk_paths = {
         str(p) for p in root.rglob("*")
-        if p.is_file() and p.suffix.lower() in SUPPORTED_EXTS
+        if is_supported_audio_file(p)
     }
     if not disk_paths:
         return 0

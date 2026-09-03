@@ -48,15 +48,18 @@ Caddy is configured in `Caddyfile`:
 
 The `web` service uses `NEXT_PUBLIC_GO_API_URL=https://<OWNWAVE_DOMAIN>/api` so the browser calls the same host, and `GO_API_URL=http://go:8080` for server-side requests.
 
-Prometheus metrics are exposed internally on the Go container at port `9090` (`/metrics`) and to authenticated admins at `/api/admin/metrics`. They are not mounted on the public Caddy routes.
+Prometheus metrics are available to authenticated admins at `/api/admin/metrics`. They are not mounted on the public Caddy routes.
 
 ## 4. Security model
 
-- All library, station, and streaming URL endpoints require a logged-in session (Bearer token).
-- Stream playback uses short-lived JWT capability tokens minted by authenticated users.
+- The browser talks to a single origin. Caddy proxies `/api/*` to Go (except `/api/trpc`). Go sets an HttpOnly `ownwave_session` cookie; JSON APIs never return the raw session token.
+- Library, station, history, feedback, and stream endpoints require that cookie (or `Authorization: Bearer` for scripts).
+- Stream URLs are cookie-gated (`/api/stream/{id}`). Unauthenticated requests return 401.
+- The music catalog is shared. Stations, listening history, and likes/bans/skips are scoped to the signed-in user.
+- Python analytics is an internal service. Go sends `X-Internal-Token` (`ANALYTICS_API_SECRET`) and `X-OwnWave-User-Id` on station writes.
 - Registration is invite-only after the first admin account is created during setup.
 - Admin maintenance endpoints require `is_admin`.
-- Caddy adds standard security headers (HSTS, CSP, frame denial, etc.).
+- Caddy adds standard security headers (HSTS, CSP, frame denial, etc.). CSP still includes `'unsafe-inline'` for Next.js.
 
 ### Post-deploy verification checklist
 
@@ -65,6 +68,9 @@ DOMAIN=https://ownwave.example.com
 
 # Should return 401
 curl -s -o /dev/null -w "%{http_code}" "$DOMAIN/api/tracks"
+
+# Stream without a session cookie should return 401
+curl -s -o /dev/null -w "%{http_code}" "$DOMAIN/api/stream/00000000-0000-0000-0000-000000000001"
 
 # Should return 401 or 403
 curl -s -o /dev/null -w "%{http_code}" -X POST "$DOMAIN/api/admin/scan"
@@ -78,7 +84,9 @@ curl -s -o /dev/null -w "%{http_code}" -X POST "$DOMAIN/api/register" \
 curl -s -o /dev/null -w "%{http_code}" "$DOMAIN/api/metrics"
 ```
 
-Expected status codes: `401`, `401` or `403`, `403`, and `404` respectively.
+Expected status codes: `401`, `401`, `401` or `403`, `403`, and `404` respectively.
+
+Set `OWNWAVE_COOKIE_SECURE=true` in production (the prod compose overlay does this). Generate a unique `ANALYTICS_API_SECRET` as well as `JWT_SECRET` and `POSTGRES_PASSWORD`.
 
 Invite flow:
 
