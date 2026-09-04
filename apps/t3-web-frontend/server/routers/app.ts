@@ -37,22 +37,6 @@ export const appRouter = t.router({
     .input(z.object({ jobId: z.string() }))
     .query(async ({ ctx, input }) => ctx.api.getScanStatus(input.jobId)),
 
-  register: t.procedure
-    .input(
-      z.object({
-        username: z.string(),
-        password: z.string(),
-        inviteToken: z.string().optional(),
-      })
-    )
-    .mutation(async ({ ctx, input }) =>
-      ctx.api.register(input.username, input.password, input.inviteToken)
-    ),
-
-  login: t.procedure
-    .input(z.object({ username: z.string(), password: z.string() }))
-    .mutation(async ({ ctx, input }) => ctx.api.login(input.username, input.password)),
-
   me: t.procedure.query(async ({ ctx }) => ctx.api.me()),
 
   updateProfile: t.procedure

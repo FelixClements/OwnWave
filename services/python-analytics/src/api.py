@@ -1,3 +1,4 @@
+import secrets
 from contextlib import contextmanager
 from pathlib import Path
 from typing import List, Optional
@@ -24,7 +25,8 @@ app = FastAPI(title="OwnWave Analytics")
 async def require_internal_token(request: Request, call_next):
     if request.url.path == "/health":
         return await call_next(request)
-    if not ANALYTICS_API_SECRET or request.headers.get("x-internal-token") != ANALYTICS_API_SECRET:
+    token = request.headers.get("x-internal-token", "")
+    if not ANALYTICS_API_SECRET or not secrets.compare_digest(token, ANALYTICS_API_SECRET):
         return JSONResponse({"detail": "unauthorized"}, status_code=401)
     return await call_next(request)
 
@@ -41,11 +43,11 @@ def _user_id_from_request(request: Request) -> UUID:
 
 def _resolved_scan_path(path: str) -> str:
     music = Path(MUSIC_DIR).resolve()
-    user_path = Path(path)
-    relative_parts = user_path.parts[1:] if user_path.is_absolute() else user_path.parts
-    candidate = music.joinpath(*relative_parts).resolve()
+    candidate = Path(path).resolve()
     if not candidate.is_relative_to(music):
-        raise HTTPException(status_code=400, detail="path outside music directory")
+        candidate = music.joinpath(path.lstrip("/")).resolve()
+    if not candidate.is_relative_to(music) or not candidate.exists():
+        raise HTTPException(status_code=400, detail="path outside music directory or does not exist")
     return str(candidate)
 
 

@@ -1,10 +1,8 @@
 package main
 
 import (
-	"bytes"
 	"encoding/json"
 	"net/http"
-	"os/exec"
 	"strconv"
 
 	"github.com/go-chi/chi/v5"
@@ -174,15 +172,13 @@ func (h *Handler) GetTrackCover(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	cmd := exec.CommandContext(r.Context(), h.ffmpegPath, "-i", fullPath, "-an", "-vcodec", "mjpeg", "-f", "image2", "-", "-v", "0")
-	var out bytes.Buffer
-	cmd.Stdout = &out
-	if err := cmd.Run(); err != nil || out.Len() == 0 {
+	coverBytes, err := h.coverCache.GetOrExtract(r.Context(), h.ffmpegPath, fullPath)
+	if err != nil || len(coverBytes) == 0 {
 		http.Error(w, "no cover art", 404)
 		return
 	}
 
 	w.Header().Set("Content-Type", "image/jpeg")
 	w.Header().Set("Cache-Control", "private, max-age=86400")
-	w.Write(out.Bytes())
+	w.Write(coverBytes)
 }

@@ -387,3 +387,16 @@ func (s *Service) ChangePassword(ctx context.Context, user User, currentPassword
 	}
 	return s.createSession(ctx, s.pool, user.ID)
 }
+
+// PurgeExpired removes expired sessions and invites from PostgreSQL.
+func (s *Service) PurgeExpired(ctx context.Context) (int64, error) {
+	tag1, err := s.pool.Exec(ctx, `DELETE FROM sessions WHERE expires_at < NOW()`)
+	if err != nil {
+		return 0, err
+	}
+	tag2, err := s.pool.Exec(ctx, `DELETE FROM user_invites WHERE expires_at < NOW()`)
+	if err != nil {
+		return tag1.RowsAffected(), err
+	}
+	return tag1.RowsAffected() + tag2.RowsAffected(), nil
+}

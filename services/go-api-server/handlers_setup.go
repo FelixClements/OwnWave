@@ -12,11 +12,6 @@ func (h *Handler) SetupStatus(w http.ResponseWriter, r *http.Request) {
 		writeInternalError(w, r, "setup status users", err)
 		return
 	}
-	trackCount, err := h.db.CountTracks(ctx)
-	if err != nil {
-		writeInternalError(w, r, "setup status tracks", err)
-		return
-	}
 	state, _ := h.db.GetAppState(ctx, "setup_completed")
 	completed := false
 	if state != nil {
@@ -25,12 +20,21 @@ func (h *Handler) SetupStatus(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	resp := map[string]interface{}{
 		"setup_completed": completed,
 		"has_users":       hasUsers > 0,
-		"track_count":     trackCount,
-	})
+	}
+
+	// Only disclose track count during initial setup before completion
+	if !completed {
+		trackCount, err := h.db.CountTracks(ctx)
+		if err == nil {
+			resp["track_count"] = trackCount
+		}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(resp)
 }
 func (h *Handler) SetupComplete(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()

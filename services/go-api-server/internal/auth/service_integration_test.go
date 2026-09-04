@@ -117,6 +117,38 @@ func TestChangePasswordRevokesOtherSessions(t *testing.T) {
 	require.True(t, ok)
 }
 
+func TestPurgeExpired(t *testing.T) {
+	pool := setupAuthDB(t)
+	svc := auth.NewService(pool)
+	ctx := context.Background()
+
+	_, admin, err := svc.Register(ctx, "alice", "password123", "")
+	require.NoError(t, err)
+
+	// Insert expired session
+	_, err = pool.Exec(ctx, `
+		INSERT INTO sessions (user_id, token_hash, expires_at)
+		VALUES ($1::uuid, 'expired-token-hash', NOW() - INTERVAL '1 day')
+	`, admin.ID)
+	require.NoError(t, err)
+
+	// Insert expired invite
+	_, err = pool.Exec(ctx, `
+		INSERT INTO user_invites (token_hash, created_by, expires_at)
+		VALUES ('expired-invite-hash', $1::uuid, NOW() - INTERVAL '1 day')
+	`, admin.ID)
+	require.NoError(t, err)
+
+	purged, err := svc.PurgeExpired(ctx)
+	require.NoError(t, err)
+	require.Equal(t, int64(2), purged)
+
+	// Running again should purge 0
+	purgedAgain, err := svc.PurgeExpired(ctx)
+	require.NoError(t, err)
+	require.Equal(t, int64(0), purgedAgain)
+}
+
 func requestWithBearer(token string) *http.Request {
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	req.Header.Set("Authorization", "Bearer "+token)

@@ -18,13 +18,6 @@ import (
 	"github.com/rs/cors"
 )
 
-var blockedSecrets = map[string]struct{}{
-	"change-me-in-production":                         {},
-	"dev-secret-change-in-production":                 {},
-	"local-dev-only-secret-not-for-production-use":    {},
-	"replace-me-generate-with-openssl-rand-base64-32": {},
-}
-
 func waitForDB(ctx context.Context, dsn string) (*pgxpool.Pool, error) {
 	var lastErr error
 	for i := 0; i < 30; i++ {
@@ -42,20 +35,6 @@ func waitForDB(ctx context.Context, dsn string) (*pgxpool.Pool, error) {
 		time.Sleep(2 * time.Second)
 	}
 	return nil, lastErr
-}
-
-func loadJWTSecret() []byte {
-	secret := os.Getenv("JWT_SECRET")
-	if secret == "" {
-		log.Fatal("JWT_SECRET not set")
-	}
-	if _, blocked := blockedSecrets[secret]; blocked {
-		log.Fatal("JWT_SECRET must be changed from the default value")
-	}
-	if len(secret) < 32 {
-		log.Fatal("JWT_SECRET must be at least 32 characters")
-	}
-	return []byte(secret)
 }
 
 func loadAllowedOrigins() []string {
@@ -101,8 +80,6 @@ func main() {
 		log.Fatalf("migrations: %v", err)
 	}
 
-	loadJWTSecret()
-
 	musicDir := os.Getenv("MUSIC_DIR")
 	if musicDir == "" {
 		musicDir = "/music"
@@ -126,6 +103,19 @@ func main() {
 	}
 
 	h := NewHandler(db, musicDir, ffmpegPath, pythonURL, recentHours)
+
+	go func() {
+		ticker := time.NewTicker(1 * time.Hour)
+		defer ticker.Stop()
+		for range ticker.C {
+			purged, err := h.auth.PurgeExpired(context.Background())
+			if err != nil {
+				slog.Error("failed to purge expired auth records", "error", err)
+			} else if purged > 0 {
+				slog.Info("purged expired auth records", "count", purged)
+			}
+		}
+	}()
 
 	r := chi.NewRouter()
 	r.Use(middleware.RealIP)
@@ -172,6 +162,7 @@ func main() {
 			r.Use(httprate.LimitByIP(60, time.Minute))
 			r.Get("/stream/{id}", h.StreamTrack)
 			r.Get("/stations/{id}/crossfade", h.StationCrossfadeStream)
+			r.Get("/tracks/{id}/cover", h.GetTrackCover)
 		})
 
 		r.Get("/tracks", h.ListTracks)
@@ -185,7 +176,6 @@ func main() {
 		r.Delete("/tracks/{id}/feedback", h.DeleteFeedback)
 		r.Get("/history", h.ListHistory)
 		r.Get("/feedback", h.ListFeedback)
-		r.Get("/tracks/{id}/cover", h.GetTrackCover)
 		r.Get("/tracks/{id}/stream-url", h.StreamURL)
 		r.Get("/genres", h.ListGenres)
 		r.Get("/tracks/{id}/genres", h.GetTrackGenres)

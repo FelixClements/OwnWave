@@ -17,6 +17,7 @@ type Handler struct {
 	auth         *auth.Service
 	playback     *playback.Service
 	stream       *streaming.Server
+	coverCache   *streaming.CoverCache
 	analytics    analytics.Client
 	musicDir     string
 	ffmpegPath   string
@@ -33,6 +34,7 @@ func NewHandler(pool *pgxpool.Pool, musicDir, ffmpegPath, pythonURL string, rece
 		auth:         auth.NewService(pool),
 		playback:     playback.NewService(pool),
 		stream:       streaming.New(streaming.Config{MusicDir: musicDir, FFmpegPath: ffmpegPath}),
+		coverCache:   streaming.NewCoverCache(500, 4),
 		analytics:    analytics.NewHTTPClient(pythonURL),
 		musicDir:     musicDir,
 		ffmpegPath:   ffmpegPath,
