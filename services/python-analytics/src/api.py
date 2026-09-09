@@ -1,7 +1,7 @@
+import os
 import secrets
 from contextlib import contextmanager
-from pathlib import Path
-from typing import List, Optional
+from typing import List, NoReturn, Optional
 from uuid import UUID
 
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Request
@@ -41,14 +41,50 @@ def _user_id_from_request(request: Request) -> UUID:
         raise HTTPException(status_code=400, detail="invalid user id")
 
 
+def _raise_invalid_scan_path() -> NoReturn:
+    raise HTTPException(status_code=400, detail="path outside music directory or does not exist")
+
+
 def _resolved_scan_path(path: str) -> str:
-    music = Path(MUSIC_DIR).resolve()
-    candidate = Path(path).resolve()
-    if not candidate.is_relative_to(music):
-        candidate = music.joinpath(path.lstrip("/")).resolve()
-    if not candidate.is_relative_to(music) or not candidate.exists():
-        raise HTTPException(status_code=400, detail="path outside music directory or does not exist")
-    return str(candidate)
+    if "\x00" in path:
+        _raise_invalid_scan_path()
+
+    # Compare absolute requests against both the configured MUSIC_DIR string and
+    # its realpath so symlink prefixes (e.g. /var vs /private/var) still match
+    # without resolving the user-supplied path on disk first.
+    configured = os.path.normpath(MUSIC_DIR)
+    base = os.path.realpath(MUSIC_DIR)
+
+    if os.path.isabs(path):
+        normalized = os.path.normpath(path)
+        if normalized == configured or normalized == base:
+            rel = ""
+        elif normalized.startswith(configured + os.sep):
+            rel = normalized[len(configured) + len(os.sep) :]
+        elif normalized.startswith(base + os.sep):
+            rel = normalized[len(base) + len(os.sep) :]
+        else:
+            _raise_invalid_scan_path()
+    else:
+        rel = path
+
+    parts = [p for p in rel.replace("\\", "/").split("/") if p and p != "."]
+    if any(p == ".." for p in parts):
+        _raise_invalid_scan_path()
+
+    fullpath = os.path.normpath(os.path.join(base, *parts) if parts else base)
+    # Containment check before any further filesystem use of the user-derived path.
+    if os.path.commonpath([base, fullpath]) != base:
+        _raise_invalid_scan_path()
+    if not (fullpath == base or fullpath.startswith(base + os.sep)):
+        _raise_invalid_scan_path()
+
+    real = os.path.realpath(fullpath)
+    if os.path.commonpath([base, real]) != base:
+        _raise_invalid_scan_path()
+    if not os.path.exists(real):
+        _raise_invalid_scan_path()
+    return real
 
 
 @app.on_event("startup")
