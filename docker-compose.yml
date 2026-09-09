@@ -7,7 +7,6 @@ services:
       POSTGRES_DB: ${POSTGRES_DB:-ownwave}
     volumes:
       - db_data:/var/lib/postgresql/data
-      - ./database/migrations:/docker-entrypoint-initdb.d:ro
     ports:
       - "127.0.0.1:5432:5432"
     healthcheck:
@@ -126,7 +125,6 @@ services:
     environment:
       DATABASE_URL: postgres://${POSTGRES_USER:-ownwave}:${POSTGRES_PASSWORD:-ownwave}@db:5432/${POSTGRES_DB:-ownwave}
       MUSIC_DIR: /music
-      JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET in .env}
       ANALYTICS_API_SECRET: ${ANALYTICS_API_SECRET:-local-analytics-secret-change-me}
       ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost:3000,http://127.0.0.1:3000}
       PUBLIC_APP_URL: ${PUBLIC_APP_URL:-http://localhost:3000}

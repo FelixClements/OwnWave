@@ -162,6 +162,9 @@ func main() {
 			r.Use(httprate.LimitByIP(60, time.Minute))
 			r.Get("/stream/{id}", h.StreamTrack)
 			r.Get("/stations/{id}/crossfade", h.StationCrossfadeStream)
+		})
+		r.Group(func(r chi.Router) {
+			r.Use(httprate.LimitByIP(300, time.Minute))
 			r.Get("/tracks/{id}/cover", h.GetTrackCover)
 		})
 

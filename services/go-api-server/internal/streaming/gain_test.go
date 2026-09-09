@@ -1,6 +1,9 @@
 package streaming
 
-import "testing"
+import (
+	"math"
+	"testing"
+)
 
 func TestNormalizeBitrate(t *testing.T) {
 	cases := []struct {
@@ -38,6 +41,9 @@ func TestVolumeGainDb(t *testing.T) {
 		{ptrFloat64(-50.0), true, maxGainDb},
 		{ptrFloat64(10.0), true, minGainDb},
 		{ptrFloat64(-8.0), false, 0},
+		{ptrFloat64(math.NaN()), true, 0},
+		{ptrFloat64(math.Inf(1)), true, 0},
+		{ptrFloat64(math.Inf(-1)), true, 0},
 	}
 	for _, c := range cases {
 		got := VolumeGainDb(c.loudness, c.normalize)

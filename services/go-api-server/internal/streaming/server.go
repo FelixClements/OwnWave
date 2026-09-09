@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/exec"
@@ -18,19 +19,26 @@ var ErrPathOutsideMusicDir = errors.New("path outside music directory")
 const maxCrossfadeTracks = 20
 
 type Config struct {
-	MusicDir   string
-	FFmpegPath string
+	MusicDir                string
+	FFmpegPath              string
+	MaxConcurrentTranscodes int
 }
 
 type Server struct {
-	musicDir   string
-	ffmpegPath string
+	musicDir     string
+	ffmpegPath   string
+	transcodeSem chan struct{}
 }
 
 func New(cfg Config) *Server {
+	maxTranscodes := cfg.MaxConcurrentTranscodes
+	if maxTranscodes <= 0 {
+		maxTranscodes = 8
+	}
 	return &Server{
-		musicDir:   cfg.MusicDir,
-		ffmpegPath: cfg.FFmpegPath,
+		musicDir:     cfg.MusicDir,
+		ffmpegPath:   cfg.FFmpegPath,
+		transcodeSem: make(chan struct{}, maxTranscodes),
 	}
 }
 
@@ -81,7 +89,8 @@ func (s *Server) ServeFLAC(w http.ResponseWriter, r *http.Request, path string) 
 
 	stat, err := f.Stat()
 	if err != nil {
-		http.Error(w, err.Error(), 500)
+		slog.Error("serve flac stat", "error", err, "path", path)
+		http.Error(w, "internal streaming error", 500)
 		return
 	}
 
@@ -121,6 +130,14 @@ func (s *Server) ServeTranscoded(w http.ResponseWriter, r *http.Request, path st
 		return
 	}
 
+	select {
+	case s.transcodeSem <- struct{}{}:
+		defer func() { <-s.transcodeSem }()
+	default:
+		http.Error(w, "transcoding server busy", http.StatusServiceUnavailable)
+		return
+	}
+
 	bitrate := r.URL.Query().Get("bitrate")
 	if bitrate == "" {
 		bitrate = defaultRate
@@ -153,11 +170,13 @@ func (s *Server) ServeTranscoded(w http.ResponseWriter, r *http.Request, path st
 	cmd := exec.CommandContext(r.Context(), s.ffmpegPath, args...)
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
-		http.Error(w, err.Error(), 500)
+		slog.Error("transcoding stdout pipe", "error", err, "path", path)
+		http.Error(w, "transcoding error", 500)
 		return
 	}
 	if err := cmd.Start(); err != nil {
-		http.Error(w, err.Error(), 500)
+		slog.Error("transcoding start", "error", err, "path", path)
+		http.Error(w, "transcoding error", 500)
 		return
 	}
 
@@ -170,6 +189,10 @@ func (s *Server) ServeTranscoded(w http.ResponseWriter, r *http.Request, path st
 }
 
 func (s *Server) ServeCrossfaded(w http.ResponseWriter, r *http.Request, queue []playback.TrackWithFeatures, format, bitrate string, gapless, normalize bool) {
+	if len(queue) == 0 {
+		http.Error(w, "empty queue", http.StatusBadRequest)
+		return
+	}
 	if len(queue) > maxCrossfadeTracks {
 		queue = queue[:maxCrossfadeTracks]
 	}
@@ -184,6 +207,14 @@ func (s *Server) ServeCrossfaded(w http.ResponseWriter, r *http.Request, queue [
 		} else {
 			s.ServeTranscoded(w, r, fullPath, format, queue[0].Loudness, normalize)
 		}
+		return
+	}
+
+	select {
+	case s.transcodeSem <- struct{}{}:
+		defer func() { <-s.transcodeSem }()
+	default:
+		http.Error(w, "transcoding server busy", http.StatusServiceUnavailable)
 		return
 	}
 
@@ -343,11 +374,13 @@ func (s *Server) ServeCrossfaded(w http.ResponseWriter, r *http.Request, queue [
 	cmd := exec.CommandContext(r.Context(), s.ffmpegPath, args...)
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
-		http.Error(w, err.Error(), 500)
+		slog.Error("crossfade stdout pipe", "error", err)
+		http.Error(w, "streaming error", 500)
 		return
 	}
 	if err := cmd.Start(); err != nil {
-		http.Error(w, err.Error(), 500)
+		slog.Error("crossfade start", "error", err)
+		http.Error(w, "streaming error", 500)
 		return
 	}
 	defer func() {

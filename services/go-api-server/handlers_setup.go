@@ -38,6 +38,16 @@ func (h *Handler) SetupStatus(w http.ResponseWriter, r *http.Request) {
 }
 func (h *Handler) SetupComplete(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
+	hasUsers, err := h.db.CountUsers(ctx)
+	if err != nil {
+		writeInternalError(w, r, "setup complete check users", err)
+		return
+	}
+	if hasUsers == 0 {
+		http.Error(w, "cannot complete setup without registered users", http.StatusBadRequest)
+		return
+	}
+
 	if err := h.db.SetAppState(ctx, "setup_completed", map[string]interface{}{"completed": true}); err != nil {
 		writeInternalError(w, r, "setup complete", err)
 		return
@@ -54,6 +64,7 @@ func (h *Handler) SetupStations(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 	resp, err := h.analyticsFor(user.ID).SetupStations(r.Body)
 	proxyAnalytics(w, r, resp, err)
 }

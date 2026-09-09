@@ -2,6 +2,7 @@ package streaming
 
 import (
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 )
@@ -25,10 +26,13 @@ func NormalizeBitrate(input, defaultRate string) string {
 }
 
 func VolumeGainDb(loudness *float64, normalize bool) float64 {
-	if !normalize || loudness == nil || *loudness == 0 {
+	if !normalize || loudness == nil || *loudness == 0 || math.IsNaN(*loudness) || math.IsInf(*loudness, 0) {
 		return 0
 	}
 	gain := targetLoudness - *loudness
+	if math.IsNaN(gain) || math.IsInf(gain, 0) {
+		return 0
+	}
 	if gain > maxGainDb {
 		return maxGainDb
 	}

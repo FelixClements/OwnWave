@@ -7,7 +7,6 @@ services:
   go:
     environment:
       PYTHON_API_URL: http://python:8000
-      JWT_SECRET: ${JWT_SECRET}
       ANALYTICS_API_SECRET: ${ANALYTICS_API_SECRET}
       OWNWAVE_COOKIE_SECURE: "true"
       ALLOWED_ORIGINS: https://${OWNWAVE_DOMAIN:-localhost}

@@ -22,13 +22,12 @@ Key variables:
 ```env
 OWNWAVE_DOMAIN=ownwave.example.com
 POSTGRES_PASSWORD=<generate-a-strong-password>
-JWT_SECRET=<generate-a-strong-secret-at-least-32-chars>
 ALLOWED_ORIGINS=https://ownwave.example.com
 PUBLIC_APP_URL=https://ownwave.example.com
 MUSIC_PATH=/path/to/music
 ```
 
-Generate a strong `JWT_SECRET` (at least 32 characters) and `POSTGRES_PASSWORD` before starting. The Go API refuses to start with missing or default JWT secrets.
+Generate a strong `POSTGRES_PASSWORD` and unique `ANALYTICS_API_SECRET` before starting.
 
 ## 2. Start the stack
 
@@ -86,7 +85,7 @@ curl -s -o /dev/null -w "%{http_code}" "$DOMAIN/api/metrics"
 
 Expected status codes: `401`, `401`, `401` or `403`, `403`, and `404` respectively.
 
-Set `OWNWAVE_COOKIE_SECURE=true` in production (the prod compose overlay does this). Generate a unique `ANALYTICS_API_SECRET` as well as `JWT_SECRET` and `POSTGRES_PASSWORD`.
+Set `OWNWAVE_COOKIE_SECURE=true` in production (the prod compose overlay does this). Generate a unique `ANALYTICS_API_SECRET` and `POSTGRES_PASSWORD`.
 
 Invite flow:
 
