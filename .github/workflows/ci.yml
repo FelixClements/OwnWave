@@ -76,6 +76,7 @@ jobs:
           repo="${GITHUB_REPOSITORY,,}"
           echo "GO_IMAGE=ghcr.io/${repo}/go" >> $GITHUB_ENV
           echo "PYTHON_IMAGE=ghcr.io/${repo}/python" >> $GITHUB_ENV
+          echo "WEB_IMAGE=ghcr.io/${repo}/web" >> $GITHUB_ENV
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -100,3 +101,12 @@ jobs:
           context: ./services/python-analytics
           push: true
           tags: ${{ env.PYTHON_IMAGE }}:${{ github.sha }},${{ env.PYTHON_IMAGE }}:latest
+
+      - name: Build and push Web image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./apps/t3-web-frontend
+          push: true
+          tags: ${{ env.WEB_IMAGE }}:${{ github.sha }},${{ env.WEB_IMAGE }}:latest
+          build-args: |
+            GO_API_URL=http://go:8080
