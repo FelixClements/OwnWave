@@ -134,97 +134,7 @@ func main() {
 		}
 	}()
 
-	r := chi.NewRouter()
-	r.Use(middleware.RealIP)
-	r.Use(httpAccessLog)
-	r.Use(middleware.Recoverer)
-	r.Use(prometheusMiddleware)
-	r.Use(cors.New(cors.Options{
-		AllowedOrigins:   loadAllowedOrigins(),
-		AllowedMethods:   []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
-		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type"},
-		AllowCredentials: true,
-	}).Handler)
-
-	r.Get("/health", h.Health)
-
-	r.Group(func(r chi.Router) {
-		r.Use(httprate.LimitByIP(10, time.Minute))
-		r.Post("/login", h.Login)
-	})
-	r.Group(func(r chi.Router) {
-		r.Use(httprate.LimitByIP(5, time.Minute))
-		r.Post("/register", h.Register)
-	})
-
-	r.Get("/setup/status", h.SetupStatus)
-	r.Group(func(r chi.Router) {
-		r.Use(h.requireSetupAccess)
-		r.Post("/setup/complete", h.SetupComplete)
-		r.Get("/setup/summary", h.SetupSummary)
-		r.Post("/setup/stations", h.SetupStations)
-	})
-
-	r.Group(func(r chi.Router) {
-		r.Use(h.auth.RequireUser)
-		r.Get("/me", h.Me)
-		r.Put("/me/profile", h.UpdateProfile)
-		r.Post("/logout", h.Logout)
-		r.Group(func(r chi.Router) {
-			r.Use(httprate.LimitByIP(5, time.Minute))
-			r.Post("/me/password", h.ChangePassword)
-		})
-
-		r.Group(func(r chi.Router) {
-			r.Use(httprate.LimitByIP(60, time.Minute))
-			r.Get("/stream/{id}", h.StreamTrack)
-		})
-		r.Group(func(r chi.Router) {
-			r.Use(httprate.LimitByIP(300, time.Minute))
-			r.Get("/tracks/{id}/cover", h.GetTrackCover)
-		})
-
-		r.Get("/tracks", h.ListTracks)
-		r.Get("/albums", h.ListAlbums)
-		r.Get("/artists", h.ListArtists)
-		r.Get("/search", h.Search)
-		r.Get("/tracks/{id}", h.GetTrack)
-		r.Get("/tracks/{id}/similar", h.GetSimilarTracks)
-		r.Post("/tracks/{id}/played", h.RecordPlay)
-		r.Post("/tracks/{id}/feedback", h.RecordFeedback)
-		r.Delete("/tracks/{id}/feedback", h.DeleteFeedback)
-		r.Get("/history", h.ListHistory)
-		r.Get("/feedback", h.ListFeedback)
-		r.Get("/genres", h.ListGenres)
-		r.Get("/tracks/{id}/genres", h.GetTrackGenres)
-
-		r.Get("/stations", h.ListStations)
-		r.Get("/stations/{id}", h.GetStation)
-		r.Put("/stations/{id}", h.UpdateStation)
-		r.Delete("/stations/{id}", h.DeleteStation)
-		r.Get("/stations/{id}/queue", h.GetQueue)
-		r.Post("/stations", h.CreateStation)
-	})
-
-	r.Group(func(r chi.Router) {
-		r.Use(h.auth.RequireAdmin)
-		r.Post("/admin/scan", h.TriggerScan)
-		r.Get("/admin/scan/{id}", h.ScanStatus)
-		r.Get("/admin/scans", h.ListScans)
-		r.Get("/admin/health", h.AdminHealth)
-		r.Get("/admin/stations", h.AdminStations)
-		r.Post("/admin/rebuild-analysis", h.AdminRebuildAnalysis)
-		r.Post("/admin/rebuild-genres", h.AdminRebuildGenres)
-		r.Post("/admin/rebuild-genre-stations", h.AdminRebuildGenreStations)
-		r.Handle("/admin/metrics", metricsHandler())
-		r.Get("/admin/users", h.ListUsers)
-		r.Post("/admin/users", h.CreateUser)
-		r.Delete("/admin/users/{id}", h.DeleteUser)
-		r.Group(func(r chi.Router) {
-			r.Use(httprate.LimitByIP(10, time.Minute))
-			r.Post("/admin/invites", h.CreateInvite)
-		})
-	})
+	r := newRouter(h, "web")
 
 	port := os.Getenv("PORT")
 	if port == "" {
@@ -260,4 +170,105 @@ func main() {
 	// ListenAndServe returns as soon as Shutdown starts; wait for open
 	// requests to drain before the deferred db.Close runs.
 	<-shutdownDone
+}
+
+// newRouter serves the API under /api and, when webDir exists, the web UI at /.
+func newRouter(h *Handler, webDir string) http.Handler {
+	r := chi.NewRouter()
+	r.Use(middleware.RealIP)
+	r.Use(httpAccessLog)
+	r.Use(middleware.Recoverer)
+	r.Use(prometheusMiddleware)
+	r.Use(cors.New(cors.Options{
+		AllowedOrigins:   loadAllowedOrigins(),
+		AllowedMethods:   []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
+		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type"},
+		AllowCredentials: true,
+	}).Handler)
+
+	r.Get("/health", h.Health)
+
+	// The API lives under /api so it can share the origin with the web UI.
+	r.Route("/api", func(r chi.Router) {
+
+		r.Group(func(r chi.Router) {
+			r.Use(httprate.LimitByIP(10, time.Minute))
+			r.Post("/login", h.Login)
+		})
+		r.Group(func(r chi.Router) {
+			r.Use(httprate.LimitByIP(5, time.Minute))
+			r.Post("/register", h.Register)
+		})
+
+		r.Get("/setup/status", h.SetupStatus)
+		r.Group(func(r chi.Router) {
+			r.Use(h.requireSetupAccess)
+			r.Post("/setup/complete", h.SetupComplete)
+			r.Get("/setup/summary", h.SetupSummary)
+			r.Post("/setup/stations", h.SetupStations)
+		})
+
+		r.Group(func(r chi.Router) {
+			r.Use(h.auth.RequireUser)
+			r.Get("/me", h.Me)
+			r.Put("/me/profile", h.UpdateProfile)
+			r.Post("/logout", h.Logout)
+			r.Group(func(r chi.Router) {
+				r.Use(httprate.LimitByIP(5, time.Minute))
+				r.Post("/me/password", h.ChangePassword)
+			})
+
+			r.Group(func(r chi.Router) {
+				r.Use(httprate.LimitByIP(60, time.Minute))
+				r.Get("/stream/{id}", h.StreamTrack)
+			})
+			r.Group(func(r chi.Router) {
+				r.Use(httprate.LimitByIP(300, time.Minute))
+				r.Get("/tracks/{id}/cover", h.GetTrackCover)
+			})
+
+			r.Get("/tracks", h.ListTracks)
+			r.Get("/albums", h.ListAlbums)
+			r.Get("/artists", h.ListArtists)
+			r.Get("/search", h.Search)
+			r.Get("/tracks/{id}", h.GetTrack)
+			r.Get("/tracks/{id}/similar", h.GetSimilarTracks)
+			r.Post("/tracks/{id}/played", h.RecordPlay)
+			r.Post("/tracks/{id}/feedback", h.RecordFeedback)
+			r.Delete("/tracks/{id}/feedback", h.DeleteFeedback)
+			r.Get("/history", h.ListHistory)
+			r.Get("/feedback", h.ListFeedback)
+			r.Get("/genres", h.ListGenres)
+			r.Get("/tracks/{id}/genres", h.GetTrackGenres)
+
+			r.Get("/stations", h.ListStations)
+			r.Get("/stations/{id}", h.GetStation)
+			r.Put("/stations/{id}", h.UpdateStation)
+			r.Delete("/stations/{id}", h.DeleteStation)
+			r.Get("/stations/{id}/queue", h.GetQueue)
+			r.Post("/stations", h.CreateStation)
+		})
+
+		r.Group(func(r chi.Router) {
+			r.Use(h.auth.RequireAdmin)
+			r.Post("/admin/scan", h.TriggerScan)
+			r.Get("/admin/scan/{id}", h.ScanStatus)
+			r.Get("/admin/scans", h.ListScans)
+			r.Get("/admin/health", h.AdminHealth)
+			r.Get("/admin/stations", h.AdminStations)
+			r.Post("/admin/rebuild-analysis", h.AdminRebuildAnalysis)
+			r.Post("/admin/rebuild-genres", h.AdminRebuildGenres)
+			r.Post("/admin/rebuild-genre-stations", h.AdminRebuildGenreStations)
+			r.Handle("/admin/metrics", metricsHandler())
+			r.Get("/admin/users", h.ListUsers)
+			r.Post("/admin/users", h.CreateUser)
+			r.Delete("/admin/users/{id}", h.DeleteUser)
+			r.Group(func(r chi.Router) {
+				r.Use(httprate.LimitByIP(10, time.Minute))
+				r.Post("/admin/invites", h.CreateInvite)
+			})
+		})
+	})
+	mountWeb(r, webDir)
+	return r
 }

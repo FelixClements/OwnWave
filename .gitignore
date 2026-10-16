@@ -13,3 +13,4 @@ backups/
 # Database dumps; migrations are source.
 *.sql
 !database/migrations/*.sql
+apps/t3-web-frontend/out

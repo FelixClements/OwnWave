@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -39,9 +40,13 @@ func httpAccessLog(next http.Handler) http.Handler {
 		ww := middleware.NewWrapResponseWriter(w, r.ProtoMajor)
 		start := time.Now()
 		next.ServeHTTP(ww, r)
+		path := r.URL.Path
+		if strings.HasPrefix(path, "/invite/") {
+			path = "/invite/REDACTED" // invite tokens are credentials
+		}
 		slog.Info("http",
 			"method", r.Method,
-			"path", r.URL.Path,
+			"path", path,
 			"status", ww.Status(),
 			"bytes", ww.BytesWritten(),
 			"ms", time.Since(start).Milliseconds(),

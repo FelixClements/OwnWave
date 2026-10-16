@@ -2,6 +2,14 @@
 
 This guide covers deploying OwnWave on a single server using Docker Compose with a Caddy reverse proxy, automatic HTTPS, and scheduled backups.
 
+The stack has five containers:
+
+- `caddy`: TLS and the public entry point.
+- `go`: the API under `/api`, audio streaming, and the static web UI.
+- `python`: the internal analytics API (scan requests, genres, job status).
+- `worker`: runs queued scans and analysis in `WORKER_CONCURRENCY` processes, and watches the music folder for changes.
+- `db`: Postgres with pgvector, which also holds the worker's task queue.
+
 ## Requirements
 
 - A Linux server with Docker and Docker Compose installed.
@@ -39,12 +47,12 @@ Caddy will automatically obtain and renew a TLS certificate for `OWNWAVE_DOMAIN`
 
 ## 3. Reverse proxy and routing
 
-Caddy is configured in `Caddyfile`:
+Caddy (`Caddyfile`) proxies everything on `https://<OWNWAVE_DOMAIN>` to Go, which serves:
 
-- `https://<OWNWAVE_DOMAIN>/` → Next.js frontend
-- `https://<OWNWAVE_DOMAIN>/api/*` → Go API (the `/api` prefix is stripped)
+- `/api/*`: the API.
+- Everything else: the web UI, a static Next.js export built into the Go image.
 
-The browser always calls same-origin `/api`. Outside Caddy (local dev), the Next.js server rewrites `/api/*` to `GO_API_URL` (`http://go:8080` in Docker).
+The browser always calls same-origin `/api`.
 
 Prometheus metrics are available to authenticated admins at `/api/admin/metrics`. They are not mounted on the public Caddy routes.
 
@@ -124,5 +132,7 @@ Pull the latest code, then rebuild:
 
 ```bash
 git pull
-docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
+docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build --remove-orphans
 ```
+
+`--remove-orphans` removes containers of services that no longer exist. Upgrading from a release that used Redis and Celery removes the `web`, `redis` and `watcher` containers. Scans that were queued in Redis are not carried over; start a new scan from the admin page if one was in progress. The unused `redis_data` volume can then be deleted with `docker volume rm <project>_redis_data`.

@@ -7,10 +7,13 @@ from watchdog.events import FileSystemEventHandler
 from watchdog.observers import Observer
 
 from audio_metadata import SUPPORTED_EXTS
-from celery_app import celery_app
+import db
+import tasks
 from config import MUSIC_DIR
 
 log = logging.getLogger(__name__)
+
+CHANGE_EVENTS = {"created", "deleted", "modified", "moved"}
 
 
 class MusicEventHandler(FileSystemEventHandler):
@@ -24,9 +27,8 @@ class MusicEventHandler(FileSystemEventHandler):
         self._next_allowed = 0.0
 
     def on_any_event(self, event):
-        if event.is_directory:
-            return
-        if event.event_type == "closed":
+        # Reads (opened/closed_no_write), e.g. by a running scan, are not changes.
+        if event.is_directory or event.event_type not in CHANGE_EVENTS:
             return
         path = getattr(event, "dest_path", None) or getattr(event, "src_path", None)
         if not path or not self._is_music_file(path):
@@ -63,28 +65,27 @@ class MusicEventHandler(FileSystemEventHandler):
 
         log.info("change detected, queuing scan of %s", self.root_path)
         try:
-            celery_app.send_task(
-                "tasks.trigger_library_scan",
-                args=[None, str(self.root_path)],
-            )
+            queue_scan(str(self.root_path))
         except Exception as exc:
             log.error("failed to queue scan: %s", exc)
 
 
-def watch_directory(path: str = MUSIC_DIR, debounce_seconds: float = 2.0, cooldown_seconds: float = 30.0):
+def queue_scan(path: str) -> None:
+    with db.get_conn() as conn:
+        tasks.queue_library_scan(conn, path)
+        conn.commit()
+
+
+def start_watching(path: str = MUSIC_DIR, debounce_seconds: float = 2.0, cooldown_seconds: float = 30.0) -> Observer:
+    """Queue a library scan whenever music files under path change."""
     root = Path(path).expanduser().resolve()
     if not root.exists():
         raise FileNotFoundError(f"Music path does not exist: {root}")
 
     event_handler = MusicEventHandler(str(root), debounce_seconds=debounce_seconds, cooldown_seconds=cooldown_seconds)
     observer = Observer()
+    observer.daemon = True
     observer.schedule(event_handler, str(root), recursive=True)
     observer.start()
-
     log.info("watching %s for music file changes", root)
-    try:
-        while True:
-            time.sleep(1)
-    except KeyboardInterrupt:
-        observer.stop()
-    observer.join()
+    return observer

@@ -14,10 +14,10 @@ An open-source, self-hosted smart radio. Turn a local library of lossless audio 
 
 | Layer | Technology | Role |
 |-------|------------|------|
-| `apps/t3-web-frontend` | Next.js, Tailwind, React Query | Web UI and player (crossfade in the browser) |
-| `services/go-api-server` | Go, Chi, pgx, FFmpeg | API, auth, streaming, stations and queues |
-| `services/python-analytics` | Python, FastAPI, Celery, librosa, scikit-learn | Library scanning, audio feature extraction, genres, clustering |
-| `database` | Postgres + pgvector, Redis | Data and task broker |
+| `apps/t3-web-frontend` | Next.js (static export), Tailwind, React Query | Web UI and player (crossfade in the browser), served by the Go API |
+| `services/go-api-server` | Go, Chi, pgx, FFmpeg | API (under `/api`), auth, streaming, stations and queues; serves the web UI |
+| `services/python-analytics` | Python, FastAPI, librosa, scikit-learn | Internal API plus a worker that scans the library, extracts audio features, genres and clusters |
+| `database` | Postgres + pgvector | Data and the worker's task queue |
 
 ## Quick start
 
@@ -28,7 +28,7 @@ cp .env.example .env
 # Edit .env with your MUSIC_PATH and secrets
 
 docker compose up --build -d
-# Once healthy, open http://localhost:3000
+# Once healthy, open http://localhost:8080
 ```
 
 ## Development
@@ -39,10 +39,14 @@ cd services/go-api-server
 go test ./...
 go build .
 
-# Frontend
+# Frontend (static export to out/)
 cd apps/t3-web-frontend
 npm install
 npm run build
+
+# Frontend with hot reload: start the stack, then run Next's dev server,
+# which proxies /api to Go at GO_API_URL (default http://localhost:8080)
+npm run dev
 
 # Full smoke test (builds Docker images and checks /health)
 just test

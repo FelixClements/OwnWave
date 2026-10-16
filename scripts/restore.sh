@@ -19,12 +19,12 @@ if [ ! -f "$BACKUP" ]; then
 fi
 
 echo "Restoring database from $BACKUP"
-docker compose -f docker-compose.yml -f docker-compose.prod.yml stop go python worker watcher
+docker compose -f docker-compose.yml -f docker-compose.prod.yml stop go python worker
 
 docker compose -f docker-compose.yml -f docker-compose.prod.yml exec -T db \
     psql -v ON_ERROR_STOP=1 --single-transaction \
     -U "${POSTGRES_USER:-ownwave}" -d "${POSTGRES_DB:-ownwave}" < "$BACKUP"
 
-docker compose -f docker-compose.yml -f docker-compose.prod.yml start go python worker watcher
+docker compose -f docker-compose.yml -f docker-compose.prod.yml start go python worker
 
 echo "Restore complete"

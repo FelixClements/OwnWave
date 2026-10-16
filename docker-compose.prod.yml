@@ -1,9 +1,4 @@
 services:
-  web:
-    environment:
-      GO_API_URL: ${GO_API_URL:-http://go:8080}
-    ports: !reset []
-
   go:
     environment:
       PYTHON_API_URL: http://python:8000
@@ -18,9 +13,6 @@ services:
     ports: !reset []
 
   db:
-    ports: !reset []
-
-  redis:
     ports: !reset []
 
   caddy:
@@ -39,7 +31,6 @@ services:
       - caddy_data:/data
       - caddy_config:/config
     depends_on:
-      - web
       - go
 
 volumes:
