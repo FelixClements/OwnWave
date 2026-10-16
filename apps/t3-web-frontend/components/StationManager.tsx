@@ -1,15 +1,47 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import type { Station } from '@/lib/api';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { api, type Station, type StationRequest } from '@/lib/api';
 import {
   emptyStationFilterForm,
+  filterFormToRequest,
+  ID_SEED_TYPES,
   parseStationSeed,
   seedToFilterForm,
   type StationFilterForm,
 } from '@/lib/station-seed';
-import { trpc } from '@/lib/trpc/client';
+import type { StationSeedType } from '@/lib/station-seed-types';
+import { keys, useGenres, useQueue, useStationQuery, useStations } from '@/lib/queries';
 import { useStation } from '@/lib/station';
+
+const SEED_TYPE_LABELS: Record<StationSeedType, string> = {
+  track: 'Track',
+  artist: 'Artist',
+  album: 'Album',
+  cluster: 'Cluster',
+  mood: 'Mood',
+  genre: 'Genre',
+  sub_genre: 'Sub-genre',
+  uncategorized: 'Uncategorized',
+};
+
+/** Seed type options; id-based types only when the station already uses one. */
+function SeedTypeOptions({ current }: { current: string }) {
+  const types = (Object.keys(SEED_TYPE_LABELS) as StationSeedType[]).filter(
+    (t) => !ID_SEED_TYPES.includes(t) || t === current,
+  );
+  return (
+    <>
+      <option value="">Any seed</option>
+      {types.map((t) => (
+        <option key={t} value={t}>
+          {SEED_TYPE_LABELS[t]}
+        </option>
+      ))}
+    </>
+  );
+}
 
 export function StationManager() {
   const [name, setName] = useState('');
@@ -24,58 +56,44 @@ export function StationManager() {
 
   const [updateMessage, setUpdateMessage] = useState<string | null>(null);
 
-  const utils = trpc.useContext();
+  const qc = useQueryClient();
   const { selectedStation, setSelectedStation, setIsPlaying } = useStation();
-  const { data: stations } = trpc.stations.useQuery();
-  const { data: genres } = trpc.genres.useQuery();
-  const { data: editingStation } = trpc.station.useQuery(
-    { id: editing ?? '' },
-    { enabled: !!editing },
-  );
-  const { data: queue } = trpc.queue.useQuery(
-    { id: previewId || '' },
-    { enabled: !!previewId }
-  );
+  const { data: stations } = useStations();
+  const { data: genres } = useGenres();
+  const { data: editingStation } = useStationQuery(editing);
+  const { data: queue } = useQueue(previewId);
 
-  const create = trpc.createStation.useMutation({
+  const create = useMutation((body: StationRequest) => api.createStation(body), {
     onSuccess: () => {
       setName('');
       setCreateFilters(emptyStationFilterForm());
       setShowCreate(false);
-      utils.stations.invalidate();
+      void qc.invalidateQueries(keys.stations);
     },
+    onError: (err: Error) => setCreateError(err.message),
   });
 
-  const update = trpc.updateStation.useMutation({
-    onSuccess: (data, variables) => {
+  const update = useMutation(({ id, body }: { id: string; body: StationRequest }) => api.updateStation(id, body), {
+    onSuccess: (data, { id }) => {
       setEditing(null);
       setEditName('');
-      setUpdateMessage(`Saved "${data.name}" (${data.track_count} tracks in queue)`);
-      utils.stations.invalidate();
-      utils.station.invalidate({ id: variables.id });
-      utils.queue.invalidate({ id: variables.id });
-      if (previewId === variables.id) {
-        utils.queue.invalidate({ id: previewId });
-      }
+      setUpdateMessage(`Saved "${data.name}" (${data.track_count} tracks)`);
+      void qc.invalidateQueries(keys.stations);
+      void qc.invalidateQueries(keys.station(id));
+      void qc.invalidateQueries(keys.queue(id));
     },
-    onError: (err) => {
-      console.error('update station failed', err);
-      alert('Failed to update station: ' + err.message);
-    },
+    onError: (err: Error) => alert('Failed to update station: ' + err.message),
   });
 
-  const remove = trpc.deleteStation.useMutation({
-    onSuccess: (_, variables) => {
-      utils.stations.invalidate();
-      if (variables.id === selectedStation) {
+  const remove = useMutation((id: string) => api.deleteStation(id), {
+    onSuccess: (_, id) => {
+      void qc.invalidateQueries(keys.stations);
+      if (id === selectedStation) {
         setSelectedStation(null);
         setIsPlaying(false);
       }
     },
-    onError: (err) => {
-      console.error('delete station failed', err);
-      alert('Failed to delete station: ' + err.message);
-    },
+    onError: (err: Error) => alert('Failed to delete station: ' + err.message),
   });
 
   const handleCreate = (e: React.FormEvent) => {
@@ -85,36 +103,13 @@ export function StationManager() {
       return;
     }
     setCreateError('');
-    create.mutate({
-      name: name.trim(),
-      min_bpm: toNum(createFilters.min_bpm),
-      max_bpm: toNum(createFilters.max_bpm),
-      min_energy: toNum(createFilters.min_energy),
-      max_energy: toNum(createFilters.max_energy),
-      min_valence: toNum(createFilters.min_valence),
-      max_valence: toNum(createFilters.max_valence),
-      seed_type: createFilters.seed_type as any || undefined,
-      main_genre: createFilters.main_genre || undefined,
-      sub_genre: createFilters.sub_genre || undefined,
-    });
+    create.mutate(filterFormToRequest(name.trim(), createFilters));
   };
 
   const handleUpdate = (e: React.FormEvent) => {
     e.preventDefault();
     if (!editing || !editName.trim()) return;
-    update.mutate({
-      id: editing,
-      name: editName.trim(),
-      min_bpm: toNum(editFilters.min_bpm),
-      max_bpm: toNum(editFilters.max_bpm),
-      min_energy: toNum(editFilters.min_energy),
-      max_energy: toNum(editFilters.max_energy),
-      min_valence: toNum(editFilters.min_valence),
-      max_valence: toNum(editFilters.max_valence),
-      seed_type: editFilters.seed_type as any || undefined,
-      main_genre: editFilters.main_genre || undefined,
-      sub_genre: editFilters.sub_genre || undefined,
-    });
+    update.mutate({ id: editing, body: filterFormToRequest(editName.trim(), editFilters) });
   };
 
   const startEdit = (station: Station) => {
@@ -128,10 +123,6 @@ export function StationManager() {
     setEditFilters(seedToFilterForm(parseStationSeed(editingStation.seed_features)));
   }, [editing, editingStation]);
 
-  function toNum(value: string) {
-    const n = parseFloat(value);
-    return isNaN(n) ? undefined : n;
-  }
 
   return (
     <div className="p-4 md:p-6 space-y-6">
@@ -176,15 +167,7 @@ export function StationManager() {
                 onChange={(e) => setCreateFilters({ ...createFilters, seed_type: e.target.value })}
                 className="w-full px-3 py-2 rounded bg-spotify-elevated text-spotify-text border border-spotify-border focus:outline-none focus:border-spotify-green"
               >
-                <option value="">Any seed</option>
-                <option value="track">Track</option>
-                <option value="artist">Artist</option>
-                <option value="album">Album</option>
-                <option value="cluster">Cluster</option>
-                <option value="mood">Mood</option>
-                <option value="genre">Genre</option>
-                <option value="sub_genre">Sub-genre</option>
-                <option value="uncategorized">Uncategorized</option>
+                <SeedTypeOptions current="" />
               </select>
             </div>
             {['genre', 'sub_genre'].includes(createFilters.seed_type) && (
@@ -432,15 +415,7 @@ export function StationManager() {
                       onChange={(e) => setEditFilters({ ...editFilters, seed_type: e.target.value })}
                       className="w-full px-2 py-1 rounded bg-spotify-elevated text-spotify-text border border-spotify-border"
                     >
-                      <option value="">Any seed</option>
-                      <option value="track">Track</option>
-                      <option value="artist">Artist</option>
-                      <option value="album">Album</option>
-                      <option value="cluster">Cluster</option>
-                      <option value="mood">Mood</option>
-                      <option value="genre">Genre</option>
-                      <option value="sub_genre">Sub-genre</option>
-                      <option value="uncategorized">Uncategorized</option>
+                      <SeedTypeOptions current={seedToFilterForm(parseStationSeed(editingStation?.seed_features)).seed_type} />
                     </select>
                   </div>
                   {['genre', 'sub_genre'].includes(editFilters.seed_type) && (
@@ -520,7 +495,7 @@ export function StationManager() {
                     Edit
                   </button>
                   <button
-                    onClick={() => remove.mutate({ id: station.id })}
+                    onClick={() => remove.mutate(station.id)}
                     className="px-3 py-1 rounded bg-red-600 text-white text-sm hover:bg-red-700 transition"
                   >
                     Delete

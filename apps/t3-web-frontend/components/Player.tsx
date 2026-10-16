@@ -1,10 +1,10 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { QueueTrack } from '@/server/routers/app';
-import { useCoverUrl } from '@/components/CoverImage';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { api, coverUrl, type QueueTrack } from '@/lib/api';
+import { keys, useFeedbackMutation, useQueue } from '@/lib/queries';
 import { useStation } from '@/lib/station';
-import { trpc } from '@/lib/trpc/client';
 import { usePlayback } from '@/lib/playback/use-playback';
 import type { StreamFormat } from '@/lib/playback/types';
 
@@ -47,114 +47,52 @@ function PauseIcon({ className }: { className?: string }) {
   );
 }
 
-export function Player({ queue: queueProp }: { queue: QueueTrack[] }) {
-  const { nowPlaying, setNowPlaying, selectedStation, setPlayingStation, playingStation, isPlaying, setIsPlaying, stations } = useStation();
+export function Player() {
+  const { nowPlaying, setNowPlaying, playingStation, isPlaying, setIsPlaying, stations } = useStation();
+  const qc = useQueryClient();
+  const { data: queue = [] } = useQueue(playingStation);
 
-  const coverUrl = useCoverUrl(nowPlaying?.id);
   const [coverError, setCoverError] = useState(false);
   const [format, setFormat] = useState<StreamFormat>('flac');
   const [bitrate, setBitrate] = useState('320');
 
-  const recordPlay = trpc.recordPlay.useMutation();
-  const utils = trpc.useContext();
+  const recordPlay = useMutation((vars: { id: string; stationId?: string }) =>
+    api.recordPlay(vars.id, vars.stationId),
+  );
+  const feedback = useFeedbackMutation(playingStation);
 
   const handleTrackChange = useCallback(
-    (fullTrack: QueueTrack, _index: number) => {
-      const stationId = playingStation ?? selectedStation;
+    (track: QueueTrack) => {
       setCoverError(false);
-      recordPlay.mutate({ id: fullTrack.id, stationId: stationId ?? undefined });
-      setNowPlaying(fullTrack);
-      if (stationId) {
-        setPlayingStation(stationId);
-      }
+      recordPlay.mutate({ id: track.id, stationId: playingStation ?? undefined });
+      setNowPlaying(track);
     },
-    [playingStation, selectedStation, recordPlay, setNowPlaying, setPlayingStation],
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- mutate is stable
+    [playingStation, setNowPlaying],
   );
 
-  const {
-    audioARef,
-    audioBRef,
+  const fetchNextQueue = useCallback(() => {
+    if (!playingStation) return Promise.resolve([] as QueueTrack[]);
+    return qc.fetchQuery(keys.queue(playingStation), () => api.getQueue(playingStation), { staleTime: 0 });
+  }, [qc, playingStation]);
+
+  const { audioARef, audioBRef, skipNext, skipPrev, removeTrack, isCrossfading } = usePlayback({
+    stationId: playingStation,
     queue,
-    skipNext: engineSkipNext,
-    skipPrev,
-    isCrossfading,
-  } = usePlayback({
-    queue: queueProp,
-    selectedStation,
-    playingStation,
     isPlaying,
     format,
     bitrate,
-    nowPlaying,
     onTrackChange: handleTrackChange,
+    fetchNextQueue,
   });
 
-  const recordFeedback = trpc.recordFeedback.useMutation({
-    onMutate: async (input) => {
-      if (!playingStation) return {};
-      await utils.queue.cancel({ id: playingStation });
-      const previous = utils.queue.getData({ id: playingStation });
-      utils.queue.setData({ id: playingStation }, (old) => {
-        if (!old) return old;
-        if (input.feedback === 'like') {
-          return old.map((t) => (t.id === input.id ? { ...t, liked: true } : t));
-        }
-        if (input.feedback === 'skip') {
-          const idx = old.findIndex((t) => t.id === input.id);
-          if (idx === -1) return old;
-          const moved = old[idx];
-          const rest = old.filter((_, i) => i !== idx);
-          return [...rest, moved];
-        }
-        if (input.feedback === 'ban') {
-          return old.filter((t) => t.id !== input.id);
-        }
-        return old;
-      });
-      return { previous };
-    },
-    onError: (err, input, context) => {
-      if (!playingStation) return;
-      const previous = (context as any)?.previous;
-      if (previous) {
-        utils.queue.setData({ id: playingStation }, previous);
-      }
-    },
-  });
-  const removeFeedback = trpc.removeFeedback.useMutation({
-    onMutate: async (input) => {
-      if (input.feedback !== 'like' || !playingStation) return {};
-      await utils.queue.cancel({ id: playingStation });
-      const previous = utils.queue.getData({ id: playingStation });
-      utils.queue.setData({ id: playingStation }, (old) => {
-        if (!old) return old;
-        return old.map((t) => (t.id === input.id ? { ...t, liked: false } : t));
-      });
-      return { previous };
-    },
-    onError: (err, input, context) => {
-      if (input.feedback !== 'like' || !playingStation) return;
-      const previous = (context as any)?.previous;
-      if (previous) {
-        utils.queue.setData({ id: playingStation }, previous);
-      }
-    },
-    onSuccess: () => {
-      if (playingStation) {
-        utils.queue.invalidate({ id: playingStation });
-      }
-    },
-  });
-
-  const isLiked = useMemo(
-    () => queue.find((q) => q.id === nowPlaying?.id)?.liked,
-    [queue, nowPlaying]
-  );
+  const isLiked = useMemo(() => queue.find((q) => q.id === nowPlaying?.id)?.liked, [queue, nowPlaying]);
+  const artworkUrl = nowPlaying && !coverError ? coverUrl(nowPlaying.id) : null;
 
   useEffect(() => {
     const savedFormat = localStorage.getItem('ownwave:format');
     const savedBitrate = localStorage.getItem('ownwave:bitrate');
-    if (savedFormat) setFormat(savedFormat as StreamFormat);
+    if (savedFormat && ['flac', 'mp3', 'opus', 'aac'].includes(savedFormat)) setFormat(savedFormat as StreamFormat);
     if (savedBitrate) setBitrate(savedBitrate);
   }, []);
 
@@ -163,45 +101,28 @@ export function Player({ queue: queueProp }: { queue: QueueTrack[] }) {
     localStorage.setItem('ownwave:bitrate', bitrate);
   }, [format, bitrate]);
 
+  const skip = useCallback(() => {
+    if (!isCrossfading()) skipNext();
+  }, [isCrossfading, skipNext]);
+
+  const ban = (track: QueueTrack) => {
+    feedback.mutate({ id: track.id, feedback: 'ban' });
+    removeTrack(track.id);
+  };
+
   useEffect(() => {
     if (typeof window === 'undefined' || !('mediaSession' in navigator) || !nowPlaying) return;
-
-    const artwork: MediaImage[] = [];
-    if (coverUrl && !coverError) {
-      artwork.push({
-        src: coverUrl,
-        sizes: '512x512',
-        type: 'image/jpeg',
-      });
-    }
-
     navigator.mediaSession.metadata = new MediaMetadata({
       title: nowPlaying.title,
       artist: nowPlaying.artist || undefined,
       album: nowPlaying.album || undefined,
-      artwork,
+      artwork: artworkUrl ? [{ src: artworkUrl, sizes: '512x512', type: 'image/jpeg' }] : [],
     });
-
     navigator.mediaSession.setActionHandler('play', () => setIsPlaying(true));
     navigator.mediaSession.setActionHandler('pause', () => setIsPlaying(false));
-    navigator.mediaSession.setActionHandler('nexttrack', () => skipNext());
-    navigator.mediaSession.setActionHandler('previoustrack', () => skipPrev());
-  }, [nowPlaying, coverUrl, coverError, setIsPlaying, skipPrev]);
-
-  useEffect(() => {
-    if (typeof window === 'undefined' || !queue.length) return;
-    try {
-      localStorage.setItem('ownwave:offlineQueue', JSON.stringify(queue.slice(0, 20)));
-    } catch {
-      // ignore storage errors
-    }
-  }, [queue]);
-
-  function skipNext() {
-    if (isCrossfading() || !nowPlaying) return;
-    recordFeedback.mutate({ id: nowPlaying.id, feedback: 'skip' });
-    engineSkipNext();
-  }
+    navigator.mediaSession.setActionHandler('nexttrack', skip);
+    navigator.mediaSession.setActionHandler('previoustrack', skipPrev);
+  }, [nowPlaying, artworkUrl, setIsPlaying, skip, skipPrev]);
 
   function togglePlay() {
     setIsPlaying(!isPlaying);
@@ -215,9 +136,10 @@ export function Player({ queue: queueProp }: { queue: QueueTrack[] }) {
       {nowPlaying ? (
         <div className="flex items-center gap-2 md:gap-4 w-5/12 md:w-5/12 min-w-0">
           <div className="w-10 h-10 md:w-14 md:h-14 shrink-0 relative rounded shadow overflow-hidden bg-spotify-card flex items-center justify-center text-xs text-spotify-subdued font-bold">
-            {coverUrl && !coverError ? (
+            {artworkUrl ? (
+              // eslint-disable-next-line @next/next/no-img-element -- auth'd same-origin API image
               <img
-                src={coverUrl}
+                src={artworkUrl}
                 alt=""
                 className="w-full h-full object-cover"
                 onError={() => setCoverError(true)}
@@ -234,8 +156,7 @@ export function Player({ queue: queueProp }: { queue: QueueTrack[] }) {
               {nowPlaying.artist || 'Unknown artist'}
             </div>
             {(() => {
-              const stationId = playingStation || selectedStation;
-              const station = stations.find((s) => s.id === stationId);
+              const station = stations.find((s) => s.id === playingStation);
               return station ? (
                 <div className="text-[10px] md:text-xs text-spotify-green truncate">
                   {station.name}
@@ -265,11 +186,7 @@ export function Player({ queue: queueProp }: { queue: QueueTrack[] }) {
         {nowPlaying && (
           <div className="flex items-center gap-1 md:gap-2">
             <button
-              onClick={() =>
-                isLiked
-                  ? removeFeedback.mutate({ id: nowPlaying.id, feedback: 'like' })
-                  : recordFeedback.mutate({ id: nowPlaying.id, feedback: 'like' })
-              }
+              onClick={() => feedback.mutate({ id: nowPlaying.id, feedback: 'like', remove: !!isLiked })}
               className={`px-2.5 py-1.5 rounded transition text-xs flex items-center gap-1 ${
                 isLiked
                   ? 'bg-spotify-green text-black'
@@ -281,14 +198,14 @@ export function Player({ queue: queueProp }: { queue: QueueTrack[] }) {
               {isLiked ? 'Liked' : 'Like'}
             </button>
             <button
-              onClick={skipNext}
+              onClick={skip}
               className="px-2.5 py-1.5 rounded bg-spotify-elevated text-spotify-text hover:bg-spotify-card-hover transition text-xs"
               title="Skip"
             >
               Skip
             </button>
             <button
-              onClick={() => recordFeedback.mutate({ id: nowPlaying.id, feedback: 'ban' })}
+              onClick={() => ban(nowPlaying)}
               className="px-2.5 py-1.5 rounded bg-red-600 text-white hover:bg-red-700 transition text-xs"
               title="Ban"
             >
@@ -329,7 +246,9 @@ export function Player({ queue: queueProp }: { queue: QueueTrack[] }) {
           )}
         </div>
         {nowPlaying && (
-          <span className="truncate">{`${nowPlaying.bpm.toFixed(0)} BPM · ${nowPlaying.key}`}</span>
+          <span className="truncate">
+            {[nowPlaying.bpm > 0 && `${nowPlaying.bpm.toFixed(0)} BPM`, nowPlaying.key].filter(Boolean).join(' · ')}
+          </span>
         )}
       </div>
     </div>

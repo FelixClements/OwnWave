@@ -8,7 +8,7 @@ import { ProfileButton } from '@/components/ProfileButton';
 import { SunIcon, MoonIcon, PlayIcon } from '@/components/Icons';
 
 export function Shell({ children }: { children: React.ReactNode }) {
-  const { selectedStation, setSelectedStation, stations, queue, playingStation, isPlaying } = useStation();
+  const { selectedStation, setSelectedStation, stations, playingStation, isPlaying } = useStation();
   const { isLight, toggleTheme } = useTheme();
 
   return (
@@ -82,7 +82,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
       </div>
 
       <div className="h-24 bg-spotify-black border-t border-spotify-border px-4 flex items-center">
-        <Player queue={queue} />
+        <Player />
       </div>
     </div>
   );

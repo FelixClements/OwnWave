@@ -90,6 +90,13 @@ func (h *Handler) RecordPlay(w http.ResponseWriter, r *http.Request) {
 	}
 	w.WriteHeader(204)
 }
+
+// validFeedback lists the feedback kinds the app records. Skips are not
+// stored: skipping only moves playback on.
+func validFeedback(kind string) bool {
+	return kind == "like" || kind == "ban"
+}
+
 func (h *Handler) RecordFeedback(w http.ResponseWriter, r *http.Request) {
 	user, ok := h.currentUser(w, r)
 	if !ok {
@@ -99,8 +106,8 @@ func (h *Handler) RecordFeedback(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Feedback string `json:"feedback"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Feedback == "" {
-		http.Error(w, "feedback required", 400)
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || !validFeedback(req.Feedback) {
+		http.Error(w, "feedback must be like or ban", http.StatusBadRequest)
 		return
 	}
 	if err := h.db.RecordFeedback(r.Context(), user.ID, trackID, req.Feedback); err != nil {
@@ -118,8 +125,8 @@ func (h *Handler) DeleteFeedback(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Feedback string `json:"feedback"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Feedback == "" {
-		http.Error(w, "feedback required", 400)
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || !validFeedback(req.Feedback) {
+		http.Error(w, "feedback must be like or ban", http.StatusBadRequest)
 		return
 	}
 	if err := h.db.DeleteFeedback(r.Context(), user.ID, trackID, req.Feedback); err != nil {
@@ -147,8 +154,8 @@ func (h *Handler) ListFeedback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	feedback := r.URL.Query().Get("feedback")
-	if feedback == "" {
-		http.Error(w, "feedback param required", 400)
+	if !validFeedback(feedback) {
+		http.Error(w, "feedback must be like or ban", http.StatusBadRequest)
 		return
 	}
 	tracks, err := h.db.ListFeedback(r.Context(), user.ID, feedback, 100)

@@ -230,6 +230,9 @@ func (db *DB) GenreCounts(ctx context.Context, minConfidence float64) ([]GenreCo
 
 type SimilarTrack struct {
 	TrackID  string  `json:"track_id"`
+	Title    string  `json:"title"`
+	Artist   *string `json:"artist,omitempty"`
+	Album    *string `json:"album,omitempty"`
 	Distance float64 `json:"distance"`
 }
 
@@ -240,8 +243,13 @@ func (db *DB) SimilarTracks(ctx context.Context, trackID string, limit int) ([]S
 			SELECT feature_vector FROM audio_features
 			WHERE track_id = $1::uuid AND feature_vector IS NOT NULL
 		)
-		SELECT af.track_id::text, (af.feature_vector <=> target.feature_vector)::float8 AS distance
-		FROM audio_features af, target
+		SELECT af.track_id::text, t.title, a.name, al.title,
+		       (af.feature_vector <=> target.feature_vector)::float8 AS distance
+		FROM audio_features af
+		CROSS JOIN target
+		JOIN tracks t ON t.id = af.track_id
+		LEFT JOIN artists a ON t.artist_id = a.id
+		LEFT JOIN albums al ON t.album_id = al.id
 		WHERE af.track_id <> $1::uuid AND af.feature_vector IS NOT NULL
 		ORDER BY distance
 		LIMIT $2
@@ -253,7 +261,7 @@ func (db *DB) SimilarTracks(ctx context.Context, trackID string, limit int) ([]S
 	out := make([]SimilarTrack, 0)
 	for rows.Next() {
 		var st SimilarTrack
-		if err := rows.Scan(&st.TrackID, &st.Distance); err != nil {
+		if err := rows.Scan(&st.TrackID, &st.Title, &st.Artist, &st.Album, &st.Distance); err != nil {
 			return nil, err
 		}
 		st.Distance = math.Round(st.Distance*1e4) / 1e4

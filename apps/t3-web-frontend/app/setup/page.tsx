@@ -2,9 +2,10 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '@/lib/auth';
-import { trpc } from '@/lib/trpc/client';
-import { ScanStatus } from '@/lib/api';
+import { api, ScanStatus } from '@/lib/api';
+import { keys, useScanStatus, useSetupStatus } from '@/lib/queries';
 
 const MIN_TRACKS_PER_STATION = 5;
 
@@ -20,32 +21,20 @@ export default function SetupPage() {
   const [selectedGenres, setSelectedGenres] = useState<Set<string>>(new Set());
   const [createStationError, setCreateStationError] = useState('');
 
-  const utils = trpc.useContext();
-  const setupStatus = trpc.setupStatus.useQuery();
-  const setupSummary = trpc.setupSummary.useQuery(undefined, {
-    enabled: step === 3,
-  });
-  const rescan = trpc.rescan.useMutation();
-  const scanStatus = trpc.scanStatus.useQuery(
-    { jobId: scanJobId || '' },
-    {
-      enabled: !!scanJobId,
-      refetchInterval: (data) =>
-        data && (data.status === 'completed' || data.status === 'failed')
-          ? false
-          : 1000,
-    }
-  );
-  const setupStations = trpc.setupStations.useMutation({
+  const qc = useQueryClient();
+  const setupStatus = useSetupStatus();
+  const setupSummary = useQuery(keys.setupSummary, () => api.setupSummary(), { enabled: step === 3 });
+  const rescan = useMutation(() => api.triggerScan());
+  const scanStatus = useScanStatus(scanJobId);
+  const setupStations = useMutation((genres: string[]) => api.setupStations(genres), {
     onSuccess: () => {
-      utils.setupSummary.invalidate();
+      void qc.invalidateQueries(keys.setupSummary);
+      void qc.invalidateQueries(keys.stations);
       setStep(5);
     },
-    onError: (err) => {
-      setCreateStationError(err.message);
-    },
+    onError: (err: Error) => setCreateStationError(err.message),
   });
-  const setupComplete = trpc.setupComplete.useMutation({
+  const setupComplete = useMutation(() => api.setupComplete(), {
     onSuccess: () => {
       window.location.href = '/';
     },
@@ -66,13 +55,13 @@ export default function SetupPage() {
 
   useEffect(() => {
     if (scanStatus.data?.status === 'completed') {
-      utils.setupStatus.invalidate();
-      utils.setupSummary.invalidate();
+      void qc.invalidateQueries(keys.setupStatus);
+      void qc.invalidateQueries(keys.setupSummary);
       setStep(3);
     } else if (scanStatus.data?.status === 'failed') {
       setStep(2);
     }
-  }, [scanStatus.data, utils]);
+  }, [scanStatus.data, qc]);
 
   useEffect(() => {
     if (setupSummary.data && step === 3) {
@@ -92,7 +81,7 @@ export default function SetupPage() {
     try {
       setAccountError('');
       await register(username.trim(), password);
-      utils.setupStatus.invalidate();
+      void qc.invalidateQueries(keys.setupStatus);
       setStep(2);
     } catch (err) {
       setAccountError(err instanceof Error ? err.message : 'Failed to create account');
@@ -123,7 +112,7 @@ export default function SetupPage() {
   const handleCreateStations = async () => {
     if (selectedGenres.size === 0) return;
     setCreateStationError('');
-    setupStations.mutate({ selectedMainGenres: Array.from(selectedGenres) });
+    setupStations.mutate(Array.from(selectedGenres));
   };
 
   const handleComplete = async () => {

@@ -1,76 +1,67 @@
 import { useCallback, useEffect, useRef } from 'react';
 import { createPlaybackEngine } from './create-engine';
-import { pinQueue } from './queue-pin';
 import { createApiStreamResolver } from './stream-resolver';
-import type { PlaybackTrack, StreamFormat } from './types';
-import { WebAudioCrossfadeEngine } from './web-audio-engine';
-import { SequentialAudioEngine } from './sequential-engine';
+import type { PlaybackEngine, PlaybackTrack, StreamFormat } from './types';
 
 type UsePlaybackOptions<T extends PlaybackTrack> = {
+  /** Station being played; changing it loads that station's queue. */
+  stationId: string | null;
   queue: T[];
-  selectedStation: string | null;
-  playingStation: string | null;
   isPlaying: boolean;
   format: StreamFormat;
   bitrate: string;
-  nowPlaying: T | null;
   onTrackChange: (track: T, index: number) => void;
+  /** Fetch the next page of the station's queue once the current one ends. */
+  fetchNextQueue: () => Promise<T[]>;
 };
 
+/**
+ * Drives a playback engine from React state. The engine owns its copy of the
+ * queue: later queue updates (optimistic likes/bans) don't restart playback.
+ */
 export function usePlayback<T extends PlaybackTrack>({
-  queue: queueProp,
-  selectedStation,
-  playingStation,
+  stationId,
+  queue,
   isPlaying,
   format,
   bitrate,
-  nowPlaying,
   onTrackChange,
+  fetchNextQueue,
 }: UsePlaybackOptions<T>) {
   const audioARef = useRef<HTMLAudioElement | null>(null);
   const audioBRef = useRef<HTMLAudioElement | null>(null);
-  const pinnedQueueRef = useRef(queueProp);
+  const engineRef = useRef<PlaybackEngine | null>(null);
   const loadedStationRef = useRef<string | null>(null);
   const loadingRef = useRef(false);
-  const engineRef = useRef<ReturnType<typeof createPlaybackEngine> | null>(null);
-  const resolverRef = useRef(createApiStreamResolver());
-  const audibleQueueRef = useRef(queueProp);
-  const nowPlayingRef = useRef(nowPlaying);
-  nowPlayingRef.current = nowPlaying;
-
-  const queue = pinQueue(
-    queueProp,
-    selectedStation,
-    playingStation,
-    pinnedQueueRef.current,
-  );
-  pinnedQueueRef.current = queue;
-  audibleQueueRef.current = queue;
 
   const onTrackChangeRef = useRef(onTrackChange);
   onTrackChangeRef.current = onTrackChange;
+  const fetchNextQueueRef = useRef(fetchNextQueue);
+  fetchNextQueueRef.current = fetchNextQueue;
 
-  const ensureEngine = useCallback(() => {
-    if (!engineRef.current) {
-      engineRef.current = createPlaybackEngine(resolverRef.current, {
-        onTrackChange: (track, index) => {
-          const audible = audibleQueueRef.current;
-          const fullTrack =
-            audible.find((q) => q.id === track.id) ?? audible[index];
-          if (!fullTrack) return;
-          onTrackChangeRef.current(fullTrack, index);
+  const getEngine = useCallback(() => {
+    if (!engineRef.current && audioARef.current && audioBRef.current) {
+      const engine: PlaybackEngine = createPlaybackEngine(
+        createApiStreamResolver(),
+        {
+          onTrackChange: (track, index) => onTrackChangeRef.current(track as T, index),
+          onQueueEnd: () => {
+            void fetchNextQueueRef
+              .current()
+              .then((next) => (next.length ? engine.load(next, 0) : undefined))
+              .catch(() => {});
+          },
         },
-      });
+        [audioARef.current, audioBRef.current],
+      );
+      engineRef.current = engine;
     }
-    const engine = engineRef.current;
-    engine.setStreamOptions({ format, bitrate });
-    if (engine instanceof WebAudioCrossfadeEngine && audioARef.current && audioBRef.current) {
-      engine.attach([audioARef.current, audioBRef.current]);
-    } else if (engine instanceof SequentialAudioEngine && audioARef.current) {
-      engine.attach(audioARef.current);
-    }
-    return engine;
-  }, [format, bitrate]);
+    return engineRef.current;
+  }, []);
+
+  useEffect(() => {
+    getEngine()?.setStreamOptions({ format, bitrate });
+  }, [format, bitrate, getEngine]);
 
   useEffect(() => {
     return () => {
@@ -80,40 +71,29 @@ export function usePlayback<T extends PlaybackTrack>({
   }, []);
 
   useEffect(() => {
-    if (typeof window === 'undefined') return;
+    const engine = getEngine();
+    if (!engine) return;
     if (!isPlaying) {
-      engineRef.current?.pause();
+      engine.pause();
       return;
     }
-    if (loadingRef.current || !queue.length || !playingStation) return;
-
-    if (playingStation === loadedStationRef.current && nowPlayingRef.current) {
-      void engineRef.current?.play();
+    if (loadingRef.current || !stationId || !queue.length) return;
+    if (loadedStationRef.current === stationId) {
+      void engine.play().catch(() => {});
       return;
     }
 
     loadingRef.current = true;
-    const engine = ensureEngine();
+    loadedStationRef.current = stationId;
     void engine
       .load(queue, 0)
-      .then(() => engine.play())
       .catch(() => {})
       .finally(() => {
         loadingRef.current = false;
-        loadedStationRef.current = playingStation;
       });
-  }, [isPlaying, playingStation, queue, ensureEngine]);
+  }, [isPlaying, stationId, queue, getEngine]);
 
-  useEffect(() => {
-    ensureEngine();
-  }, [format, bitrate, ensureEngine]);
-
-  const skipTo = useCallback(
-    (index: number) => {
-      void ensureEngine().skipTo(index);
-    },
-    [ensureEngine],
-  );
+  const skipTo = useCallback((index: number) => void engineRef.current?.skipTo(index), []);
 
   const skipNext = useCallback(() => {
     const engine = engineRef.current;
@@ -124,17 +104,18 @@ export function usePlayback<T extends PlaybackTrack>({
   const skipPrev = useCallback(() => {
     const engine = engineRef.current;
     if (!engine || engine.isCrossfading()) return;
-    void engine.skipTo(engine.getCurrentIndex() - 1);
+    void engine.skipTo(Math.max(0, engine.getCurrentIndex() - 1));
   }, []);
+
+  const removeTrack = useCallback((id: string) => void engineRef.current?.removeTrack(id), []);
 
   return {
     audioARef,
     audioBRef,
-    queue,
     skipNext,
     skipPrev,
     skipTo,
-    getCurrentIndex: () => engineRef.current?.getCurrentIndex() ?? 0,
+    removeTrack,
     isCrossfading: () => engineRef.current?.isCrossfading() ?? false,
   };
 }

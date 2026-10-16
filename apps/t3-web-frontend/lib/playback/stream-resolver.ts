@@ -1,4 +1,4 @@
-import { getStreamBaseUrl } from '@/lib/api';
+import { API_BASE } from '@/lib/api';
 import type { StreamOptions } from './types';
 
 export interface StreamResolver {
@@ -11,7 +11,7 @@ export function createApiStreamResolver(): StreamResolver {
       const params = new URLSearchParams();
       params.set('format', options.format);
       if (options.bitrate) params.set('bitrate', options.bitrate);
-      return `${getStreamBaseUrl()}/stream/${encodeURIComponent(trackId)}?${params.toString()}`;
+      return `${API_BASE}/stream/${encodeURIComponent(trackId)}?${params.toString()}`;
     },
   };
 }

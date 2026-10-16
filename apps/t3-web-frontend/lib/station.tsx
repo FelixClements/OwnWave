@@ -1,9 +1,9 @@
 'use client';
 
-import { createContext, useContext, useMemo, useState, useEffect } from 'react';
-import { useSearchParams, useRouter } from 'next/navigation';
-import { trpc } from '@/lib/trpc/client';
-import { QueueTrack } from '@/server/routers/app';
+import { createContext, useCallback, useContext, useMemo, useState } from 'react';
+import { usePathname, useRouter, useSearchParams } from 'next/navigation';
+import type { QueueTrack } from '@/lib/api';
+import { useQueue, useStations } from '@/lib/queries';
 
 interface StationContextValue {
   selectedStation: string | null;
@@ -22,49 +22,23 @@ const StationContext = createContext<StationContextValue | null>(null);
 
 export function StationProvider({ children }: { children: React.ReactNode }) {
   const searchParams = useSearchParams();
+  const pathname = usePathname();
   const router = useRouter();
-  const stationParam = searchParams?.get('station') ?? null;
+  // The URL (?station=…) is the single source of truth for the browsed station.
+  const selectedStation = pathname === '/' ? searchParams?.get('station') ?? null : null;
 
-  const [selectedStation, setSelectedState] = useState<string | null>(stationParam);
-  const [nowPlaying, setNowPlayingState] = useState<QueueTrack | null>(null);
-  const [playingStation, setPlayingStationState] = useState<string | null>(null);
-  const [isPlaying, setIsPlayingState] = useState(false);
-  const { data: stations } = trpc.stations.useQuery();
-  const { data: queue } = trpc.queue.useQuery(
-    { id: selectedStation || '' },
-    { enabled: !!selectedStation, refetchOnWindowFocus: false, refetchInterval: false }
+  const [nowPlaying, setNowPlaying] = useState<QueueTrack | null>(null);
+  const [playingStation, setPlayingStation] = useState<string | null>(null);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const { data: stations } = useStations();
+  const { data: queue } = useQueue(selectedStation);
+
+  const setSelectedStation = useCallback(
+    (id: string | null) => {
+      router.replace(id ? `/?station=${encodeURIComponent(id)}` : '/');
+    },
+    [router],
   );
-
-  useEffect(() => {
-    const id = searchParams?.get('station') ?? null;
-    if (id !== selectedStation) {
-      setSelectedState(id);
-    }
-  }, [searchParams, selectedStation]);
-
-  const setSelectedStation = (id: string | null) => {
-    setSelectedState(id);
-    const url = new URL(window.location.href);
-    url.pathname = '/';
-    if (id) {
-      url.searchParams.set('station', id);
-    } else {
-      url.searchParams.delete('station');
-    }
-    router.replace(url.pathname + url.search);
-  };
-
-  const setNowPlaying = (track: QueueTrack | null) => {
-    setNowPlayingState(track);
-  };
-
-  const setPlayingStation = (id: string | null) => {
-    setPlayingStationState(id);
-  };
-
-  const setIsPlaying = (value: boolean) => {
-    setIsPlayingState(value);
-  };
 
   const value = useMemo(
     () => ({
@@ -79,7 +53,7 @@ export function StationProvider({ children }: { children: React.ReactNode }) {
       isPlaying,
       setIsPlaying,
     }),
-    [selectedStation, stations, queue, nowPlaying, playingStation, isPlaying]
+    [selectedStation, setSelectedStation, stations, queue, nowPlaying, playingStation, isPlaying],
   );
 
   return <StationContext.Provider value={value}>{children}</StationContext.Provider>;

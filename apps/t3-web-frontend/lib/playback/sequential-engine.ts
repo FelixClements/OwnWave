@@ -1,21 +1,17 @@
 import type { StreamResolver } from './stream-resolver';
-import type { PlaybackCallbacks, PlaybackTrack, StreamOptions } from './types';
+import type { PlaybackCallbacks, PlaybackEngine, PlaybackTrack, StreamOptions } from './types';
 
 /** Fallback when Web Audio is unavailable — sequential single-deck playback. */
-export class SequentialAudioEngine {
+export class SequentialAudioEngine implements PlaybackEngine {
   private queue: PlaybackTrack[] = [];
   private streamOptions: StreamOptions = { format: 'flac', bitrate: '320' };
-  private audio: HTMLAudioElement | null = null;
   private currentIndex = 0;
 
   constructor(
     private readonly resolver: StreamResolver,
     private readonly callbacks: PlaybackCallbacks,
+    private readonly audio: HTMLAudioElement,
   ) {}
-
-  attach(audio: HTMLAudioElement) {
-    this.audio = audio;
-  }
 
   setStreamOptions(options: StreamOptions) {
     this.streamOptions = options;
@@ -30,51 +26,53 @@ export class SequentialAudioEngine {
   }
 
   pause() {
-    this.audio?.pause();
-  }
-
-  async load(queue: PlaybackTrack[], startIndex = 0) {
-    this.queue = queue;
-    this.currentIndex = startIndex;
-    if (!this.audio) return;
-    await this.playIndex(startIndex);
+    this.audio.pause();
   }
 
   async play() {
-    if (this.audio) await this.audio.play();
+    await this.audio.play();
+  }
+
+  async load(queue: PlaybackTrack[], startIndex = 0) {
+    this.queue = [...queue];
+    await this.playIndex(startIndex);
   }
 
   async skipTo(index: number) {
-    if (index < 0 || index >= this.queue.length || !this.audio) return;
-    this.audio.onended = null;
+    if (index < 0) return;
     await this.playIndex(index);
+  }
+
+  async removeTrack(id: string) {
+    const idx = this.queue.findIndex((t) => t.id === id);
+    if (idx < 0) return;
+    this.queue.splice(idx, 1);
+    if (idx < this.currentIndex) {
+      this.currentIndex--;
+    } else if (idx === this.currentIndex) {
+      await this.playIndex(idx);
+    }
   }
 
   dispose() {
     this.pause();
-    if (this.audio) {
-      this.audio.onended = null;
-      this.audio.src = '';
-    }
+    this.audio.onended = null;
+    this.audio.removeAttribute('src');
   }
 
   private async playIndex(index: number) {
-    const audio = this.audio;
     const track = this.queue[index];
-    if (!audio || !track) return;
-
+    this.audio.onended = null;
+    if (!track) {
+      this.audio.pause();
+      this.callbacks.onQueueEnd();
+      return;
+    }
     this.currentIndex = index;
-    const url = await this.resolver.resolve(track.id, this.streamOptions);
-    audio.src = url;
-    audio.load();
+    this.audio.src = await this.resolver.resolve(track.id, this.streamOptions);
+    this.audio.load();
     this.callbacks.onTrackChange(track, index);
-    await audio.play();
-
-    audio.onended = () => {
-      const next = this.currentIndex + 1;
-      if (next < this.queue.length) {
-        void this.playIndex(next);
-      }
-    };
+    this.audio.onended = () => void this.playIndex(this.currentIndex + 1);
+    await this.audio.play();
   }
 }
