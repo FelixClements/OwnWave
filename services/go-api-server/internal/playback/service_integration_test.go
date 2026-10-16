@@ -5,6 +5,7 @@ package playback_test
 import (
 	"context"
 	"fmt"
+	"sort"
 	"testing"
 	"time"
 
@@ -14,419 +15,258 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"ownwave/api/internal/playback"
+	"ownwave/api/internal/stations"
+	"ownwave/api/internal/testdb"
 )
 
-type trackSeed struct {
-	path     string
-	title    string
-	artist   string
-	album    string
-	position int
-	playedAt *time.Time
-	feedback string
-	trackNum int
+const minConfidence = 0.3
+
+type fixture struct {
+	t    *testing.T
+	pool *pgxpool.Pool
+	ctx  context.Context
+	user string
 }
 
-func seedArtist(t *testing.T, pool *pgxpool.Pool, name string) string {
-	t.Helper()
-	ctx := context.Background()
-	var id string
-	err := pool.QueryRow(ctx, `
-		INSERT INTO artists (name) VALUES ($1)
-		ON CONFLICT (name) DO UPDATE SET name = EXCLUDED.name
-		RETURNING id::text
-	`, name).Scan(&id)
-	require.NoError(t, err)
-	return id
+func newFixture(t *testing.T) *fixture {
+	f := &fixture{t: t, pool: testdb.NewPool(t), ctx: context.Background()}
+	f.user = f.newUser()
+	return f
 }
 
-func seedAlbum(t *testing.T, pool *pgxpool.Pool, artistID, title string) string {
-	t.Helper()
-	ctx := context.Background()
-	var id string
-	err := pool.QueryRow(ctx, `
-		INSERT INTO albums (artist_id, title) VALUES ($1::uuid, $2)
-		ON CONFLICT (artist_id, title) DO UPDATE SET title = EXCLUDED.title
-		RETURNING id::text
-	`, artistID, title).Scan(&id)
-	require.NoError(t, err)
-	return id
+func (f *fixture) scalar(query string, args ...any) string {
+	f.t.Helper()
+	var v string
+	require.NoError(f.t, f.pool.QueryRow(f.ctx, query, args...).Scan(&v))
+	return v
 }
 
-func seedTrackGraph(t *testing.T, pool *pgxpool.Pool, userID, stationID string, seed trackSeed) string {
-	t.Helper()
-	ctx := context.Background()
+func (f *fixture) exec(query string, args ...any) {
+	f.t.Helper()
+	_, err := f.pool.Exec(f.ctx, query, args...)
+	require.NoError(f.t, err)
+}
 
-	artistID := seedArtist(t, pool, seed.artist)
-	albumID := seedAlbum(t, pool, artistID, seed.album)
+func (f *fixture) newUser() string {
+	return f.scalar(`INSERT INTO users (username, password_hash) VALUES ($1, 'x') RETURNING id::text`, uuid.NewString())
+}
 
-	var trackID string
-	err := pool.QueryRow(ctx, `
-		INSERT INTO tracks (path, artist_id, album_id, title, track_number, duration_seconds, sample_rate, channels)
-		VALUES ($1, $2::uuid, $3::uuid, $4, $5, 180.0, 44100, 2)
-		RETURNING id::text
-	`, seed.path, artistID, albumID, seed.title, seed.trackNum).Scan(&trackID)
-	require.NoError(t, err)
+type track struct {
+	title, artist, album string
+	bpm, energy, valence float64
+	genres               map[string]float64 // "main/sub" -> confidence
+	cluster              *int
+	vector               string // pgvector literal, e.g. "[1,0,...]"
+}
 
-	_, err = pool.Exec(ctx, `
-		INSERT INTO audio_features (track_id, bpm, key, energy, valence, loudness)
-		VALUES ($1::uuid, 120.0, 'C', 0.5, 0.5, -10.0)
-	`, trackID)
-	require.NoError(t, err)
-
-	if seed.feedback != "" {
-		_, err = pool.Exec(ctx, `
-			INSERT INTO track_feedback (user_id, track_id, feedback) VALUES ($1::uuid, $2::uuid, $3)
-		`, userID, trackID, seed.feedback)
-		require.NoError(t, err)
+func (f *fixture) addTrack(tr track) string {
+	f.t.Helper()
+	if tr.artist == "" {
+		tr.artist = "Artist"
 	}
+	if tr.album == "" {
+		tr.album = "Album"
+	}
+	artistID := f.scalar(`INSERT INTO artists (name) VALUES ($1)
+		ON CONFLICT (name) DO UPDATE SET name = EXCLUDED.name RETURNING id::text`, tr.artist)
+	albumID := f.scalar(`INSERT INTO albums (artist_id, title) VALUES ($1::uuid, $2)
+		ON CONFLICT (artist_id, title) DO UPDATE SET title = EXCLUDED.title RETURNING id::text`, artistID, tr.album)
+	id := f.scalar(`INSERT INTO tracks (path, artist_id, album_id, title, duration_seconds)
+		VALUES ($1, $2::uuid, $3::uuid, $4, 180) RETURNING id::text`,
+		fmt.Sprintf("/music/%s.flac", uuid.NewString()), artistID, albumID, tr.title)
 
-	_, err = pool.Exec(ctx, `
-		INSERT INTO station_tracks (station_id, track_id, position, played_at)
-		VALUES ($1::uuid, $2::uuid, $3, $4)
-	`, stationID, trackID, seed.position, seed.playedAt)
-	require.NoError(t, err)
+	var vector any
+	if tr.vector != "" {
+		vector = tr.vector
+	}
+	f.exec(`INSERT INTO audio_features (track_id, bpm, key, energy, valence, loudness, feature_vector)
+		VALUES ($1::uuid, $2, 'C', $3, $4, -10, $5::vector)`, id, tr.bpm, tr.energy, tr.valence, vector)
 
-	return trackID
-}
-
-func seedUser(t *testing.T, pool *pgxpool.Pool) string {
-	t.Helper()
-	ctx := context.Background()
-	var id string
-	err := pool.QueryRow(ctx, `
-		INSERT INTO users (username, password_hash, is_admin)
-		VALUES ($1, 'x', false)
-		RETURNING id::text
-	`, uuid.NewString()).Scan(&id)
-	require.NoError(t, err)
+	for genre, conf := range tr.genres {
+		main, sub := splitGenre(genre)
+		f.exec(`INSERT INTO track_genres (track_id, main_genre, sub_genre, confidence, source)
+			VALUES ($1::uuid, $2, $3, $4, 'test')`, id, main, sub, conf)
+	}
+	if tr.cluster != nil {
+		f.exec(`INSERT INTO track_clusters (track_id, cluster_id) VALUES ($1::uuid, $2)`, id, *tr.cluster)
+	}
 	return id
 }
 
-func seedStation(t *testing.T, pool *pgxpool.Pool, userID, name string) string {
-	t.Helper()
-	ctx := context.Background()
-	var id string
-	err := pool.QueryRow(ctx, `
-		INSERT INTO stations (name, user_id) VALUES ($1, $2::uuid) RETURNING id::text
-	`, name, userID).Scan(&id)
-	require.NoError(t, err)
-	return id
-}
-
-func TestRecord_WritesListeningHistory(t *testing.T) {
-	pool := setupTestDB(t)
-	ctx := context.Background()
-	userID := seedUser(t, pool)
-	stationID := seedStation(t, pool, userID, "record-history")
-	trackID := seedTrackGraph(t, pool, userID, stationID, trackSeed{
-		path:     fmt.Sprintf("/music/%s.flac", uuid.NewString()),
-		title:    "History Track",
-		artist:   "Test Artist",
-		album:    "Test Album",
-		position: 1,
-	})
-
-	svc := playback.NewService(pool)
-	require.NoError(t, svc.Record(ctx, userID, trackID, ""))
-
-	var count int
-	err := pool.QueryRow(ctx, `
-		SELECT COUNT(*) FROM listening_history
-		WHERE track_id = $1::uuid AND station_id IS NULL
-	`, trackID).Scan(&count)
-	require.NoError(t, err)
-	assert.Equal(t, 1, count)
-}
-
-func TestRecord_UpdatesStationTracksPlayedAt(t *testing.T) {
-	pool := setupTestDB(t)
-	ctx := context.Background()
-	userID := seedUser(t, pool)
-	stationID := seedStation(t, pool, userID, "record-station")
-	trackID := seedTrackGraph(t, pool, userID, stationID, trackSeed{
-		path:     fmt.Sprintf("/music/%s.flac", uuid.NewString()),
-		title:    "Station Track",
-		artist:   "Rotation Artist",
-		album:    "Rotation Album",
-		position: 1,
-	})
-
-	svc := playback.NewService(pool)
-	require.NoError(t, svc.Record(ctx, userID, trackID, stationID))
-
-	var historyStationID *string
-	err := pool.QueryRow(ctx, `
-		SELECT station_id::text FROM listening_history WHERE track_id = $1::uuid
-	`, trackID).Scan(&historyStationID)
-	require.NoError(t, err)
-	require.NotNil(t, historyStationID)
-	assert.Equal(t, stationID, *historyStationID)
-
-	var playedAt *time.Time
-	err = pool.QueryRow(ctx, `
-		SELECT played_at FROM station_tracks WHERE station_id = $1::uuid AND track_id = $2::uuid
-	`, stationID, trackID).Scan(&playedAt)
-	require.NoError(t, err)
-	assert.NotNil(t, playedAt)
-}
-
-func TestRecord_TransactionAtomic(t *testing.T) {
-	pool := setupTestDB(t)
-	ctx := context.Background()
-	userID := seedUser(t, pool)
-	stationID := seedStation(t, pool, userID, "atomic-station")
-	trackID := seedTrackGraph(t, pool, userID, stationID, trackSeed{
-		path:     fmt.Sprintf("/music/%s.flac", uuid.NewString()),
-		title:    "Atomic Track",
-		artist:   "Atomic Artist",
-		album:    "Atomic Album",
-		position: 1,
-	})
-
-	nonexistentStationID := uuid.NewString()
-
-	svc := playback.NewService(pool)
-	err := svc.Record(ctx, userID, trackID, nonexistentStationID)
-	require.Error(t, err)
-
-	var count int
-	err = pool.QueryRow(ctx, `
-		SELECT COUNT(*) FROM listening_history WHERE track_id = $1::uuid
-	`, trackID).Scan(&count)
-	require.NoError(t, err)
-	assert.Equal(t, 0, count)
-}
-
-func TestBuildQueue_ExcludesRecentlyPlayed(t *testing.T) {
-	pool := setupTestDB(t)
-	ctx := context.Background()
-	userID := seedUser(t, pool)
-	stationID := seedStation(t, pool, userID, "recent-queue")
-
-	recent := time.Now().Add(-1 * time.Hour)
-	recentTrackID := seedTrackGraph(t, pool, userID, stationID, trackSeed{
-		path:     fmt.Sprintf("/music/%s.flac", uuid.NewString()),
-		title:    "Recent Track",
-		artist:   "Queue Artist A",
-		album:    "Queue Album",
-		position: 1,
-		playedAt: &recent,
-	})
-	unplayedTrackID := seedTrackGraph(t, pool, userID, stationID, trackSeed{
-		path:     fmt.Sprintf("/music/%s.flac", uuid.NewString()),
-		title:    "Fresh Track",
-		artist:   "Queue Artist B",
-		album:    "Queue Album",
-		position: 2,
-	})
-
-	svc := playback.NewService(pool)
-	queue, err := svc.BuildQueue(ctx, userID, stationID, 24)
-	require.NoError(t, err)
-
-	ids := queueTrackIDs(queue)
-	assert.Contains(t, ids, unplayedTrackID)
-	assert.NotContains(t, ids, recentTrackID)
-}
-
-func TestBuildQueue_FallbackWhenAllPlayed(t *testing.T) {
-	pool := setupTestDB(t)
-	ctx := context.Background()
-	userID := seedUser(t, pool)
-	stationID := seedStation(t, pool, userID, "fallback-queue")
-
-	recent := time.Now().Add(-1 * time.Hour)
-	trackID := seedTrackGraph(t, pool, userID, stationID, trackSeed{
-		path:     fmt.Sprintf("/music/%s.flac", uuid.NewString()),
-		title:    "Played Track",
-		artist:   "Fallback Artist",
-		album:    "Fallback Album",
-		position: 1,
-		playedAt: &recent,
-	})
-
-	svc := playback.NewService(pool)
-	queue, err := svc.BuildQueue(ctx, userID, stationID, 24)
-	require.NoError(t, err)
-	require.NotEmpty(t, queue)
-	assert.Contains(t, queueTrackIDs(queue), trackID)
-}
-
-func TestBuildQueue_ExcludesBanned(t *testing.T) {
-	pool := setupTestDB(t)
-	ctx := context.Background()
-	userID := seedUser(t, pool)
-	stationID := seedStation(t, pool, userID, "ban-queue")
-
-	bannedTrackID := seedTrackGraph(t, pool, userID, stationID, trackSeed{
-		path:     fmt.Sprintf("/music/%s.flac", uuid.NewString()),
-		title:    "Banned Track",
-		artist:   "Ban Artist",
-		album:    "Ban Album",
-		position: 1,
-		feedback: "ban",
-	})
-	allowedTrackID := seedTrackGraph(t, pool, userID, stationID, trackSeed{
-		path:     fmt.Sprintf("/music/%s.flac", uuid.NewString()),
-		title:    "Allowed Track",
-		artist:   "Allow Artist",
-		album:    "Allow Album",
-		position: 2,
-	})
-
-	svc := playback.NewService(pool)
-	queue, err := svc.BuildQueue(ctx, userID, stationID, 0)
-	require.NoError(t, err)
-
-	ids := queueTrackIDs(queue)
-	assert.Contains(t, ids, allowedTrackID)
-	assert.NotContains(t, ids, bannedTrackID)
-}
-
-func TestBuildQueue_DeduplicatesTitleArtist(t *testing.T) {
-	pool := setupTestDB(t)
-	ctx := context.Background()
-	userID := seedUser(t, pool)
-	stationID := seedStation(t, pool, userID, "dedup-queue")
-
-	sharedTitle := "Shared Title"
-	sharedArtist := "Shared Artist"
-
-	trackOneID := seedTrackGraph(t, pool, userID, stationID, trackSeed{
-		path:     fmt.Sprintf("/music/%s.flac", uuid.NewString()),
-		title:    sharedTitle,
-		artist:   sharedArtist,
-		album:    "Dedup Album One",
-		position: 1,
-	})
-	trackTwoID := seedTrackGraph(t, pool, userID, stationID, trackSeed{
-		path:     fmt.Sprintf("/music/%s.flac", uuid.NewString()),
-		title:    sharedTitle,
-		artist:   sharedArtist,
-		album:    "Dedup Album Two",
-		position: 2,
-	})
-
-	svc := playback.NewService(pool)
-	queue, err := svc.BuildQueue(ctx, userID, stationID, 0)
-	require.NoError(t, err)
-
-	matches := 0
-	for _, q := range queue {
-		if q.Title == sharedTitle && q.Artist != nil && *q.Artist == sharedArtist {
-			matches++
+func splitGenre(g string) (string, string) {
+	for i := range g {
+		if g[i] == '/' {
+			return g[:i], g[i+1:]
 		}
 	}
-	assert.Equal(t, 1, matches)
-	assert.True(t, containsTrackID(queue, trackOneID) || containsTrackID(queue, trackTwoID))
+	return g, g
 }
 
-func TestBuildQueue_BanIsPerUser(t *testing.T) {
-	pool := setupTestDB(t)
-	ctx := context.Background()
-	userA := seedUser(t, pool)
-	userB := seedUser(t, pool)
-	stationA := seedStation(t, pool, userA, "a-station")
-	stationB := seedStation(t, pool, userB, "b-station")
-
-	bannedForA := seedTrackGraph(t, pool, userA, stationA, trackSeed{
-		path:     fmt.Sprintf("/music/%s.flac", uuid.NewString()),
-		title:    "Shared Banned",
-		artist:   "Shared Artist",
-		album:    "Shared Album",
-		position: 1,
-		feedback: "ban",
-	})
-	_, err := pool.Exec(ctx, `
-		INSERT INTO station_tracks (station_id, track_id, position)
-		SELECT $1::uuid, track_id, position FROM station_tracks WHERE station_id = $2::uuid
-	`, stationB, stationA)
-	require.NoError(t, err)
-
-	allowed := seedTrackGraph(t, pool, userB, stationB, trackSeed{
-		path:     fmt.Sprintf("/music/%s.flac", uuid.NewString()),
-		title:    "B Only",
-		artist:   "B Artist",
-		album:    "B Album",
-		position: 2,
-	})
-
-	svc := playback.NewService(pool)
-	queueA, err := svc.BuildQueue(ctx, userA, stationA, 0)
-	require.NoError(t, err)
-	assert.NotContains(t, queueTrackIDs(queueA), bannedForA)
-
-	queueB, err := svc.BuildQueue(ctx, userB, stationB, 0)
-	require.NoError(t, err)
-	idsB := queueTrackIDs(queueB)
-	assert.Contains(t, idsB, bannedForA)
-	assert.Contains(t, idsB, allowed)
+func (f *fixture) station(seed stations.Seed) string {
+	raw, err := seed.JSON()
+	require.NoError(f.t, err)
+	return f.scalar(`INSERT INTO stations (user_id, name, seed_features) VALUES ($1::uuid, $2, $3::jsonb) RETURNING id::text`,
+		f.user, uuid.NewString(), raw)
 }
 
-func TestBuildQueue_WrongUserSeesEmpty(t *testing.T) {
-	pool := setupTestDB(t)
-	ctx := context.Background()
-	owner := seedUser(t, pool)
-	other := seedUser(t, pool)
-	stationID := seedStation(t, pool, owner, "owned")
-	_ = seedTrackGraph(t, pool, owner, stationID, trackSeed{
-		path:     fmt.Sprintf("/music/%s.flac", uuid.NewString()),
-		title:    "Owned Track",
-		artist:   "Owner",
-		album:    "Album",
-		position: 1,
-	})
-
-	svc := playback.NewService(pool)
-	queue, err := svc.BuildQueue(ctx, other, stationID, 0)
-	require.NoError(t, err)
-	assert.Empty(t, queue)
-}
-
-func TestRecord_HistoryIsPerUser(t *testing.T) {
-	pool := setupTestDB(t)
-	ctx := context.Background()
-	userA := seedUser(t, pool)
-	userB := seedUser(t, pool)
-	stationA := seedStation(t, pool, userA, "hist-a")
-	trackID := seedTrackGraph(t, pool, userA, stationA, trackSeed{
-		path:     fmt.Sprintf("/music/%s.flac", uuid.NewString()),
-		title:    "Hist Track",
-		artist:   "Hist Artist",
-		album:    "Hist Album",
-		position: 1,
-	})
-
-	svc := playback.NewService(pool)
-	require.NoError(t, svc.Record(ctx, userA, trackID, ""))
-
-	var countA, countB int
-	err := pool.QueryRow(ctx, `
-		SELECT COUNT(*) FROM listening_history WHERE user_id = $1::uuid AND track_id = $2::uuid
-	`, userA, trackID).Scan(&countA)
-	require.NoError(t, err)
-	err = pool.QueryRow(ctx, `
-		SELECT COUNT(*) FROM listening_history WHERE user_id = $1::uuid AND track_id = $2::uuid
-	`, userB, trackID).Scan(&countB)
-	require.NoError(t, err)
-	assert.Equal(t, 1, countA)
-	assert.Equal(t, 0, countB)
-}
-
-func queueTrackIDs(queue []playback.TrackWithFeatures) []string {
+func (f *fixture) queueIDs(stationID string, seed stations.Seed) []string {
+	f.t.Helper()
+	svc := playback.NewService(f.pool, minConfidence)
+	queue, err := svc.BuildQueue(f.ctx, f.user, stationID, seed, 24)
+	require.NoError(f.t, err)
 	ids := make([]string, len(queue))
 	for i, q := range queue {
 		ids[i] = q.ID
+		assert.Equal(f.t, i, q.Position)
 	}
 	return ids
 }
 
-func containsTrackID(queue []playback.TrackWithFeatures, trackID string) bool {
-	for _, q := range queue {
-		if q.ID == trackID {
-			return true
-		}
+func sorted(ids ...string) []string {
+	out := append([]string(nil), ids...)
+	sort.Strings(out)
+	return out
+}
+
+func vec(first float64) string {
+	v := "[" + fmt.Sprint(first)
+	for i := 1; i < 33; i++ {
+		v += ",0.1"
 	}
-	return false
+	return v + "]"
+}
+
+func ptr[T any](v T) *T { return &v }
+
+func TestBuildQueue_SeedTypes(t *testing.T) {
+	f := newFixture(t)
+	cluster := 7
+	rock := f.addTrack(track{title: "Rock", artist: "Rocker", album: "Loud", bpm: 140, energy: 0.9, valence: 0.6,
+		genres: map[string]float64{"rock/punk": 0.9}, cluster: &cluster})
+	rockWeak := f.addTrack(track{title: "Maybe Rock", bpm: 100, energy: 0.5, valence: 0.5,
+		genres: map[string]float64{"rock/indie": 0.1}})
+	jazz := f.addTrack(track{title: "Jazz", artist: "Cat", bpm: 90, energy: 0.2, valence: 0.3,
+		genres: map[string]float64{"jazz/bebop": 0.8}})
+	plain := f.addTrack(track{title: "Plain", artist: "Rocker", album: "Other", bpm: 120, energy: 0.6, valence: 0.9})
+
+	artistID := f.scalar(`SELECT artist_id::text FROM tracks WHERE id = $1::uuid`, rock)
+	albumID := f.scalar(`SELECT album_id::text FROM tracks WHERE id = $1::uuid`, rock)
+
+	cases := map[string]struct {
+		seed stations.Seed
+		want []string
+	}{
+		"whole library":         {stations.Seed{}, sorted(rock, rockWeak, jazz, plain)},
+		"genre uses confidence": {stations.Seed{Type: "genre", MainGenre: "rock"}, sorted(rock)},
+		"sub genre":             {stations.Seed{Type: "sub_genre", MainGenre: "jazz", SubGenre: "bebop"}, sorted(jazz)},
+		"uncategorized":         {stations.Seed{Type: "uncategorized"}, sorted(rockWeak, plain)},
+		"artist":                {stations.Seed{Type: "artist", ArtistID: artistID}, sorted(rock, plain)},
+		"album":                 {stations.Seed{Type: "album", AlbumID: albumID}, sorted(rock)},
+		"cluster":               {stations.Seed{Type: "cluster", ClusterID: &cluster}, sorted(rock)},
+		"mood range":            {stations.Seed{Type: "mood", MinEnergy: ptr(0.4), MaxValence: ptr(0.7)}, sorted(rock, rockWeak)},
+		"bpm range with genre":  {stations.Seed{Type: "genre", MainGenre: "rock", MaxBPM: ptr(120.0)}, nil},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			got := f.queueIDs(f.station(tc.seed), tc.seed)
+			assert.Equal(t, tc.want, sortedOrNil(got))
+		})
+	}
+}
+
+func sortedOrNil(ids []string) []string {
+	if len(ids) == 0 {
+		return nil
+	}
+	return sorted(ids...)
+}
+
+func TestBuildQueue_TrackSeedUsesNearestNeighbours(t *testing.T) {
+	f := newFixture(t)
+	seedTrack := f.addTrack(track{title: "Seed", vector: vec(1)})
+	near := f.addTrack(track{title: "Near", vector: vec(0.9)})
+	noVector := f.addTrack(track{title: "No vector"})
+
+	seed := stations.Seed{Type: "track", TrackID: seedTrack}
+	got := f.queueIDs(f.station(seed), seed)
+	assert.Equal(t, sorted(seedTrack, near), sorted(got...))
+	assert.NotContains(t, got, noVector)
+}
+
+func TestBuildQueue_ExcludesBansAndFlagsLikes(t *testing.T) {
+	f := newFixture(t)
+	liked := f.addTrack(track{title: "Liked"})
+	banned := f.addTrack(track{title: "Banned"})
+	f.exec(`INSERT INTO track_feedback (user_id, track_id, feedback) VALUES ($1::uuid, $2::uuid, 'like'), ($1::uuid, $3::uuid, 'ban')`,
+		f.user, liked, banned)
+
+	svc := playback.NewService(f.pool, minConfidence)
+	station := f.station(stations.Seed{})
+	queue, err := svc.BuildQueue(f.ctx, f.user, station, stations.Seed{}, 24)
+	require.NoError(t, err)
+	require.Len(t, queue, 1)
+	assert.Equal(t, liked, queue[0].ID)
+	assert.True(t, queue[0].Liked)
+
+	// Another user's ban does not affect this user.
+	other := f.newUser()
+	f.exec(`INSERT INTO track_feedback (user_id, track_id, feedback) VALUES ($1::uuid, $2::uuid, 'ban')`, other, liked)
+	n, err := svc.PoolSize(f.ctx, f.user, stations.Seed{})
+	require.NoError(t, err)
+	assert.Equal(t, 1, n)
+}
+
+func TestBuildQueue_RecentlyPlayedGoLastOldestFirst(t *testing.T) {
+	f := newFixture(t)
+	fresh := f.addTrack(track{title: "Fresh"})
+	playedLongAgo := f.addTrack(track{title: "Long ago"})
+	playedHourAgo := f.addTrack(track{title: "Hour ago"})
+	playedJustNow := f.addTrack(track{title: "Just now"})
+	station := f.station(stations.Seed{})
+
+	now := time.Now()
+	for id, at := range map[string]time.Time{
+		playedLongAgo: now.Add(-72 * time.Hour),
+		playedHourAgo: now.Add(-time.Hour),
+		playedJustNow: now.Add(-time.Minute),
+	} {
+		f.exec(`INSERT INTO listening_history (user_id, track_id, station_id, played_at) VALUES ($1::uuid, $2::uuid, $3::uuid, $4)`,
+			f.user, id, station, at)
+	}
+
+	got := f.queueIDs(station, stations.Seed{})
+	require.Len(t, got, 4)
+	assert.ElementsMatch(t, []string{fresh, playedLongAgo}, got[:2], "outside the recent window counts as fresh")
+	assert.Equal(t, []string{playedHourAgo, playedJustNow}, got[2:])
+}
+
+func TestBuildQueue_PagesAndDedupes(t *testing.T) {
+	f := newFixture(t)
+	for i := 0; i < playback.QueuePageSize+10; i++ {
+		f.addTrack(track{title: fmt.Sprintf("Track %d", i)})
+	}
+	f.addTrack(track{title: "Track 0", album: "Deluxe"}) // same title+artist as an existing track
+
+	station := f.station(stations.Seed{})
+	assert.Len(t, f.queueIDs(station, stations.Seed{}), playback.QueuePageSize)
+
+	n, err := playback.NewService(f.pool, minConfidence).PoolSize(f.ctx, f.user, stations.Seed{})
+	require.NoError(t, err)
+	assert.Equal(t, playback.QueuePageSize+11, n)
+}
+
+func TestRecord_WritesHistoryAndChecksStationOwner(t *testing.T) {
+	f := newFixture(t)
+	trackID := f.addTrack(track{title: "History"})
+	station := f.station(stations.Seed{})
+	svc := playback.NewService(f.pool, minConfidence)
+
+	require.NoError(t, svc.Record(f.ctx, f.user, trackID, ""))
+	require.NoError(t, svc.Record(f.ctx, f.user, trackID, station))
+	assert.Equal(t, "2", f.scalar(`SELECT COUNT(*)::text FROM listening_history WHERE track_id = $1::uuid`, trackID))
+	assert.Equal(t, "1", f.scalar(`SELECT COUNT(*)::text FROM listening_history WHERE station_id = $1::uuid`, station))
+
+	other := f.newUser()
+	require.Error(t, svc.Record(f.ctx, other, trackID, station))
+	assert.Equal(t, "2", f.scalar(`SELECT COUNT(*)::text FROM listening_history WHERE track_id = $1::uuid`, trackID))
 }

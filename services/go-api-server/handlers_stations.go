@@ -3,11 +3,15 @@ package main
 import (
 	"encoding/json"
 	"errors"
-	"io"
 	"net/http"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+
+	"ownwave/api/internal/auth"
+	"ownwave/api/internal/stations"
 )
 
 func (h *Handler) ListStations(w http.ResponseWriter, r *http.Request) {
@@ -15,13 +19,38 @@ func (h *Handler) ListStations(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	stations, err := h.db.ListStations(r.Context(), user.ID)
+	list, err := h.db.ListStations(r.Context(), user.ID)
 	if err != nil {
 		writeInternalError(w, r, "list stations", err)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{"stations": stations})
+	json.NewEncoder(w).Encode(map[string]interface{}{"stations": list})
+}
+
+// loadStation fetches the user's station named by the {id} URL param and
+// parses its seed, writing 404/500 itself when that fails.
+func (h *Handler) loadStation(w http.ResponseWriter, r *http.Request, user auth.User) (Station, stations.Seed, bool) {
+	id := chi.URLParam(r, "id")
+	if _, err := uuid.Parse(id); err != nil {
+		http.Error(w, "station not found", http.StatusNotFound)
+		return Station{}, stations.Seed{}, false
+	}
+	station, err := h.db.GetStationByID(r.Context(), user.ID, id)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			http.Error(w, "station not found", http.StatusNotFound)
+		} else {
+			writeInternalError(w, r, "get station", err)
+		}
+		return Station{}, stations.Seed{}, false
+	}
+	seed, err := stations.ParseStored(station.SeedFeatures)
+	if err != nil {
+		writeInternalError(w, r, "parse station seed", err)
+		return Station{}, stations.Seed{}, false
+	}
+	return station, seed, true
 }
 
 func (h *Handler) GetStation(w http.ResponseWriter, r *http.Request) {
@@ -29,18 +58,61 @@ func (h *Handler) GetStation(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	id := chi.URLParam(r, "id")
-	station, err := h.db.GetStationByID(r.Context(), user.ID, id)
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			http.Error(w, "station not found", http.StatusNotFound)
-			return
-		}
-		writeInternalError(w, r, "get station", err)
+	station, _, ok := h.loadStation(w, r, user)
+	if !ok {
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(station)
+}
+
+// decodeStationRequest reads a create/update body, writing 400/413 on failure.
+func decodeStationRequest(w http.ResponseWriter, r *http.Request) (stations.Request, bool) {
+	var req stations.Request
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		var maxBytesErr *http.MaxBytesError
+		if errors.As(err, &maxBytesErr) {
+			http.Error(w, "request entity too large", http.StatusRequestEntityTooLarge)
+		} else {
+			http.Error(w, "invalid request", http.StatusBadRequest)
+		}
+		return req, false
+	}
+	req.Name = strings.TrimSpace(req.Name)
+	return req, true
+}
+
+func (h *Handler) CreateStation(w http.ResponseWriter, r *http.Request) {
+	user, ok := h.currentUser(w, r)
+	if !ok {
+		return
+	}
+	req, ok := decodeStationRequest(w, r)
+	if !ok {
+		return
+	}
+	if req.Name == "" {
+		http.Error(w, "name is required", http.StatusBadRequest)
+		return
+	}
+	seed, err := req.Seed()
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	raw, err := seed.JSON()
+	if err != nil {
+		writeInternalError(w, r, "encode station seed", err)
+		return
+	}
+	id, err := h.db.CreateStation(r.Context(), user.ID, req.Name, raw)
+	if err != nil {
+		writeInternalError(w, r, "create station", err)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"station_id": id})
 }
 
 func (h *Handler) UpdateStation(w http.ResponseWriter, r *http.Request) {
@@ -48,28 +120,47 @@ func (h *Handler) UpdateStation(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	id := chi.URLParam(r, "id")
-	if _, err := h.db.GetStationByID(r.Context(), user.ID, id); err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			http.Error(w, "station not found", http.StatusNotFound)
-			return
-		}
-		writeInternalError(w, r, "get station", err)
+	station, seed, ok := h.loadStation(w, r, user)
+	if !ok {
 		return
 	}
-	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
-	body, err := io.ReadAll(r.Body)
+	req, ok := decodeStationRequest(w, r)
+	if !ok {
+		return
+	}
+
+	name := req.Name
+	if name == "" {
+		name = station.Name
+	}
+	if req.HasSeed() {
+		var err error
+		if seed, err = req.Seed(); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+	}
+	raw, err := seed.JSON()
 	if err != nil {
-		var maxBytesErr *http.MaxBytesError
-		if errors.As(err, &maxBytesErr) {
-			http.Error(w, "request entity too large", http.StatusRequestEntityTooLarge)
-			return
-		}
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		writeInternalError(w, r, "encode station seed", err)
 		return
 	}
-	resp, err := h.analyticsFor(user.ID).UpdateStation(id, body)
-	proxyAnalytics(w, r, resp, err)
+
+	if err := h.db.UpdateStation(r.Context(), user.ID, station.ID, name, raw); err != nil {
+		writeInternalError(w, r, "update station", err)
+		return
+	}
+	count, err := h.playback.PoolSize(r.Context(), user.ID, seed)
+	if err != nil {
+		writeInternalError(w, r, "count station tracks", err)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"station_id":  station.ID,
+		"name":        name,
+		"track_count": count,
+	})
 }
 
 func (h *Handler) DeleteStation(w http.ResponseWriter, r *http.Request) {
@@ -78,6 +169,10 @@ func (h *Handler) DeleteStation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	id := chi.URLParam(r, "id")
+	if _, err := uuid.Parse(id); err != nil {
+		http.Error(w, "station not found", http.StatusNotFound)
+		return
+	}
 	if err := h.db.DeleteStation(r.Context(), user.ID, id); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			http.Error(w, "station not found", http.StatusNotFound)
@@ -94,16 +189,11 @@ func (h *Handler) GetQueue(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	id := chi.URLParam(r, "id")
-	if _, err := h.db.GetStationByID(r.Context(), user.ID, id); err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			http.Error(w, "station not found", http.StatusNotFound)
-			return
-		}
-		writeInternalError(w, r, "get station", err)
+	station, seed, ok := h.loadStation(w, r, user)
+	if !ok {
 		return
 	}
-	queue, err := h.playback.BuildQueue(r.Context(), user.ID, id, h.recentHours)
+	queue, err := h.playback.BuildQueue(r.Context(), user.ID, station.ID, seed, h.recentHours)
 	if err != nil {
 		writeInternalError(w, r, "build queue", err)
 		return
@@ -112,22 +202,12 @@ func (h *Handler) GetQueue(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]interface{}{"queue": queue})
 }
 
-func (h *Handler) CreateStation(w http.ResponseWriter, r *http.Request) {
-	user, ok := h.currentUser(w, r)
-	if !ok {
-		return
-	}
-	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
-	body, err := io.ReadAll(r.Body)
+// ensureGenreStation creates the user's station for a genre seed unless one
+// with that name already exists.
+func (h *Handler) ensureGenreStation(r *http.Request, userID, name string, seed stations.Seed) (string, bool, error) {
+	raw, err := seed.JSON()
 	if err != nil {
-		var maxBytesErr *http.MaxBytesError
-		if errors.As(err, &maxBytesErr) {
-			http.Error(w, "request entity too large", http.StatusRequestEntityTooLarge)
-			return
-		}
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
+		return "", false, err
 	}
-	resp, err := h.analyticsFor(user.ID).CreateStation(body)
-	proxyAnalytics(w, r, resp, err)
+	return h.db.EnsureStation(r.Context(), userID, name, raw)
 }

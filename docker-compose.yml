@@ -137,6 +137,8 @@ services:
       OWNWAVE_DOMAIN: ${OWNWAVE_DOMAIN:-localhost}
       FFMPEG_PATH: ffmpeg
       PYTHON_API_URL: http://python:8000
+      GENRE_MIN_CONFIDENCE: ${GENRE_MIN_CONFIDENCE:-0.3}
+      GENRE_MIN_TRACKS_PER_STATION: ${GENRE_MIN_TRACKS_PER_STATION:-5}
     volumes:
       - ${MUSIC_PATH:-./music}:/music:ro
       - ./database/migrations:/migrations:ro

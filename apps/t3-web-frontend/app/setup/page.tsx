@@ -314,7 +314,7 @@ export default function SetupPage() {
           <div className="p-4 rounded bg-spotify-card space-y-4 text-center">
             <h2 className="text-lg font-semibold">Setup complete</h2>
             <p className="text-spotify-subdued">
-              Your stations have been created. Every track is now in at least one station.
+              Your stations are ready. They update automatically as your library changes.
             </p>
             <button
               onClick={handleComplete}

@@ -85,3 +85,23 @@ func TestMetricsUseRoutePattern(t *testing.T) {
 	labels := prometheus.Labels{"method": http.MethodGet, "route": "/tracks/{id}", "status": http.StatusText(http.StatusOK)}
 	require.Equal(t, 3.0, testutil.ToFloat64(requestCount.With(labels)))
 }
+
+func TestCreateStationRejectsInvalidSeed(t *testing.T) {
+	h := newTestHandler(analytics.NewStub())
+	cases := map[string]string{
+		"missing name":       `{"seed_type":"genre","main_genre":"rock"}`,
+		"genre without name": `{"name":"x","seed_type":"genre"}`,
+		"bad track id":       `{"name":"x","seed_type":"track","track_id":"nope"}`,
+		"unknown type":       `{"name":"x","seed_type":"vibes"}`,
+		"energy range":       `{"name":"x","seed_type":"mood","min_energy":2}`,
+	}
+	for name, body := range cases {
+		t.Run(name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodPost, "/stations", strings.NewReader(body))
+			req = req.WithContext(auth.WithUser(req.Context(), auth.User{ID: "6f1b8c6e-6a43-4e4b-9b1e-2b3f8d1a0c55"}))
+			rec := httptest.NewRecorder()
+			h.CreateStation(rec, req)
+			require.Equal(t, http.StatusBadRequest, rec.Code, rec.Body.String())
+		})
+	}
+}

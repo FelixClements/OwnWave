@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"errors"
+	"math"
 	"strings"
 	"time"
 
@@ -138,56 +140,126 @@ func (db *DB) ListStations(ctx context.Context, userID string) ([]Station, error
 	return stations, rows.Err()
 }
 
-type StationQueueStatus struct {
-	Station
-	TrackCount  int `json:"track_count"`
-	PlayedCount int `json:"played_count"`
-}
-
-func (db *DB) ListStationsWithQueueStatus(ctx context.Context, userID string) ([]StationQueueStatus, error) {
-	rows, err := db.pool.Query(ctx, `
-		SELECT s.id::text, s.name, s.seed_features::text,
-		       COUNT(st.track_id) FILTER (WHERE st.station_id = s.id),
-		       COUNT(st.track_id) FILTER (WHERE st.station_id = s.id AND st.played_at IS NOT NULL)
-		FROM stations s
-		LEFT JOIN station_tracks st ON s.id = st.station_id
-		WHERE s.user_id = $1::uuid
-		GROUP BY s.id, s.name, s.seed_features
-		ORDER BY s.created_at DESC
-	`, userID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	out := make([]StationQueueStatus, 0)
-	for rows.Next() {
-		var q StationQueueStatus
-		if err := rows.Scan(&q.ID, &q.Name, &q.SeedFeatures, &q.TrackCount, &q.PlayedCount); err != nil {
-			return nil, err
-		}
-		out = append(out, q)
-	}
-	return out, rows.Err()
-}
-
 func (db *DB) GetStationByID(ctx context.Context, userID, stationID string) (Station, error) {
 	var s Station
 	err := db.pool.QueryRow(ctx, `
 		SELECT id::text, name, seed_features::text
 		FROM stations
-		WHERE id = $1 AND user_id = $2::uuid
+		WHERE id = $1::uuid AND user_id = $2::uuid
 	`, stationID, userID).Scan(&s.ID, &s.Name, &s.SeedFeatures)
 	return s, err
 }
 
-func (db *DB) UpdateStation(ctx context.Context, userID, stationID, name, seedFeatures string) error {
+// CreateStation stores a station; seed is the stations.Seed JSON (nil = whole library).
+func (db *DB) CreateStation(ctx context.Context, userID, name string, seed []byte) (string, error) {
+	var id string
+	err := db.pool.QueryRow(ctx, `
+		INSERT INTO stations (user_id, name, seed_features)
+		VALUES ($1::uuid, $2, $3::jsonb)
+		RETURNING id::text
+	`, userID, name, seed).Scan(&id)
+	return id, err
+}
+
+// UpdateStation renames a station and replaces its seed.
+func (db *DB) UpdateStation(ctx context.Context, userID, stationID, name string, seed []byte) error {
 	_, err := db.pool.Exec(ctx, `
-		UPDATE stations
-		SET name = $3,
-		    seed_features = COALESCE(NULLIF($4, '')::jsonb, seed_features)
-		WHERE id = $1 AND user_id = $2::uuid
-	`, stationID, userID, name, seedFeatures)
+		UPDATE stations SET name = $3, seed_features = $4::jsonb
+		WHERE id = $1::uuid AND user_id = $2::uuid
+	`, stationID, userID, name, seed)
 	return err
+}
+
+// EnsureStation returns the user's station with this name, creating it with
+// seed when missing.
+func (db *DB) EnsureStation(ctx context.Context, userID, name string, seed []byte) (id string, created bool, err error) {
+	err = db.pool.QueryRow(ctx, `
+		SELECT id::text FROM stations WHERE user_id = $1::uuid AND name = $2
+		ORDER BY created_at LIMIT 1
+	`, userID, name).Scan(&id)
+	if err == nil {
+		return id, false, nil
+	}
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return "", false, err
+	}
+	id, err = db.CreateStation(ctx, userID, name, seed)
+	return id, err == nil, err
+}
+
+// PlayedCount is the number of distinct tracks the user has played on a station.
+func (db *DB) PlayedCount(ctx context.Context, userID, stationID string) (int, error) {
+	var n int
+	err := db.pool.QueryRow(ctx, `
+		SELECT COUNT(DISTINCT track_id) FROM listening_history
+		WHERE user_id = $1::uuid AND station_id = $2::uuid
+	`, userID, stationID).Scan(&n)
+	return n, err
+}
+
+type GenreCount struct {
+	MainGenre  string
+	SubGenre   string
+	TrackCount int
+}
+
+// GenreCounts returns per-main-genre (SubGenre empty) and per-sub-genre track
+// counts for predictions at or above minConfidence.
+func (db *DB) GenreCounts(ctx context.Context, minConfidence float64) ([]GenreCount, error) {
+	rows, err := db.pool.Query(ctx, `
+		SELECT main_genre, COALESCE(sub_genre, ''), COUNT(DISTINCT track_id)
+		FROM track_genres
+		WHERE confidence >= $1
+		GROUP BY GROUPING SETS ((main_genre), (main_genre, sub_genre))
+		ORDER BY main_genre, sub_genre NULLS FIRST
+	`, minConfidence)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make([]GenreCount, 0)
+	for rows.Next() {
+		var g GenreCount
+		if err := rows.Scan(&g.MainGenre, &g.SubGenre, &g.TrackCount); err != nil {
+			return nil, err
+		}
+		out = append(out, g)
+	}
+	return out, rows.Err()
+}
+
+type SimilarTrack struct {
+	TrackID  string  `json:"track_id"`
+	Distance float64 `json:"distance"`
+}
+
+// SimilarTracks returns the nearest tracks by cosine distance of feature vectors.
+func (db *DB) SimilarTracks(ctx context.Context, trackID string, limit int) ([]SimilarTrack, error) {
+	rows, err := db.pool.Query(ctx, `
+		WITH target AS (
+			SELECT feature_vector FROM audio_features
+			WHERE track_id = $1::uuid AND feature_vector IS NOT NULL
+		)
+		SELECT af.track_id::text, (af.feature_vector <=> target.feature_vector)::float8 AS distance
+		FROM audio_features af, target
+		WHERE af.track_id <> $1::uuid AND af.feature_vector IS NOT NULL
+		ORDER BY distance
+		LIMIT $2
+	`, trackID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make([]SimilarTrack, 0)
+	for rows.Next() {
+		var st SimilarTrack
+		if err := rows.Scan(&st.TrackID, &st.Distance); err != nil {
+			return nil, err
+		}
+		st.Distance = math.Round(st.Distance*1e4) / 1e4
+		out = append(out, st)
+	}
+	return out, rows.Err()
 }
 
 func (db *DB) DeleteStation(ctx context.Context, userID, stationID string) error {
