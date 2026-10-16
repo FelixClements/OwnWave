@@ -10,4 +10,6 @@ apps/t3-web-frontend/tsconfig.tsbuildinfo
 music/**
 !music/.gitkeep
 backups/
+# Database dumps; migrations are source.
 *.sql
+!database/migrations/*.sql
