@@ -20,6 +20,11 @@ celery_app.conf.update(
     task_acks_late=True,
     worker_prefetch_multiplier=1,
     task_track_started=True,
+    # Bound how long publishing waits on an unreachable Redis (defaults: 4s
+    # connect timeout per attempt, 3 retries) so the API answers 503 well
+    # within the Go client's 30s timeout.
+    broker_connection_timeout=2,
+    task_publish_retry_policy={"max_retries": 2, "interval_start": 0, "interval_step": 0.5, "interval_max": 1},
 )
 
 

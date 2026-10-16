@@ -1,6 +1,40 @@
+# Shared by the python, worker and watcher services (same image, same config).
+x-python: &python
+  build:
+    context: ./services/python-analytics
+    args:
+      DOWNLOAD_GENRE_MODELS: ${DOWNLOAD_GENRE_MODELS:-false}
+  platform: linux/amd64
+  restart: unless-stopped
+  environment:
+    DATABASE_URL: postgres://${POSTGRES_USER:-ownwave}:${POSTGRES_PASSWORD:-ownwave}@db:5432/${POSTGRES_DB:-ownwave}
+    REDIS_URL: redis://:${REDIS_PASSWORD:-ownwave}@redis:6379/0
+    CELERY_BROKER_URL: redis://:${REDIS_PASSWORD:-ownwave}@redis:6379/0
+    CELERY_RESULT_BACKEND: redis://:${REDIS_PASSWORD:-ownwave}@redis:6379/0
+    ANALYTICS_API_SECRET: ${ANALYTICS_API_SECRET:-local-analytics-secret-change-me}
+    MUSIC_DIR: /music
+    ENABLE_GENRE_ANALYSIS: ${ENABLE_GENRE_ANALYSIS:-false}
+    GENRE_MODEL_DIR: ${GENRE_MODEL_DIR:-/app/models}
+    GENRE_SNIPPET_START: ${GENRE_SNIPPET_START:-30}
+    GENRE_SNIPPET_DURATION: ${GENRE_SNIPPET_DURATION:-30}
+    GENRE_MIN_CONFIDENCE: ${GENRE_MIN_CONFIDENCE:-0.3}
+    GENRE_MIN_TRACKS_PER_STATION: ${GENRE_MIN_TRACKS_PER_STATION:-5}
+    GENRE_FULL_TRACK_MODE: ${GENRE_FULL_TRACK_MODE:-false}
+  volumes:
+    - ${MUSIC_PATH:-./music}:/music:ro
+  # go runs the database migrations, so it must be healthy first.
+  depends_on:
+    db:
+      condition: service_healthy
+    redis:
+      condition: service_healthy
+    go:
+      condition: service_healthy
+
 services:
   db:
     image: pgvector/pgvector:pg15
+    restart: unless-stopped
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-ownwave}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-ownwave}
@@ -17,6 +51,7 @@ services:
 
   redis:
     image: redis:7-alpine
+    restart: unless-stopped
     command: redis-server --requirepass ${REDIS_PASSWORD:-ownwave}
     volumes:
       - redis_data:/data
@@ -29,105 +64,25 @@ services:
       retries: 10
 
   python:
-    build:
-      context: ./services/python-analytics
-      args:
-        DOWNLOAD_GENRE_MODELS: ${DOWNLOAD_GENRE_MODELS:-false}
-    platform: linux/amd64
-    environment:
-      DATABASE_URL: postgres://${POSTGRES_USER:-ownwave}:${POSTGRES_PASSWORD:-ownwave}@db:5432/${POSTGRES_DB:-ownwave}
-      REDIS_URL: redis://:${REDIS_PASSWORD:-ownwave}@redis:6379/0
-      CELERY_BROKER_URL: redis://:${REDIS_PASSWORD:-ownwave}@redis:6379/0
-      CELERY_RESULT_BACKEND: redis://:${REDIS_PASSWORD:-ownwave}@redis:6379/0
-      ANALYTICS_API_SECRET: ${ANALYTICS_API_SECRET:-local-analytics-secret-change-me}
-      MUSIC_DIR: /music
-      ENABLE_GENRE_ANALYSIS: ${ENABLE_GENRE_ANALYSIS:-false}
-      GENRE_MODEL_DIR: ${GENRE_MODEL_DIR:-/app/models}
-      GENRE_SNIPPET_START: ${GENRE_SNIPPET_START:-30}
-      GENRE_SNIPPET_DURATION: ${GENRE_SNIPPET_DURATION:-30}
-      GENRE_MIN_CONFIDENCE: ${GENRE_MIN_CONFIDENCE:-0.3}
-      GENRE_MIN_TRACKS_PER_STATION: ${GENRE_MIN_TRACKS_PER_STATION:-5}
-      GENRE_FULL_TRACK_MODE: ${GENRE_FULL_TRACK_MODE:-false}
-    volumes:
-      - ${MUSIC_PATH:-./music}:/music:ro
+    <<: *python
     healthcheck:
       test: ["CMD-SHELL", "curl -fsS http://localhost:8000/health"]
       interval: 5s
       timeout: 3s
       retries: 10
       start_period: 20s
-    depends_on:
-      db:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-      go:
-        condition: service_healthy
 
   worker:
-    build:
-      context: ./services/python-analytics
-      args:
-        DOWNLOAD_GENRE_MODELS: ${DOWNLOAD_GENRE_MODELS:-false}
-    platform: linux/amd64
+    <<: *python
     command: celery -A celery_app worker -P prefork -c ${WORKER_CONCURRENCY:-2} --loglevel=info -n worker@%h
-    environment:
-      DATABASE_URL: postgres://${POSTGRES_USER:-ownwave}:${POSTGRES_PASSWORD:-ownwave}@db:5432/${POSTGRES_DB:-ownwave}
-      REDIS_URL: redis://:${REDIS_PASSWORD:-ownwave}@redis:6379/0
-      CELERY_BROKER_URL: redis://:${REDIS_PASSWORD:-ownwave}@redis:6379/0
-      CELERY_RESULT_BACKEND: redis://:${REDIS_PASSWORD:-ownwave}@redis:6379/0
-      ANALYTICS_API_SECRET: ${ANALYTICS_API_SECRET:-local-analytics-secret-change-me}
-      MUSIC_DIR: /music
-      ENABLE_GENRE_ANALYSIS: ${ENABLE_GENRE_ANALYSIS:-false}
-      GENRE_MODEL_DIR: ${GENRE_MODEL_DIR:-/app/models}
-      GENRE_SNIPPET_START: ${GENRE_SNIPPET_START:-30}
-      GENRE_SNIPPET_DURATION: ${GENRE_SNIPPET_DURATION:-30}
-      GENRE_MIN_CONFIDENCE: ${GENRE_MIN_CONFIDENCE:-0.3}
-      GENRE_MIN_TRACKS_PER_STATION: ${GENRE_MIN_TRACKS_PER_STATION:-5}
-      GENRE_FULL_TRACK_MODE: ${GENRE_FULL_TRACK_MODE:-false}
-    volumes:
-      - ${MUSIC_PATH:-./music}:/music:ro
-    depends_on:
-      db:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-      go:
-        condition: service_healthy
 
   watcher:
-    build:
-      context: ./services/python-analytics
-      args:
-        DOWNLOAD_GENRE_MODELS: ${DOWNLOAD_GENRE_MODELS:-false}
-    platform: linux/amd64
+    <<: *python
     command: python -m main watch
-    environment:
-      DATABASE_URL: postgres://${POSTGRES_USER:-ownwave}:${POSTGRES_PASSWORD:-ownwave}@db:5432/${POSTGRES_DB:-ownwave}
-      REDIS_URL: redis://:${REDIS_PASSWORD:-ownwave}@redis:6379/0
-      CELERY_BROKER_URL: redis://:${REDIS_PASSWORD:-ownwave}@redis:6379/0
-      CELERY_RESULT_BACKEND: redis://:${REDIS_PASSWORD:-ownwave}@redis:6379/0
-      ANALYTICS_API_SECRET: ${ANALYTICS_API_SECRET:-local-analytics-secret-change-me}
-      MUSIC_DIR: /music
-      ENABLE_GENRE_ANALYSIS: ${ENABLE_GENRE_ANALYSIS:-false}
-      GENRE_MODEL_DIR: ${GENRE_MODEL_DIR:-/app/models}
-      GENRE_SNIPPET_START: ${GENRE_SNIPPET_START:-30}
-      GENRE_SNIPPET_DURATION: ${GENRE_SNIPPET_DURATION:-30}
-      GENRE_MIN_CONFIDENCE: ${GENRE_MIN_CONFIDENCE:-0.3}
-      GENRE_MIN_TRACKS_PER_STATION: ${GENRE_MIN_TRACKS_PER_STATION:-5}
-      GENRE_FULL_TRACK_MODE: ${GENRE_FULL_TRACK_MODE:-false}
-    volumes:
-      - ${MUSIC_PATH:-./music}:/music:ro
-    depends_on:
-      db:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-      go:
-        condition: service_healthy
 
   go:
     build: ./services/go-api-server
+    restart: unless-stopped
     environment:
       DATABASE_URL: postgres://${POSTGRES_USER:-ownwave}:${POSTGRES_PASSWORD:-ownwave}@db:5432/${POSTGRES_DB:-ownwave}
       MUSIC_DIR: /music
@@ -159,6 +114,7 @@ services:
       context: ./apps/t3-web-frontend
       args:
         GO_API_URL: http://go:8080
+    restart: unless-stopped
     environment:
       GO_API_URL: ${GO_API_URL:-http://go:8080}
     ports:

@@ -6,8 +6,6 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/go-chi/chi/v5"
-	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
 	"ownwave/api/internal/auth"
@@ -24,16 +22,14 @@ func (h *Handler) ListStations(w http.ResponseWriter, r *http.Request) {
 		writeInternalError(w, r, "list stations", err)
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{"stations": list})
+	writeJSON(w, http.StatusOK, map[string]interface{}{"stations": list})
 }
 
 // loadStation fetches the user's station named by the {id} URL param and
 // parses its seed, writing 404/500 itself when that fails.
 func (h *Handler) loadStation(w http.ResponseWriter, r *http.Request, user auth.User) (Station, stations.Seed, bool) {
-	id := chi.URLParam(r, "id")
-	if _, err := uuid.Parse(id); err != nil {
-		http.Error(w, "station not found", http.StatusNotFound)
+	id, ok := parseUUIDParam(w, r, "id")
+	if !ok {
 		return Station{}, stations.Seed{}, false
 	}
 	station, err := h.db.GetStationByID(r.Context(), user.ID, id)
@@ -62,8 +58,7 @@ func (h *Handler) GetStation(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(station)
+	writeJSON(w, http.StatusOK, station)
 }
 
 // decodeStationRequest reads a create/update body, writing 400/413 on failure.
@@ -111,8 +106,7 @@ func (h *Handler) CreateStation(w http.ResponseWriter, r *http.Request) {
 		writeInternalError(w, r, "create station", err)
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"station_id": id})
+	writeJSON(w, http.StatusOK, map[string]string{"station_id": id})
 }
 
 func (h *Handler) UpdateStation(w http.ResponseWriter, r *http.Request) {
@@ -155,8 +149,7 @@ func (h *Handler) UpdateStation(w http.ResponseWriter, r *http.Request) {
 		writeInternalError(w, r, "count station tracks", err)
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"station_id":  station.ID,
 		"name":        name,
 		"track_count": count,
@@ -168,9 +161,8 @@ func (h *Handler) DeleteStation(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	id := chi.URLParam(r, "id")
-	if _, err := uuid.Parse(id); err != nil {
-		http.Error(w, "station not found", http.StatusNotFound)
+	id, ok := parseUUIDParam(w, r, "id")
+	if !ok {
 		return
 	}
 	if err := h.db.DeleteStation(r.Context(), user.ID, id); err != nil {
@@ -198,8 +190,7 @@ func (h *Handler) GetQueue(w http.ResponseWriter, r *http.Request) {
 		writeInternalError(w, r, "build queue", err)
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{"queue": queue})
+	writeJSON(w, http.StatusOK, map[string]interface{}{"queue": queue})
 }
 
 // ensureGenreStation creates the user's station for a genre seed unless one

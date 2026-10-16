@@ -1,3 +1,4 @@
+import logging
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 from uuid import UUID
@@ -27,6 +28,8 @@ from audio_metadata import (
     parse_int_tag,
 )
 from genre_sources import get_genre_sources
+
+log = logging.getLogger(__name__)
 
 def _file_changed(
     file_path: Path,
@@ -151,7 +154,7 @@ def import_folder(
                             result.failed_paths.append(FailedPath(path_str, feature_error))
                 except Exception as e:
                     reason = str(e)
-                    print(f"Error processing {file_path}: {e}")
+                    log.warning("error processing %s: %s", file_path, e)
                     result.failed_paths.append(FailedPath(str(file_path), reason))
                     result_changed = True
 
@@ -291,7 +294,7 @@ def _build_feature_record(conn: psycopg.Connection, file_path: Path, path_str: s
         }
     except Exception as exc:
         error = f"audio analysis failed: {exc}"
-        print(f"Error analyzing {file_path}: {exc}")
+        log.warning("error analyzing %s: %s", file_path, exc)
         return None, [], error
 
     predictions = []
@@ -304,7 +307,7 @@ def _build_feature_record(conn: psycopg.Connection, file_path: Path, path_str: s
             predictions = ml_source.predict(path_str)
         except Exception as exc:
             error = f"genre analysis failed: {exc}"
-            print(f"[folder_importer] genre analysis failed for {path_str}: {exc}")
+            log.warning("genre analysis failed for %s: %s", path_str, exc)
 
     return record, predictions, error
 

@@ -21,10 +21,3 @@ def get_genre_sources() -> List[GenreSource]:
     _cached_sources = sources
     return sources
 
-
-def predict_all_genres(path: str) -> list:
-    """Run all genre sources and return flat prediction list."""
-    predictions = []
-    for source in get_genre_sources():
-        predictions.extend(source.predict(path))
-    return predictions

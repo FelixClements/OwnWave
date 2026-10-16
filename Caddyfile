@@ -17,16 +17,7 @@
         }
     }
 
-    # tRPC requests go to the Next.js frontend server
-    handle /api/trpc* {
-        reverse_proxy web:3000 {
-            header_up X-Forwarded-For {http.request.remote.host}
-            header_up X-Real-IP {http.request.remote.host}
-            header_up -True-Client-IP
-        }
-    }
-
-    # All other /api/* routes go to the Go API (strip the /api prefix)
+    # All /api/* routes go to the Go API (strip the /api prefix)
     handle_path /api/* {
         reverse_proxy go:8080 {
             header_up X-Forwarded-For {http.request.remote.host}

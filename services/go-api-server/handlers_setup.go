@@ -35,8 +35,7 @@ func (h *Handler) SetupStatus(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(resp)
+	writeJSON(w, http.StatusOK, resp)
 }
 func (h *Handler) SetupComplete(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
@@ -54,11 +53,10 @@ func (h *Handler) SetupComplete(w http.ResponseWriter, r *http.Request) {
 		writeInternalError(w, r, "setup complete", err)
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{"setup_completed": true})
+	writeJSON(w, http.StatusOK, map[string]interface{}{"setup_completed": true})
 }
 func (h *Handler) SetupSummary(w http.ResponseWriter, r *http.Request) {
-	resp, err := h.analytics.SetupSummary()
+	resp, err := h.analytics.SetupSummary(r.Context())
 	proxyAnalytics(w, r, resp, err)
 }
 
@@ -124,8 +122,7 @@ func (h *Handler) SetupStations(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"created":     created,
 		"station_ids": ids,
 		"uncovered":   uncovered,

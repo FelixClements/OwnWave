@@ -3,7 +3,8 @@ import argparse
 import db
 from config import MUSIC_DIR
 from db import get_conn, wait_for_db
-from scanner import scan_path
+from library_scan import scan_library
+from library_scan.options import ScanOptions
 
 
 def main():
@@ -36,7 +37,7 @@ def main():
 
     if args.command == "scan":
         wait_for_db()
-        result = scan_path(args.path, force=args.force)
+        result = scan_library(args.path, options=ScanOptions(force=args.force))
         print(f"Scanned {result.to_dict()}")
 
     elif args.command == "scan-celery":

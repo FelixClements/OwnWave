@@ -3,7 +3,6 @@ package auth
 import (
 	"context"
 	"errors"
-	"fmt"
 	"net/http"
 	"strings"
 	"time"
@@ -24,6 +23,7 @@ var (
 	ErrWeakPassword       = errors.New("password must be at least 8 characters")
 	ErrPasswordTooLong    = errors.New("password must be at most 72 bytes")
 	ErrInvalidUsername    = errors.New("username required")
+	ErrCannotDeleteSelf   = errors.New("cannot delete own account")
 )
 
 const (
@@ -92,12 +92,6 @@ func validatePassword(password string) error {
 	return nil
 }
 
-func (s *Service) CountUsers(ctx context.Context) (int, error) {
-	var count int
-	err := s.pool.QueryRow(ctx, `SELECT COUNT(*) FROM users`).Scan(&count)
-	return count, err
-}
-
 func (s *Service) Register(ctx context.Context, username, password, inviteToken string) (string, User, error) {
 	if err := validateCredentials(username, password); err != nil {
 		return "", User{}, err
@@ -137,10 +131,6 @@ func (s *Service) Register(ctx context.Context, username, password, inviteToken 
 	return token, user, nil
 }
 
-func (s *Service) RegisterFirstAdmin(ctx context.Context, username, password string) (string, User, error) {
-	return s.Register(ctx, username, password, "")
-}
-
 func (s *Service) registerWithInvite(ctx context.Context, q querier, username, password, inviteToken string) (string, User, error) {
 	_, presetUsername, err := s.consumeInvite(ctx, q, inviteToken)
 	if err != nil {
@@ -174,7 +164,7 @@ func (s *Service) registerUser(ctx context.Context, q querier, username, passwor
 	return token, User{ID: userID, Username: username, IsAdmin: isAdmin}, nil
 }
 
-func (s *Service) CreateUser(ctx context.Context, adminID, username, password string) (User, error) {
+func (s *Service) CreateUser(ctx context.Context, username, password string) (User, error) {
 	if err := validateCredentials(username, password); err != nil {
 		return User{}, err
 	}
@@ -189,7 +179,6 @@ func (s *Service) CreateUser(ctx context.Context, adminID, username, password st
 		}
 		return User{}, err
 	}
-	_ = adminID
 	return User{ID: userID, Username: username, IsAdmin: false}, nil
 }
 
@@ -261,7 +250,7 @@ func (s *Service) ListUsers(ctx context.Context) ([]User, error) {
 
 func (s *Service) DeleteUser(ctx context.Context, actorID, targetID string) error {
 	if actorID == targetID {
-		return fmt.Errorf("cannot delete own account")
+		return ErrCannotDeleteSelf
 	}
 	tag, err := s.pool.Exec(ctx, `DELETE FROM users WHERE id = $1::uuid`, targetID)
 	if err != nil {

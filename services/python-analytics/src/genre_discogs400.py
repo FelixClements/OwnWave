@@ -1,5 +1,6 @@
 """Discogs400 ML genre predictions — no tag fallback."""
 
+import logging
 import json
 import os
 import re
@@ -10,6 +11,8 @@ import numpy as np
 
 from config import ENABLE_GENRE_ANALYSIS, GENRE_MODEL_DIR, GENRE_MIN_CONFIDENCE
 from models import GenrePrediction
+
+log = logging.getLogger(__name__)
 
 try:
     import essentia
@@ -104,7 +107,7 @@ class Discogs400GenreSource:
                 )
             return predictions
         except Exception as exc:
-            print(f"[Discogs400GenreSource] error analyzing {path}: {exc}")
+            log.warning("error analyzing %s: %s", path, exc)
             return []
 
     @staticmethod

@@ -1,3 +1,4 @@
+import logging
 import threading
 import time
 from pathlib import Path
@@ -8,6 +9,8 @@ from watchdog.observers import Observer
 from audio_metadata import SUPPORTED_EXTS
 from celery_app import celery_app
 from config import MUSIC_DIR
+
+log = logging.getLogger(__name__)
 
 
 class MusicEventHandler(FileSystemEventHandler):
@@ -58,14 +61,14 @@ class MusicEventHandler(FileSystemEventHandler):
             self._dirty = False
             self._next_allowed = now + self.cooldown_seconds
 
-        print(f"[watcher] change detected, queuing scan of {self.root_path}")
+        log.info("change detected, queuing scan of %s", self.root_path)
         try:
             celery_app.send_task(
                 "tasks.trigger_library_scan",
                 args=[None, str(self.root_path)],
             )
         except Exception as exc:
-            print(f"[watcher] failed to queue scan: {exc}")
+            log.error("failed to queue scan: %s", exc)
 
 
 def watch_directory(path: str = MUSIC_DIR, debounce_seconds: float = 2.0, cooldown_seconds: float = 30.0):
@@ -78,7 +81,7 @@ def watch_directory(path: str = MUSIC_DIR, debounce_seconds: float = 2.0, cooldo
     observer.schedule(event_handler, str(root), recursive=True)
     observer.start()
 
-    print(f"[watcher] watching {root} for music file changes")
+    log.info("watching %s for music file changes", root)
     try:
         while True:
             time.sleep(1)
