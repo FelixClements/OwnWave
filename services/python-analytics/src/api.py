@@ -12,7 +12,7 @@ import db
 from celery_app import celery_app
 from config import ANALYTICS_API_SECRET, CELERY_BROKER_URL, MUSIC_DIR
 from library_scan import scan_library
-from library_scan.options import ScanJobContext, ScanOptions
+from library_scan.options import ScanOptions
 from similarity import get_similar_tracks
 from station_builder import build_station, setup_main_genre_stations
 from station.seed import seed_from_request
@@ -333,12 +333,7 @@ def _run_scan(job_id: UUID, path: str, force: bool):
         db.update_scan_job(conn, job_id, "running")
         conn.commit()
         try:
-            result = scan_library(
-                path,
-                options=ScanOptions(force=force),
-                job=ScanJobContext(job_id=job_id),
-                conn=conn,
-            )
+            result = scan_library(path, options=ScanOptions(force=force))
             db.upsert_scan_job_progress(conn, job_id, None, result)
             db.update_scan_job(conn, job_id, "completed")
             conn.commit()

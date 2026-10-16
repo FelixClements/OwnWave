@@ -33,7 +33,7 @@ def _parse_key(key: Optional[str]) -> Tuple[float, float, float]:
 
 
 def build_raw_feature_vector(features: AudioFeatures) -> List[float]:
-    """Build a raw 31-dimensional feature vector from AudioFeatures."""
+    """Build a raw DIM (33)-dimensional feature vector from AudioFeatures."""
     bpm = float(features.bpm) if features.bpm is not None else 120.0
     loudness = float(features.loudness) if features.loudness is not None else -14.0
     energy = float(features.energy) if features.energy is not None else 0.5

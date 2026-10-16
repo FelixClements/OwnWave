@@ -1,6 +1,5 @@
 from uuid import uuid4
 
-import pytest
 
 from station.compiler import distance, key_penalty, smart_queue
 from station.filter import apply_numeric_filter

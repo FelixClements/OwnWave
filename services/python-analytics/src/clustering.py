@@ -3,7 +3,7 @@ from typing import List, Optional, Tuple
 
 import numpy as np
 import psycopg
-from sklearn.cluster import DBSCAN, KMeans
+from sklearn.cluster import KMeans
 
 
 def _count_items(cur, sql, args=()):
@@ -31,25 +31,21 @@ def _choose_k(n: int, max_k: int = 20) -> int:
 
 
 def rebuild_clusters(conn: psycopg.Connection, n_clusters: Optional[int] = None) -> dict:
-    """Run K-Means and DBSCAN over feature vectors and store results."""
+    """Run K-Means over feature vectors and store the cluster assignment."""
     with conn.cursor() as cur:
         rows = _load_vectors(cur)
 
     if not rows:
-        return {"kmeans_clusters": 0, "dbscan_clusters": 0, "tracks": 0}
+        return {"kmeans_clusters": 0, "tracks": 0}
 
     track_ids = [r[0] for r in rows]
     vectors = np.array([r[1] for r in rows])
     n = len(track_ids)
 
-    k = n_clusters or _choose_k(n)
+    k = min(n_clusters or _choose_k(n), n)
     kmeans = KMeans(n_clusters=k, random_state=42, n_init=10)
     kmeans_labels = kmeans.fit_predict(vectors)
 
-    dbscan = DBSCAN(eps=0.5, min_samples=3, metric="euclidean")
-    dbscan_labels = dbscan.fit_predict(vectors)
-
-    # Use K-Means labels as the primary cluster assignment.
     with conn.cursor() as cur:
         # Clear previous clusters
         cur.execute("DELETE FROM track_clusters")
@@ -70,10 +66,8 @@ def rebuild_clusters(conn: psycopg.Connection, n_clusters: Optional[int] = None)
                 (int(i), center.tolist(), count),
             )
 
-    dbscan_count = len(set(dbscan_labels)) - (1 if -1 in dbscan_labels else 0)
     return {
         "kmeans_clusters": int(k),
-        "dbscan_clusters": dbscan_count,
         "tracks": n,
     }
 
