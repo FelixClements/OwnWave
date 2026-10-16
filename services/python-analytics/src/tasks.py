@@ -1,7 +1,7 @@
 import logging
 from pathlib import Path
 from typing import List, Optional
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from celery import chord, group
 
@@ -84,7 +84,18 @@ def trigger_library_scan(master_job_id: Optional[str], path: str, force: bool = 
             conn.commit()
         return {"master_job_id": master_job_id, "dispatched": 0}
 
-    header = group(process_audio_folder.s(folder, master_job_id, force) for folder in folders)
+    # Create the folder jobs up front so progress has a fixed denominator.
+    master = UUID(master_job_id)
+    folder_jobs = [(folder, uuid4()) for folder in folders]
+    with db.get_conn() as conn:
+        for folder, job_id in folder_jobs:
+            db.create_scan_job(conn, folder, job_id=job_id, parent_id=master)
+        conn.commit()
+
+    header = group(
+        process_audio_folder.s(folder, master_job_id, force).set(task_id=str(job_id))
+        for folder, job_id in folder_jobs
+    )
     finalize = chord(header)(finalize_scan.s(master_job_id, str(root)))
 
     return {
@@ -96,7 +107,10 @@ def trigger_library_scan(master_job_id: Optional[str], path: str, force: bool = 
 
 @celery_app.task
 def finalize_scan(results: List[dict], master_job_id: str, root_path: str) -> dict:
-    """Finish the master job, prune moved/deleted tracks, then refresh analysis."""
+    """Prune moved/deleted tracks, then refresh analysis.
+
+    The master job stays running until rebuild_analysis completes it.
+    """
     job_id = UUID(master_job_id)
     failures = [r for r in results if not r or r.get("failed")]
     summary = {"master_job_id": master_job_id, "total": len(results), "failed": len(failures)}
@@ -113,7 +127,6 @@ def finalize_scan(results: List[dict], master_job_id: str, root_path: str) -> di
         else:
             try:
                 summary.update(prune_library(conn, Path(root_path), _job_started_at(conn, job_id)))
-                db.update_scan_job(conn, job_id, "completed")
                 conn.commit()
             except Exception as exc:
                 conn.rollback()
@@ -121,7 +134,9 @@ def finalize_scan(results: List[dict], master_job_id: str, root_path: str) -> di
                 conn.commit()
                 raise
 
-    (rebuild_feature_vectors.si() | rebuild_clusters.si()).delay()
+    # A failed scan is already finished; still refresh analysis for the
+    # folders that did import.
+    rebuild_analysis.delay(None if failures else master_job_id)
     return summary
 
 
@@ -130,6 +145,32 @@ def _job_started_at(conn, job_id: UUID):
         cur.execute("SELECT started_at FROM scan_jobs WHERE id = %s", (job_id,))
         row = cur.fetchone()
         return row[0] if row else None
+
+
+@celery_app.task
+def rebuild_analysis(scan_job_id: Optional[str] = None) -> dict:
+    """Rebuild feature vectors, then clusters.
+
+    With scan_job_id, this is the last step of that scan: the job completes
+    or fails with it.
+    """
+    try:
+        from clustering import backfill_library_clusters
+        from feature_vector import backfill_library_feature_vectors
+
+        vectors = backfill_library_feature_vectors()
+        clusters = backfill_library_clusters()
+    except Exception as exc:
+        if scan_job_id:
+            with db.get_conn() as conn:
+                db.update_scan_job(conn, UUID(scan_job_id), "failed", error=f"analysis failed: {exc}")
+                conn.commit()
+        raise
+    if scan_job_id:
+        with db.get_conn() as conn:
+            db.update_scan_job(conn, UUID(scan_job_id), "completed")
+            conn.commit()
+    return {"vectors": vectors, "clusters": clusters}
 
 
 @celery_app.task

@@ -1,7 +1,7 @@
 'use client';
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { api, type Feedback, type QueueTrack, type ScanStatus } from '@/lib/api';
+import { api, type Feedback, type QueueTrack, type ScanState, type ScanStatus, type ScanSummary } from '@/lib/api';
 
 /** React Query keys, one place so invalidations stay consistent. */
 export const keys = {
@@ -19,6 +19,7 @@ export const keys = {
   history: ['history'] as const,
   feedback: (kind: Feedback) => ['feedback', kind] as const,
   scanStatus: (jobId: string) => ['scanStatus', jobId] as const,
+  scans: ['scans'] as const,
   adminHealth: ['adminHealth'] as const,
   adminStations: ['adminStations'] as const,
   users: ['users'] as const,
@@ -42,12 +43,21 @@ export function useQueue(id: string | null) {
   });
 }
 
+export const isScanFinished = (status: ScanState) => status === 'completed' || status === 'failed';
+
 /** Polls a scan job every second until it completes or fails. */
 export function useScanStatus(jobId: string | null) {
   return useQuery(keys.scanStatus(jobId ?? ''), () => api.getScanStatus(jobId!), {
     enabled: !!jobId,
-    refetchInterval: (data?: ScanStatus) =>
-      data && (data.status === 'completed' || data.status === 'failed') ? false : 1000,
+    refetchInterval: (data?: ScanStatus) => (data && isScanFinished(data.status) ? false : 1000),
+  });
+}
+
+/** Recent scans, polled while one is still in progress. */
+export function useScans(enabled = true) {
+  return useQuery(keys.scans, () => api.listScans(), {
+    enabled,
+    refetchInterval: (jobs?: ScanSummary[]) => (jobs?.some((j) => !isScanFinished(j.status)) ? 5000 : false),
   });
 }
 

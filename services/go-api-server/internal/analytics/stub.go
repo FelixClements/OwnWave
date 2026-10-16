@@ -1,6 +1,9 @@
 package analytics
 
-import "context"
+import (
+	"context"
+	"strconv"
+)
 
 // Stub records calls and returns canned responses for handler tests.
 type Stub struct {
@@ -24,16 +27,16 @@ func (s *Stub) GetJob(ctx context.Context, jobID string) (*Response, error) {
 	return s.call("GetJob:" + jobID)
 }
 
+func (s *Stub) ListJobs(ctx context.Context, limit int) (*Response, error) {
+	return s.call("ListJobs:" + strconv.Itoa(limit))
+}
+
 func (s *Stub) Health(ctx context.Context) (*Response, error) {
 	return s.call("Health")
 }
 
-func (s *Stub) RebuildVectors(ctx context.Context) (*Response, error) {
-	return s.call("RebuildVectors")
-}
-
-func (s *Stub) RebuildClusters(ctx context.Context) (*Response, error) {
-	return s.call("RebuildClusters")
+func (s *Stub) RebuildAnalysis(ctx context.Context) (*Response, error) {
+	return s.call("RebuildAnalysis")
 }
 
 func (s *Stub) ListGenres(ctx context.Context) (*Response, error) {

@@ -19,6 +19,21 @@ func (h *Handler) ScanStatus(w http.ResponseWriter, r *http.Request) {
 	proxyAnalytics(w, r, resp, err)
 }
 
+// ListScans returns the most recent library scans (?limit=1..50, default 10).
+func (h *Handler) ListScans(w http.ResponseWriter, r *http.Request) {
+	limit := 10
+	if v := r.URL.Query().Get("limit"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n < 1 || n > 50 {
+			http.Error(w, "limit must be 1-50", http.StatusBadRequest)
+			return
+		}
+		limit = n
+	}
+	resp, err := h.analytics.ListJobs(r.Context(), limit)
+	proxyAnalytics(w, r, resp, err)
+}
+
 // TriggerScan queues a scan of the whole music directory.
 func (h *Handler) TriggerScan(w http.ResponseWriter, r *http.Request) {
 	var req struct {
@@ -87,12 +102,10 @@ func (h *Handler) AdminStations(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, map[string]interface{}{"stations": out})
 }
-func (h *Handler) AdminRebuildVectors(w http.ResponseWriter, r *http.Request) {
-	resp, err := h.analytics.RebuildVectors(r.Context())
-	proxyAnalytics(w, r, resp, err)
-}
-func (h *Handler) AdminRebuildClusters(w http.ResponseWriter, r *http.Request) {
-	resp, err := h.analytics.RebuildClusters(r.Context())
+
+// AdminRebuildAnalysis queues a feature vector and cluster rebuild.
+func (h *Handler) AdminRebuildAnalysis(w http.ResponseWriter, r *http.Request) {
+	resp, err := h.analytics.RebuildAnalysis(r.Context())
 	proxyAnalytics(w, r, resp, err)
 }
 func (h *Handler) ListGenres(w http.ResponseWriter, r *http.Request) {

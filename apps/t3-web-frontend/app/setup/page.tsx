@@ -4,8 +4,9 @@ import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '@/lib/auth';
-import { api, ScanStatus } from '@/lib/api';
+import { api } from '@/lib/api';
 import { keys, useScanStatus, useSetupStatus } from '@/lib/queries';
+import { ScanProgress } from '@/components/ScanProgress';
 
 const MIN_TRACKS_PER_STATION = 5;
 
@@ -119,7 +120,7 @@ export default function SetupPage() {
     await setupComplete.mutateAsync();
   };
 
-  const failedPaths = (scanStatus.data?.stats?.failed_paths || []) as ScanStatus['stats']['failed_paths'];
+  const failedPaths = scanStatus.data?.stats.failed_paths ?? [];
 
   if (setupStatus.isLoading) {
     return <div className="p-6 text-spotify-text">Loading...</div>;
@@ -184,25 +185,7 @@ export default function SetupPage() {
               </div>
             ) : scanStatus.data ? (
               <div className="space-y-2">
-                <p className="text-spotify-subdued">Status: <span className="text-spotify-text capitalize">{scanStatus.data.status}</span></p>
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-sm">
-                  <div className="bg-spotify-elevated p-2 rounded">
-                    <div className="text-spotify-subdued text-xs">Found</div>
-                    <div className="font-semibold">{scanStatus.data.stats.total_files}</div>
-                  </div>
-                  <div className="bg-spotify-elevated p-2 rounded">
-                    <div className="text-spotify-subdued text-xs">Imported</div>
-                    <div className="font-semibold">{scanStatus.data.stats.imported}</div>
-                  </div>
-                  <div className="bg-spotify-elevated p-2 rounded">
-                    <div className="text-spotify-subdued text-xs">Scanned</div>
-                    <div className="font-semibold">{scanStatus.data.stats.scanned}</div>
-                  </div>
-                  <div className="bg-spotify-elevated p-2 rounded">
-                    <div className="text-spotify-subdued text-xs">Model OK</div>
-                    <div className="font-semibold">{scanStatus.data.stats.model_success}</div>
-                  </div>
-                </div>
+                <ScanProgress scan={scanStatus.data} />
                 {scanStatus.data.status === 'failed' && (
                   <p className="text-red-500 text-sm">Scan failed. Please try again.</p>
                 )}

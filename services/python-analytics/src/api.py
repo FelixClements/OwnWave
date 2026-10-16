@@ -5,7 +5,7 @@ from contextlib import asynccontextmanager, contextmanager
 from typing import NoReturn
 from uuid import UUID
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
@@ -133,6 +133,12 @@ def scan(req: ScanRequest):
     return {"job_id": str(job_id), "status": "queued"}
 
 
+@app.get("/jobs")
+def list_jobs(limit: int = Query(10, ge=1, le=50)):
+    with _db_conn() as conn:
+        return {"jobs": db.list_scan_jobs(conn, limit)}
+
+
 @app.get("/jobs/{job_id}")
 def get_job(job_id: UUID):
     with _db_conn() as conn:
@@ -150,14 +156,9 @@ def _enqueue(task, *args):
     return {"task_id": result.id, "status": "queued"}
 
 
-@app.post("/rebuild-vectors")
-def rebuild_vectors():
-    return _enqueue(tasks.rebuild_feature_vectors)
-
-
-@app.post("/rebuild-clusters")
-def rebuild_clusters():
-    return _enqueue(tasks.rebuild_clusters)
+@app.post("/rebuild-analysis")
+def rebuild_analysis():
+    return _enqueue(tasks.rebuild_analysis)
 
 
 @app.post("/rebuild-genres")

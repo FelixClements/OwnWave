@@ -117,3 +117,32 @@ func TestFeedbackOnlyAcceptsLikeAndBan(t *testing.T) {
 		require.Equal(t, http.StatusBadRequest, rec.Code, body)
 	}
 }
+
+func TestListScansValidatesLimit(t *testing.T) {
+	stub := analytics.NewStub()
+	h := newTestHandler(stub)
+
+	for _, tc := range []struct {
+		query    string
+		wantCode int
+		wantCall string
+	}{
+		{"", http.StatusOK, "ListJobs:10"},
+		{"?limit=25", http.StatusOK, "ListJobs:25"},
+		{"?limit=0", http.StatusBadRequest, ""},
+		{"?limit=51", http.StatusBadRequest, ""},
+		{"?limit=abc", http.StatusBadRequest, ""},
+	} {
+		t.Run(tc.query, func(t *testing.T) {
+			stub.Calls = nil
+			rec := httptest.NewRecorder()
+			h.ListScans(rec, httptest.NewRequest(http.MethodGet, "/admin/scans"+tc.query, nil))
+			require.Equal(t, tc.wantCode, rec.Code)
+			if tc.wantCall == "" {
+				require.Empty(t, stub.Calls)
+			} else {
+				require.Equal(t, []string{tc.wantCall}, stub.Calls)
+			}
+		})
+	}
+}

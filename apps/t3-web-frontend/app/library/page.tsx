@@ -6,6 +6,8 @@ import { useInfiniteQuery, useMutation, useQuery } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import { Cover } from '@/components/Cover';
 import { keys, useScanStatus } from '@/lib/queries';
+import { useAuth } from '@/lib/auth';
+import { ScanProgress } from '@/components/ScanProgress';
 
 type Tab = 'tracks' | 'albums' | 'artists';
 
@@ -13,87 +15,8 @@ const PAGE_LIMIT = 20;
 
 type Status = { message: string; type: 'info' | 'success' | 'error' } | null;
 
-type ScanStatusData = {
-  id: string;
-  path: string;
-  status: string;
-  stats: {
-    total_files: number;
-    imported: number;
-    scanned: number;
-    features: number;
-    model_success: number;
-    model_failed: number;
-    failed_paths: { path: string; error: string }[];
-  };
-};
-
-function ScanStatusPanel({ data }: { data: ScanStatusData }) {
-  const [showFailed, setShowFailed] = useState(false);
-  const stats = data.stats;
-
-  return (
-    <div className="rounded-lg border border-spotify-border bg-spotify-elevated p-4 space-y-3">
-      <div className="flex items-center justify-between">
-        <h3 className="text-sm font-bold text-spotify-text uppercase tracking-wide">Scan status</h3>
-        <span
-          className={`text-xs font-semibold px-2 py-0.5 rounded ${
-            data.status === 'completed'
-              ? 'bg-green-900/40 text-spotify-green'
-              : data.status === 'failed'
-              ? 'bg-red-900/40 text-red-400'
-              : 'bg-spotify-card text-spotify-text'
-          }`}
-        >
-          {data.status}
-        </span>
-      </div>
-
-      <div className="grid grid-cols-2 sm:grid-cols-6 gap-3">
-        <StatBox label="Found" value={stats.total_files} />
-        <StatBox label="Imported" value={stats.imported} />
-        <StatBox label="Scanned" value={stats.scanned} />
-        <StatBox label="Features" value={stats.features} />
-        <StatBox label="Model OK" value={stats.model_success} />
-        <StatBox label="Model failed" value={stats.model_failed} />
-      </div>
-
-      {stats.failed_paths.length > 0 && (
-        <div className="space-y-2">
-          <button
-            onClick={() => setShowFailed(!showFailed)}
-            className="text-xs font-semibold text-spotify-green hover:underline"
-          >
-            {showFailed ? 'Hide' : 'Show'} {stats.failed_paths.length} failed file
-            {stats.failed_paths.length === 1 ? '' : 's'}
-          </button>
-          {showFailed && (
-            <div className="max-h-48 overflow-y-auto rounded border border-spotify-border bg-black p-2 space-y-1 text-xs">
-              {stats.failed_paths.map((fp, i) => (
-                <div key={i} className="text-spotify-subdued break-all">
-                  <span className="text-spotify-text font-medium">{fp.path}</span>
-                  <span className="mx-1">—</span>
-                  {fp.error}
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function StatBox({ label, value }: { label: string; value: number }) {
-  return (
-    <div className="rounded bg-black p-2 text-center">
-      <div className="text-lg font-bold text-spotify-text">{value}</div>
-      <div className="text-[10px] uppercase tracking-wide text-spotify-subdued">{label}</div>
-    </div>
-  );
-}
-
 export default function LibraryPage() {
+  const { user } = useAuth();
   const [tab, setTab] = useState<Tab>('tracks');
   const [q, setQ] = useState('');
   const [search, setSearch] = useState('');
@@ -138,7 +61,7 @@ export default function LibraryPage() {
       setScanJobId(data.job_id ?? null);
       showStatus({ message: 'Library rescan started.', type: 'success' });
     },
-    onError: () => showStatus({ message: 'Rescan failed.', type: 'error' }),
+    onError: (err: Error) => showStatus({ message: `Rescan failed: ${err.message}`, type: 'error' }),
   });
 
   useEffect(() => {
@@ -165,35 +88,37 @@ export default function LibraryPage() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <h2 className="text-2xl font-bold">Library</h2>
-        <button
-          onClick={() => rescan.mutate()}
-          disabled={rescan.isLoading}
-          className="text-xs font-semibold px-3 py-1.5 rounded-full bg-spotify-elevated text-spotify-text hover:bg-spotify-card-hover transition disabled:opacity-50 inline-flex items-center gap-2"
-        >
-          {rescan.isLoading && (
-            <svg
-              className="animate-spin h-3.5 w-3.5"
-              xmlns="http://www.w3.org/2000/svg"
-              fill="none"
-              viewBox="0 0 24 24"
-            >
-              <circle
-                className="opacity-25"
-                cx="12"
-                cy="12"
-                r="10"
-                stroke="currentColor"
-                strokeWidth="4"
-              />
-              <path
-                className="opacity-75"
-                fill="currentColor"
-                d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
-              />
-            </svg>
-          )}
-          {rescan.isLoading ? 'Rescanning...' : 'Rescan library'}
-        </button>
+        {user?.is_admin && (
+          <button
+            onClick={() => rescan.mutate()}
+            disabled={rescan.isLoading}
+            className="text-xs font-semibold px-3 py-1.5 rounded-full bg-spotify-elevated text-spotify-text hover:bg-spotify-card-hover transition disabled:opacity-50 inline-flex items-center gap-2"
+          >
+            {rescan.isLoading && (
+              <svg
+                className="animate-spin h-3.5 w-3.5"
+                xmlns="http://www.w3.org/2000/svg"
+                fill="none"
+                viewBox="0 0 24 24"
+              >
+                <circle
+                  className="opacity-25"
+                  cx="12"
+                  cy="12"
+                  r="10"
+                  stroke="currentColor"
+                  strokeWidth="4"
+                />
+                <path
+                  className="opacity-75"
+                  fill="currentColor"
+                  d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
+                />
+              </svg>
+            )}
+            {rescan.isLoading ? 'Rescanning...' : 'Rescan library'}
+          </button>
+        )}
       </div>
 
       {status && (
@@ -232,7 +157,7 @@ export default function LibraryPage() {
         </div>
       )}
 
-      {scanStatus.data && <ScanStatusPanel data={scanStatus.data} />}
+      {scanStatus.data && <ScanProgress scan={scanStatus.data} />}
 
       <div className="flex gap-4 border-b border-spotify-border mb-6">
         {(['tracks', 'albums', 'artists'] as Tab[]).map((t) => (
