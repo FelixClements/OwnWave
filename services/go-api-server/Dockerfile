@@ -1,14 +1,14 @@
 FROM golang:1.25-alpine AS builder
 
-RUN apk add --no-cache git
-
 WORKDIR /app
 
-COPY . .
-RUN go mod tidy
-RUN go build -o server .
+COPY go.mod go.sum ./
+RUN go mod download
 
-FROM alpine:latest
+COPY . .
+RUN CGO_ENABLED=0 go build -o server .
+
+FROM alpine:3.22
 
 RUN apk add --no-cache ffmpeg ca-certificates wget \
     && adduser -D -u 1000 ownwave

@@ -4,9 +4,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"strconv"
-
-	"github.com/go-chi/chi/v5"
-	"github.com/google/uuid"
 )
 
 func (h *Handler) ListTracks(w http.ResponseWriter, r *http.Request) {
@@ -24,41 +21,36 @@ func (h *Handler) ListTracks(w http.ResponseWriter, r *http.Request) {
 		writeInternalError(w, r, "list tracks", err)
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{"tracks": tracks})
+	writeJSON(w, http.StatusOK, map[string]interface{}{"tracks": tracks})
 }
 func (h *Handler) Search(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query().Get("q")
 	results, err := h.db.Search(r.Context(), q)
 	if err != nil {
-		writeInternalError(w, r, "list tracks", err)
+		writeInternalError(w, r, "search", err)
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(results)
+	writeJSON(w, http.StatusOK, results)
 }
 func (h *Handler) ListAlbums(w http.ResponseWriter, r *http.Request) {
 	albums, err := h.db.ListAlbums(r.Context())
 	if err != nil {
-		writeInternalError(w, r, "list tracks", err)
+		writeInternalError(w, r, "list albums", err)
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{"albums": albums})
+	writeJSON(w, http.StatusOK, map[string]interface{}{"albums": albums})
 }
 func (h *Handler) ListArtists(w http.ResponseWriter, r *http.Request) {
 	artists, err := h.db.ListArtists(r.Context())
 	if err != nil {
-		writeInternalError(w, r, "list tracks", err)
+		writeInternalError(w, r, "list artists", err)
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{"artists": artists})
+	writeJSON(w, http.StatusOK, map[string]interface{}{"artists": artists})
 }
 func (h *Handler) GetSimilarTracks(w http.ResponseWriter, r *http.Request) {
-	id := chi.URLParam(r, "id")
-	if _, err := uuid.Parse(id); err != nil {
-		http.Error(w, "track not found", http.StatusNotFound)
+	id, ok := parseUUIDParam(w, r, "id")
+	if !ok {
 		return
 	}
 	limit, err := strconv.Atoi(r.URL.Query().Get("limit"))
@@ -71,15 +63,17 @@ func (h *Handler) GetSimilarTracks(w http.ResponseWriter, r *http.Request) {
 		writeInternalError(w, r, "similar tracks", err)
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{"track_id": id, "similar": similar})
+	writeJSON(w, http.StatusOK, map[string]interface{}{"track_id": id, "similar": similar})
 }
 func (h *Handler) RecordPlay(w http.ResponseWriter, r *http.Request) {
 	user, ok := h.currentUser(w, r)
 	if !ok {
 		return
 	}
-	trackID := chi.URLParam(r, "id")
+	trackID, ok := parseUUIDParam(w, r, "id")
+	if !ok {
+		return
+	}
 	var req struct {
 		StationID string `json:"station_id"`
 	}
@@ -102,7 +96,10 @@ func (h *Handler) RecordFeedback(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	trackID := chi.URLParam(r, "id")
+	trackID, ok := parseUUIDParam(w, r, "id")
+	if !ok {
+		return
+	}
 	var req struct {
 		Feedback string `json:"feedback"`
 	}
@@ -121,7 +118,10 @@ func (h *Handler) DeleteFeedback(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	trackID := chi.URLParam(r, "id")
+	trackID, ok := parseUUIDParam(w, r, "id")
+	if !ok {
+		return
+	}
 	var req struct {
 		Feedback string `json:"feedback"`
 	}
@@ -142,11 +142,10 @@ func (h *Handler) ListHistory(w http.ResponseWriter, r *http.Request) {
 	}
 	entries, err := h.db.ListHistory(r.Context(), user.ID, 50)
 	if err != nil {
-		writeInternalError(w, r, "list tracks", err)
+		writeInternalError(w, r, "list history", err)
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{"history": entries})
+	writeJSON(w, http.StatusOK, map[string]interface{}{"history": entries})
 }
 func (h *Handler) ListFeedback(w http.ResponseWriter, r *http.Request) {
 	user, ok := h.currentUser(w, r)
@@ -160,24 +159,28 @@ func (h *Handler) ListFeedback(w http.ResponseWriter, r *http.Request) {
 	}
 	tracks, err := h.db.ListFeedback(r.Context(), user.ID, feedback, 100)
 	if err != nil {
-		writeInternalError(w, r, "list tracks", err)
+		writeInternalError(w, r, "list feedback", err)
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{"tracks": tracks})
+	writeJSON(w, http.StatusOK, map[string]interface{}{"tracks": tracks})
 }
 func (h *Handler) GetTrack(w http.ResponseWriter, r *http.Request) {
-	id := chi.URLParam(r, "id")
+	id, ok := parseUUIDParam(w, r, "id")
+	if !ok {
+		return
+	}
 	track, err := h.db.GetTrackByID(r.Context(), id)
 	if err != nil {
 		http.Error(w, "track not found", 404)
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(track)
+	writeJSON(w, http.StatusOK, track)
 }
 func (h *Handler) GetTrackCover(w http.ResponseWriter, r *http.Request) {
-	id := chi.URLParam(r, "id")
+	id, ok := parseUUIDParam(w, r, "id")
+	if !ok {
+		return
+	}
 	track, err := h.db.GetTrackByID(r.Context(), id)
 	if err != nil {
 		http.Error(w, "track not found", 404)

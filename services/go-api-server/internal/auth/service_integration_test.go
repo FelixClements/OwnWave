@@ -18,7 +18,7 @@ import (
 
 func setupAuthDB(t *testing.T) *pgxpool.Pool { return testdb.NewPool(t) }
 
-func TestRegisterFirstAdminAndInviteFlow(t *testing.T) {
+func TestFirstUserIsAdminThenInviteOnly(t *testing.T) {
 	pool := setupAuthDB(t)
 	svc := auth.NewService(pool)
 	ctx := context.Background()

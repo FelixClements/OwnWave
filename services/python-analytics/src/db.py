@@ -1,3 +1,4 @@
+import logging
 import time
 from typing import List, Optional
 from uuid import UUID
@@ -7,6 +8,8 @@ from psycopg.types.json import Jsonb
 
 from config import DATABASE_URL
 from models import AudioFeatures, GenrePrediction, ScanResult
+
+log = logging.getLogger(__name__)
 
 
 def get_conn():
@@ -31,7 +34,7 @@ def wait_for_db(max_retries: int = 30, delay: float = 2.0) -> None:
             return
         except Exception as exc:
             last_exc = exc
-            print(f"waiting for db... ({i + 1}/{max_retries})")
+            log.info("waiting for db... (%d/%d)", i + 1, max_retries)
             time.sleep(delay)
     raise last_exc
 

@@ -9,7 +9,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
 
 	"ownwave/api/internal/auth"
@@ -38,8 +37,7 @@ func (h *Handler) CreateInvite(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"invite_url": inviteURL(token),
 		"expires_at": invite.ExpiresAt,
 		"invite":     invite,
@@ -61,8 +59,6 @@ func inviteURL(token string) string {
 }
 
 func (h *Handler) CreateUser(w http.ResponseWriter, r *http.Request) {
-	admin, _ := auth.UserFromContext(r.Context())
-
 	var req struct {
 		Username string `json:"username"`
 		Password string `json:"password"`
@@ -72,7 +68,7 @@ func (h *Handler) CreateUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	user, err := h.auth.CreateUser(r.Context(), admin.ID, req.Username, req.Password)
+	user, err := h.auth.CreateUser(r.Context(), req.Username, req.Password)
 	if err != nil {
 		switch {
 		case errors.Is(err, auth.ErrUsernameTaken):
@@ -85,9 +81,7 @@ func (h *Handler) CreateUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(map[string]interface{}{"user": user})
+	writeJSON(w, http.StatusCreated, map[string]interface{}{"user": user})
 }
 
 func (h *Handler) ListUsers(w http.ResponseWriter, r *http.Request) {
@@ -96,20 +90,22 @@ func (h *Handler) ListUsers(w http.ResponseWriter, r *http.Request) {
 		writeInternalError(w, r, "list users", err)
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{"users": users})
+	writeJSON(w, http.StatusOK, map[string]interface{}{"users": users})
 }
 
 func (h *Handler) DeleteUser(w http.ResponseWriter, r *http.Request) {
 	admin, _ := auth.UserFromContext(r.Context())
-	targetID := chi.URLParam(r, "id")
+	targetID, ok := parseUUIDParam(w, r, "id")
+	if !ok {
+		return
+	}
 
 	if err := h.auth.DeleteUser(r.Context(), admin.ID, targetID); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			http.Error(w, "user not found", http.StatusNotFound)
 			return
 		}
-		if err.Error() == "cannot delete own account" {
+		if errors.Is(err, auth.ErrCannotDeleteSelf) {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}

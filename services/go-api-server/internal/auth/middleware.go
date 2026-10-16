@@ -27,12 +27,3 @@ func (s *Service) RequireAdmin(next http.Handler) http.Handler {
 		next.ServeHTTP(w, r.WithContext(WithUser(r.Context(), user)))
 	})
 }
-
-func (s *Service) OptionalUser(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if user, ok := s.UserFromRequest(r); ok {
-			r = r.WithContext(WithUser(r.Context(), user))
-		}
-		next.ServeHTTP(w, r)
-	})
-}

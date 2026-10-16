@@ -1,6 +1,7 @@
 package analytics
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -11,7 +12,7 @@ func TestStubRecordsCalls(t *testing.T) {
 	stub := NewStub()
 	stub.Responses["ListGenres"] = &Response{StatusCode: 200, Body: []byte(`[{"main_genre":"Rock"}]`)}
 
-	resp, err := stub.ListGenres()
+	resp, err := stub.ListGenres(context.Background())
 	if err != nil {
 		t.Fatalf("ListGenres() error = %v", err)
 	}
@@ -27,7 +28,7 @@ func TestStubReturnsConfiguredError(t *testing.T) {
 	stub := NewStub()
 	stub.Errors["Health"] = errors.New("down")
 
-	if _, err := stub.Health(); err == nil || err.Error() != "down" {
+	if _, err := stub.Health(context.Background()); err == nil || err.Error() != "down" {
 		t.Fatalf("Health() error = %v, want down", err)
 	}
 }
@@ -59,7 +60,7 @@ func TestHTTPClientProxiesPath(t *testing.T) {
 	defer server.Close()
 
 	client := NewHTTPClientWithSecret(server.URL, "test-secret")
-	resp, err := client.ListGenres()
+	resp, err := client.ListGenres(context.Background())
 	if err != nil {
 		t.Fatalf("ListGenres() error = %v", err)
 	}
@@ -78,7 +79,22 @@ func TestHTTPClientSendsInternalToken(t *testing.T) {
 	defer server.Close()
 
 	client := NewHTTPClientWithSecret(server.URL, "s3cret")
-	if _, err := client.Health(); err != nil {
+	if _, err := client.Health(context.Background()); err != nil {
 		t.Fatalf("Health() error = %v", err)
+	}
+}
+
+func TestHTTPClientHonoursContextCancel(t *testing.T) {
+	block := make(chan struct{})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		<-block
+	}))
+	defer server.Close()
+	defer close(block)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := NewHTTPClientWithSecret(server.URL, "s").Health(ctx); err == nil {
+		t.Fatal("expected error for cancelled context")
 	}
 }

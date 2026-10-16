@@ -1,3 +1,4 @@
+import logging
 from pathlib import Path
 from typing import List, Optional
 from uuid import UUID
@@ -9,6 +10,8 @@ from celery_app import celery_app
 from folder_importer import import_folder
 from library_scan.prune import music_dirs, prune_library
 from models import ScanResult
+
+log = logging.getLogger(__name__)
 
 
 @celery_app.task(bind=True, max_retries=3, default_retry_delay=5)
@@ -187,7 +190,7 @@ def rebuild_track_genres(path: str, force: bool = False) -> dict:
                     db.upsert_track_genres(conn, track_id, predictions)
                     updated += 1
             except Exception as exc:
-                print(f"[rebuild_track_genres] failed for {path_str}: {exc}")
+                log.warning("genre rebuild failed for %s: %s", path_str, exc)
                 skipped += 1
         conn.commit()
 

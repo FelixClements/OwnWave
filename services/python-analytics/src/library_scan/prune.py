@@ -6,6 +6,7 @@ were moved or renamed are matched to their old track row and keep its id, so
 listening history and likes/bans survive.
 """
 
+import logging
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Set, Tuple
@@ -14,6 +15,8 @@ import psycopg
 
 from audio_metadata import is_supported_audio_file
 from db import delete_tracks
+
+log = logging.getLogger(__name__)
 
 # Durations of the same file read twice can differ slightly between decoders.
 DURATION_TOLERANCE_SECONDS = 0.5
@@ -73,7 +76,7 @@ def prune_library(
         return {"moved": 0, "deleted": 0}
     on_disk = list_audio_files(root)
     if not on_disk:
-        print(f"[prune] no audio files under {root}; skipping prune")
+        log.warning("no audio files under %s; skipping prune", root)
         return {"moved": 0, "deleted": 0}
 
     with conn.cursor() as cur:
@@ -123,7 +126,7 @@ def prune_library(
     conn.commit()
 
     if pairs or to_delete:
-        print(f"[prune] {root}: moved {len(pairs)}, deleted {len(to_delete)}")
+        log.info("%s: moved %d, deleted %d", root, len(pairs), len(to_delete))
     return {"moved": len(pairs), "deleted": len(to_delete)}
 
 

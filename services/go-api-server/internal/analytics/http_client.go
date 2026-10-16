@@ -2,11 +2,18 @@ package analytics
 
 import (
 	"bytes"
+	"context"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
+	"time"
 )
+
+// requestTimeout bounds every call; long work (scans, rebuilds) is queued by
+// the analytics service and returns immediately.
+const requestTimeout = 30 * time.Second
 
 // HTTPClient calls the Python analytics service over HTTP.
 type HTTPClient struct {
@@ -23,77 +30,60 @@ func NewHTTPClientWithSecret(baseURL, secret string) *HTTPClient {
 	return &HTTPClient{
 		baseURL:    strings.TrimRight(baseURL, "/"),
 		secret:     secret,
-		httpClient: http.DefaultClient,
+		httpClient: &http.Client{Timeout: requestTimeout},
 	}
 }
 
-func (c *HTTPClient) Scan(body []byte) (*Response, error) {
-	return c.post("/scan", "application/json", bytes.NewReader(body))
+func (c *HTTPClient) Scan(ctx context.Context, body []byte) (*Response, error) {
+	return c.do(ctx, http.MethodPost, "/scan", bytes.NewReader(body))
 }
 
-func (c *HTTPClient) GetJob(jobID string) (*Response, error) {
-	return c.get("/jobs/" + jobID)
+func (c *HTTPClient) GetJob(ctx context.Context, jobID string) (*Response, error) {
+	return c.do(ctx, http.MethodGet, "/jobs/"+url.PathEscape(jobID), nil)
 }
 
-func (c *HTTPClient) Health() (*Response, error) {
-	return c.get("/health")
+func (c *HTTPClient) Health(ctx context.Context) (*Response, error) {
+	return c.do(ctx, http.MethodGet, "/health", nil)
 }
 
-func (c *HTTPClient) RebuildVectors() (*Response, error) {
-	return c.post("/rebuild-vectors", "application/json", nil)
+func (c *HTTPClient) RebuildVectors(ctx context.Context) (*Response, error) {
+	return c.do(ctx, http.MethodPost, "/rebuild-vectors", nil)
 }
 
-func (c *HTTPClient) RebuildClusters() (*Response, error) {
-	return c.post("/rebuild-clusters", "application/json", nil)
+func (c *HTTPClient) RebuildClusters(ctx context.Context) (*Response, error) {
+	return c.do(ctx, http.MethodPost, "/rebuild-clusters", nil)
 }
 
-func (c *HTTPClient) ListGenres() (*Response, error) {
-	return c.get("/genres")
+func (c *HTTPClient) ListGenres(ctx context.Context) (*Response, error) {
+	return c.do(ctx, http.MethodGet, "/genres", nil)
 }
 
-func (c *HTTPClient) GetTrackGenres(trackID string) (*Response, error) {
-	return c.get("/tracks/" + trackID + "/genres")
+func (c *HTTPClient) GetTrackGenres(ctx context.Context, trackID string) (*Response, error) {
+	return c.do(ctx, http.MethodGet, "/tracks/"+url.PathEscape(trackID)+"/genres", nil)
 }
 
-func (c *HTTPClient) RebuildGenres() (*Response, error) {
-	return c.post("/rebuild-genres", "application/json", nil)
+func (c *HTTPClient) RebuildGenres(ctx context.Context) (*Response, error) {
+	return c.do(ctx, http.MethodPost, "/rebuild-genres", nil)
 }
 
-func (c *HTTPClient) SetupSummary() (*Response, error) {
-	return c.get("/setup/summary")
+func (c *HTTPClient) SetupSummary(ctx context.Context) (*Response, error) {
+	return c.do(ctx, http.MethodGet, "/setup/summary", nil)
 }
 
-func (c *HTTPClient) get(path string) (*Response, error) {
-	req, err := http.NewRequest(http.MethodGet, c.baseURL+path, nil)
+func (c *HTTPClient) do(ctx context.Context, method, path string, body io.Reader) (*Response, error) {
+	req, err := http.NewRequestWithContext(ctx, method, c.baseURL+path, body)
 	if err != nil {
 		return nil, err
 	}
-	c.setAuth(req)
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return nil, err
+	if body != nil {
+		req.Header.Set("Content-Type", "application/json")
 	}
-	return readResponse(resp)
-}
-
-func (c *HTTPClient) post(path, contentType string, body io.Reader) (*Response, error) {
-	req, err := http.NewRequest(http.MethodPost, c.baseURL+path, body)
-	if err != nil {
-		return nil, err
-	}
-	if contentType != "" {
-		req.Header.Set("Content-Type", contentType)
-	}
-	c.setAuth(req)
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	return readResponse(resp)
-}
-
-func (c *HTTPClient) setAuth(req *http.Request) {
 	if c.secret != "" {
 		req.Header.Set("X-Internal-Token", c.secret)
 	}
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	return readResponse(resp)
 }

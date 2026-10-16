@@ -2,39 +2,34 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
+	"io"
 	"net/http"
 	"strconv"
-
-	"github.com/go-chi/chi/v5"
 
 	"ownwave/api/internal/stations"
 )
 
-func (h *Handler) Rescan(w http.ResponseWriter, r *http.Request) {
-	payload, _ := json.Marshal(map[string]interface{}{
-		"path":  h.musicDir,
-		"force": false,
-	})
-	resp, err := h.analytics.Scan(payload)
-	proxyAnalytics(w, r, resp, err)
-}
 func (h *Handler) ScanStatus(w http.ResponseWriter, r *http.Request) {
-	jobID := chi.URLParam(r, "id")
-	resp, err := h.analytics.GetJob(jobID)
+	jobID, ok := parseUUIDParam(w, r, "id")
+	if !ok {
+		return
+	}
+	resp, err := h.analytics.GetJob(r.Context(), jobID)
 	proxyAnalytics(w, r, resp, err)
 }
+
+// TriggerScan queues a scan of the whole music directory.
 func (h *Handler) TriggerScan(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Path  string `json:"path"`
-		Force bool   `json:"force"`
+		Force bool `json:"force"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		req.Path = h.musicDir
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil && !errors.Is(err, io.EOF) {
+		http.Error(w, "invalid request", http.StatusBadRequest)
+		return
 	}
-	req.Path = h.musicDir
-
-	payload, _ := json.Marshal(req)
-	resp, err := h.analytics.Scan(payload)
+	payload, _ := json.Marshal(map[string]interface{}{"path": h.musicDir, "force": req.Force})
+	resp, err := h.analytics.Scan(r.Context(), payload)
 	proxyAnalytics(w, r, resp, err)
 }
 func (h *Handler) AdminHealth(w http.ResponseWriter, r *http.Request) {
@@ -47,7 +42,7 @@ func (h *Handler) AdminHealth(w http.ResponseWriter, r *http.Request) {
 	if err := h.db.pool.Ping(r.Context()); err != nil {
 		status["db"] = "error: " + err.Error()
 	}
-	resp, err := h.analytics.Health()
+	resp, err := h.analytics.Health(r.Context())
 	if err != nil {
 		status["python"] = "error: " + err.Error()
 	} else if resp.StatusCode == 200 {
@@ -55,8 +50,7 @@ func (h *Handler) AdminHealth(w http.ResponseWriter, r *http.Request) {
 	} else {
 		status["python"] = "error: status " + strconv.Itoa(resp.StatusCode)
 	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(status)
+	writeJSON(w, http.StatusOK, status)
 }
 func (h *Handler) AdminStations(w http.ResponseWriter, r *http.Request) {
 	user, ok := h.currentUser(w, r)
@@ -91,28 +85,30 @@ func (h *Handler) AdminStations(w http.ResponseWriter, r *http.Request) {
 		}
 		out = append(out, status)
 	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{"stations": out})
+	writeJSON(w, http.StatusOK, map[string]interface{}{"stations": out})
 }
 func (h *Handler) AdminRebuildVectors(w http.ResponseWriter, r *http.Request) {
-	resp, err := h.analytics.RebuildVectors()
+	resp, err := h.analytics.RebuildVectors(r.Context())
 	proxyAnalytics(w, r, resp, err)
 }
 func (h *Handler) AdminRebuildClusters(w http.ResponseWriter, r *http.Request) {
-	resp, err := h.analytics.RebuildClusters()
+	resp, err := h.analytics.RebuildClusters(r.Context())
 	proxyAnalytics(w, r, resp, err)
 }
 func (h *Handler) ListGenres(w http.ResponseWriter, r *http.Request) {
-	resp, err := h.analytics.ListGenres()
+	resp, err := h.analytics.ListGenres(r.Context())
 	proxyAnalytics(w, r, resp, err)
 }
 func (h *Handler) GetTrackGenres(w http.ResponseWriter, r *http.Request) {
-	id := chi.URLParam(r, "id")
-	resp, err := h.analytics.GetTrackGenres(id)
+	id, ok := parseUUIDParam(w, r, "id")
+	if !ok {
+		return
+	}
+	resp, err := h.analytics.GetTrackGenres(r.Context(), id)
 	proxyAnalytics(w, r, resp, err)
 }
 func (h *Handler) AdminRebuildGenres(w http.ResponseWriter, r *http.Request) {
-	resp, err := h.analytics.RebuildGenres()
+	resp, err := h.analytics.RebuildGenres(r.Context())
 	proxyAnalytics(w, r, resp, err)
 }
 
@@ -148,6 +144,5 @@ func (h *Handler) AdminRebuildGenreStations(w http.ResponseWriter, r *http.Reque
 			created++
 		}
 	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{"status": "ok", "created": created})
+	writeJSON(w, http.StatusOK, map[string]interface{}{"status": "ok", "created": created})
 }

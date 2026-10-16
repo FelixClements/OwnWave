@@ -2,12 +2,15 @@ package main
 
 import (
 	"context"
+	"errors"
 	"log"
 	"log/slog"
 	"net/http"
 	"os"
+	"os/signal"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -175,7 +178,6 @@ func main() {
 		r.Group(func(r chi.Router) {
 			r.Use(httprate.LimitByIP(60, time.Minute))
 			r.Get("/stream/{id}", h.StreamTrack)
-			r.Get("/stations/{id}/crossfade", h.StationCrossfadeStream)
 		})
 		r.Group(func(r chi.Router) {
 			r.Use(httprate.LimitByIP(300, time.Minute))
@@ -193,7 +195,6 @@ func main() {
 		r.Delete("/tracks/{id}/feedback", h.DeleteFeedback)
 		r.Get("/history", h.ListHistory)
 		r.Get("/feedback", h.ListFeedback)
-		r.Get("/tracks/{id}/stream-url", h.StreamURL)
 		r.Get("/genres", h.ListGenres)
 		r.Get("/tracks/{id}/genres", h.GetTrackGenres)
 
@@ -202,13 +203,11 @@ func main() {
 		r.Put("/stations/{id}", h.UpdateStation)
 		r.Delete("/stations/{id}", h.DeleteStation)
 		r.Get("/stations/{id}/queue", h.GetQueue)
-		r.Get("/stations/{id}/crossfade-url", h.StationCrossfadeURL)
 		r.Post("/stations", h.CreateStation)
 	})
 
 	r.Group(func(r chi.Router) {
 		r.Use(h.auth.RequireAdmin)
-		r.Post("/rescan", h.Rescan)
 		r.Post("/admin/scan", h.TriggerScan)
 		r.Get("/admin/scan/{id}", h.ScanStatus)
 		r.Get("/admin/health", h.AdminHealth)
@@ -231,9 +230,34 @@ func main() {
 	if port == "" {
 		port = "8080"
 	}
+	// No WriteTimeout: audio streams stay open for the whole track.
+	srv := &http.Server{
+		Addr:              ":" + port,
+		Handler:           r,
+		ReadHeaderTimeout: 10 * time.Second,
+		IdleTimeout:       2 * time.Minute,
+	}
+
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	shutdownDone := make(chan struct{})
+	go func() {
+		defer close(shutdownDone)
+		<-ctx.Done()
+		slog.Info("shutting down")
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		if err := srv.Shutdown(shutdownCtx); err != nil {
+			slog.Error("shutdown", "error", err)
+		}
+	}()
+
 	slog.Info("go-api listening", "port", port)
-	if err := http.ListenAndServe(":"+port, r); err != nil {
+	if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		slog.Error("server failed", "error", err)
 		log.Fatal(err)
 	}
+	// ListenAndServe returns as soon as Shutdown starts; wait for open
+	// requests to drain before the deferred db.Close runs.
+	<-shutdownDone
 }

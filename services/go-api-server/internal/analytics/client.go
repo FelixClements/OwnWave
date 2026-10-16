@@ -1,14 +1,16 @@
 package analytics
 
+import "context"
+
 // Client proxies OwnWave Python analytics endpoints (scanning, analysis, genres).
 type Client interface {
-	Scan(body []byte) (*Response, error)
-	GetJob(jobID string) (*Response, error)
-	Health() (*Response, error)
-	RebuildVectors() (*Response, error)
-	RebuildClusters() (*Response, error)
-	ListGenres() (*Response, error)
-	GetTrackGenres(trackID string) (*Response, error)
-	RebuildGenres() (*Response, error)
-	SetupSummary() (*Response, error)
+	Scan(ctx context.Context, body []byte) (*Response, error)
+	GetJob(ctx context.Context, jobID string) (*Response, error)
+	Health(ctx context.Context) (*Response, error)
+	RebuildVectors(ctx context.Context) (*Response, error)
+	RebuildClusters(ctx context.Context) (*Response, error)
+	ListGenres(ctx context.Context) (*Response, error)
+	GetTrackGenres(ctx context.Context, trackID string) (*Response, error)
+	RebuildGenres(ctx context.Context) (*Response, error)
+	SetupSummary(ctx context.Context) (*Response, error)
 }

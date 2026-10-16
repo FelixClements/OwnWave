@@ -42,20 +42,19 @@ Caddy will automatically obtain and renew a TLS certificate for `OWNWAVE_DOMAIN`
 Caddy is configured in `Caddyfile`:
 
 - `https://<OWNWAVE_DOMAIN>/` → Next.js frontend
-- `https://<OWNWAVE_DOMAIN>/api/trpc/*` → Next.js tRPC endpoint
 - `https://<OWNWAVE_DOMAIN>/api/*` → Go API (the `/api` prefix is stripped)
 
-The `web` service uses `NEXT_PUBLIC_GO_API_URL=https://<OWNWAVE_DOMAIN>/api` so the browser calls the same host, and `GO_API_URL=http://go:8080` for server-side requests.
+The browser always calls same-origin `/api`. Outside Caddy (local dev), the Next.js server rewrites `/api/*` to `GO_API_URL` (`http://go:8080` in Docker).
 
 Prometheus metrics are available to authenticated admins at `/api/admin/metrics`. They are not mounted on the public Caddy routes.
 
 ## 4. Security model
 
-- The browser talks to a single origin. Caddy proxies `/api/*` to Go (except `/api/trpc`). Go sets an HttpOnly `ownwave_session` cookie; JSON APIs never return the raw session token.
+- The browser talks to a single origin. Caddy proxies `/api/*` to Go. Go sets an HttpOnly `ownwave_session` cookie; JSON APIs never return the raw session token.
 - Library, station, history, feedback, and stream endpoints require that cookie (or `Authorization: Bearer` for scripts).
 - Stream URLs are cookie-gated (`/api/stream/{id}`). Unauthenticated requests return 401.
-- The music catalog is shared. Stations, listening history, and likes/bans/skips are scoped to the signed-in user.
-- Python analytics is an internal service. Go sends `X-Internal-Token` (`ANALYTICS_API_SECRET`) and `X-OwnWave-User-Id` on station writes.
+- The music catalog is shared. Stations, listening history, and likes/bans are scoped to the signed-in user.
+- Python analytics is an internal service. Go authenticates to it with `X-Internal-Token` (`ANALYTICS_API_SECRET`).
 - Registration is invite-only after the first admin account is created during setup.
 - Admin maintenance endpoints require `is_admin`.
 - Caddy adds standard security headers (HSTS, CSP, frame denial, etc.). CSP still includes `'unsafe-inline'` for Next.js.

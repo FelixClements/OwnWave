@@ -1,7 +1,10 @@
+import logging
 import os
 from dotenv import load_dotenv
 
 load_dotenv()
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 
 DATABASE_URL = os.environ["DATABASE_URL"]
 ANALYTICS_API_SECRET = os.environ.get("ANALYTICS_API_SECRET", "")

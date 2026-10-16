@@ -288,15 +288,6 @@ func (db *DB) DeleteStation(ctx context.Context, userID, stationID string) error
 	return tx.Commit(ctx)
 }
 
-func (db *DB) UpdateUserPassword(ctx context.Context, userID, passwordHash string) error {
-	_, err := db.pool.Exec(ctx, `
-		UPDATE users
-		SET password_hash = $2
-		WHERE id = $1
-	`, userID, passwordHash)
-	return err
-}
-
 func (db *DB) UpdateUserProfile(ctx context.Context, userID, email, fullName string) error {
 	_, err := db.pool.Exec(ctx, `
 		UPDATE users

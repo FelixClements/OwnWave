@@ -5,18 +5,18 @@ An open-source, self-hosted smart radio. Turn a local library of lossless audio 
 ## What it does
 
 - Scans a local music folder and extracts rich metadata and audio features (BPM, key, energy, valence).
-- Builds AI-driven stations that queue cohesive, similar tracks from a seed.
+- Builds stations from a seed (genre, artist, album, similar track, or mood). A station is live: it holds every library track matching its seed, plays them shuffled with tracks you have not heard recently first, and reshuffles when the queue runs out.
 - Streams raw FLAC or on-the-fly transcodes to MP3, Opus, or AAC per client.
-- Tracks listening history, likes, skips, and bans to improve recommendations.
+- Tracks listening history and likes; banned tracks are never queued again.
 - Provides a responsive web player and an admin dashboard for monitoring and maintenance.
 
 ## Architecture
 
 | Layer | Technology | Role |
 |-------|------------|------|
-| `apps/t3-web-frontend` | Next.js, Tailwind, tRPC | Web UI and player |
-| `services/go-api-server` | Go, Chi, pgx, FFmpeg | API, auth, streaming, queues |
-| `services/python-analytics` | Python, FastAPI, librosa, scikit-learn | Scanning, feature extraction, AI clustering, station generation |
+| `apps/t3-web-frontend` | Next.js, Tailwind, React Query | Web UI and player (crossfade in the browser) |
+| `services/go-api-server` | Go, Chi, pgx, FFmpeg | API, auth, streaming, stations and queues |
+| `services/python-analytics` | Python, FastAPI, Celery, librosa, scikit-learn | Library scanning, audio feature extraction, genres, clustering |
 | `database` | Postgres + pgvector, Redis | Data and task broker |
 
 ## Quick start
