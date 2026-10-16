@@ -17,21 +17,23 @@ dev *args:
 scan path="/music" *args:
     docker compose run --rm python python -m main scan {{path}} {{args}}
 
-# Smoke test: build, start core services, and health-check the Go API
+# Smoke test: build, start core services, and health-check the Go and Python APIs
 test:
     #!/usr/bin/env bash
     set -euo pipefail
     docker compose build python go
     docker compose up -d db redis go python
     trap 'docker compose down' EXIT
-    for i in $(seq 1 60); do
-        if curl -fsS http://localhost:8080/health >/dev/null 2>&1; then
-            echo "Health check passed"
+    for i in $(seq 1 120); do
+        if curl -fsS http://localhost:8080/health >/dev/null 2>&1 \
+            && docker compose exec -T python curl -fsS http://localhost:8000/health >/dev/null 2>&1; then
+            echo "Health check passed (go + python)"
             exit 0
         fi
         sleep 1
     done
     echo "Health check failed" >&2
+    docker compose logs --tail=50 python >&2 || true
     exit 1
 
 # Run Go unit tests

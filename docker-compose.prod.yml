@@ -2,7 +2,7 @@ services:
   web:
     environment:
       GO_API_URL: ${GO_API_URL:-http://go:8080}
-    ports: []
+    ports: !reset []
 
   go:
     environment:
@@ -12,16 +12,16 @@ services:
       ALLOWED_ORIGINS: https://${OWNWAVE_DOMAIN:-localhost}
       PUBLIC_APP_URL: https://${OWNWAVE_DOMAIN:-localhost}
       OWNWAVE_DOMAIN: ${OWNWAVE_DOMAIN:-localhost}
-    ports: []
+    ports: !reset []
 
   python:
-    ports: []
+    ports: !reset []
 
   db:
-    ports: []
+    ports: !reset []
 
   redis:
-    ports: []
+    ports: !reset []
 
   caddy:
     image: caddy:2-alpine

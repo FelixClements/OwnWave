@@ -49,11 +49,28 @@ jobs:
           go test -tags=integration ./internal/playback/...
           go test -tags=integration ./internal/auth/...
 
-      - name: Build frontend
+      - name: Test frontend
         run: |
           cd apps/t3-web-frontend
           npm ci
+          npm test
+
+      - name: Build frontend
+        run: |
+          cd apps/t3-web-frontend
           npm run build
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Test Python analytics
+        run: |
+          cd services/python-analytics
+          grep -v '^essentia' requirements.txt > /tmp/requirements-ci.txt
+          pip install -r /tmp/requirements-ci.txt pytest
+          DATABASE_URL=postgres://unused@localhost/unused PYTHONPATH=src pytest -q tests
 
       - name: Build Docker images
         env:

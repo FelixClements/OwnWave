@@ -85,12 +85,11 @@ def test_apply_numeric_filter_limits_bpm():
 
 def test_seed_types_match_json_schema():
     import json
+    from pathlib import Path
 
-    from station.seed import SCHEMA_PATH, SEED_TYPES
+    from station.seed import SEED_TYPES
 
-    if not SCHEMA_PATH.is_file():
-        pytest.skip("schema file not available in this environment")
-
-    schema = json.loads(SCHEMA_PATH.read_text())
+    schema_path = Path(__file__).resolve().parents[3] / "schemas" / "station-seed.schema.json"
+    schema = json.loads(schema_path.read_text())
     schema_types = set(schema["properties"]["type"]["enum"])
     assert schema_types == set(SEED_TYPES)

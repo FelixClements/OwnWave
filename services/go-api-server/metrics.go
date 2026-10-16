@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -39,15 +40,21 @@ func prometheusMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
 		ww := middleware.NewWrapResponseWriter(w, r.ProtoMajor)
-		route := r.URL.Path
-		if r.URL.RawPath != "" {
-			route = r.URL.RawPath
-		}
 		next.ServeHTTP(ww, r)
+		// Use the matched route pattern (e.g. /tracks/{id}) so label
+		// cardinality stays bounded regardless of IDs in the path.
+		route := "unmatched"
+		if rctx := chi.RouteContext(r.Context()); rctx != nil && rctx.RoutePattern() != "" {
+			route = rctx.RoutePattern()
+		}
+		status := ww.Status()
+		if status == 0 {
+			status = http.StatusOK // handler wrote nothing; net/http sends 200
+		}
 		labels := prometheus.Labels{
 			"method": r.Method,
 			"route":  route,
-			"status": http.StatusText(ww.Status()),
+			"status": http.StatusText(status),
 		}
 		requestDuration.With(labels).Observe(time.Since(start).Seconds())
 		requestCount.With(labels).Inc()
