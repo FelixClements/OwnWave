@@ -88,10 +88,10 @@ export default function SetupPage() {
 
   const handleCreateAccount = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!username.trim() || !password.trim()) return;
+    if (!username.trim() || !password) return;
     try {
       setAccountError('');
-      await register(username.trim(), password.trim());
+      await register(username.trim(), password);
       utils.setupStatus.invalidate();
       setStep(2);
     } catch (err) {

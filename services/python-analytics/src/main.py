@@ -101,14 +101,9 @@ def main():
 
     elif args.command == "rebuild-vectors":
         if args.celery:
-            from celery_app import celery_app
+            from tasks import rebuild_feature_vectors
 
-            @celery_app.task
-            def _rebuild_vectors():
-                from feature_vector import backfill_library_feature_vectors
-                return backfill_library_feature_vectors()
-
-            task = _rebuild_vectors.delay()
+            task = rebuild_feature_vectors.delay()
             print(f"Queued rebuild: {task.id}")
         else:
             from feature_vector import backfill_library_feature_vectors
@@ -119,14 +114,9 @@ def main():
 
     elif args.command == "rebuild-clusters":
         if args.celery:
-            from celery_app import celery_app
+            from tasks import rebuild_clusters
 
-            @celery_app.task
-            def _rebuild_clusters():
-                from clustering import backfill_library_clusters
-                return backfill_library_clusters(n_clusters=args.n_clusters)
-
-            task = _rebuild_clusters.delay()
+            task = rebuild_clusters.delay(args.n_clusters)
             print(f"Queued rebuild: {task.id}")
         else:
             from clustering import backfill_library_clusters

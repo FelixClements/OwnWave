@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"os"
 	"strings"
@@ -21,14 +22,14 @@ func (h *Handler) CreateInvite(w http.ResponseWriter, r *http.Request) {
 		Username *string `json:"username"`
 		TTLHours *int    `json:"ttl_hours"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil && err.Error() != "EOF" {
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil && !errors.Is(err, io.EOF) {
 		http.Error(w, "invalid request", http.StatusBadRequest)
 		return
 	}
 
 	ttl := 7 * 24 * time.Hour
 	if req.TTLHours != nil && *req.TTLHours > 0 {
-		ttl = time.Duration(*req.TTLHours) * time.Hour
+		ttl = time.Duration(min(*req.TTLHours, maxInviteTTLHours)) * time.Hour
 	}
 
 	token, invite, err := h.auth.CreateInvite(r.Context(), admin.ID, req.Username, ttl)
@@ -37,21 +38,26 @@ func (h *Handler) CreateInvite(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	baseURL := strings.TrimSuffix(os.Getenv("PUBLIC_APP_URL"), "/")
-	if baseURL == "" {
-		baseURL = "https://" + os.Getenv("OWNWAVE_DOMAIN")
-	}
-	if baseURL == "https://" || baseURL == "" {
-		baseURL = "/invite"
-	}
-	inviteURL := baseURL + "/invite/" + token
-
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
-		"invite_url": inviteURL,
+		"invite_url": inviteURL(token),
 		"expires_at": invite.ExpiresAt,
 		"invite":     invite,
 	})
+}
+
+const maxInviteTTLHours = 30 * 24
+
+// inviteURL builds the public invite link, falling back to a relative path
+// when neither PUBLIC_APP_URL nor OWNWAVE_DOMAIN is configured.
+func inviteURL(token string) string {
+	baseURL := strings.TrimSuffix(os.Getenv("PUBLIC_APP_URL"), "/")
+	if baseURL == "" {
+		if domain := os.Getenv("OWNWAVE_DOMAIN"); domain != "" {
+			baseURL = "https://" + domain
+		}
+	}
+	return baseURL + "/invite/" + token
 }
 
 func (h *Handler) CreateUser(w http.ResponseWriter, r *http.Request) {
@@ -71,7 +77,7 @@ func (h *Handler) CreateUser(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case errors.Is(err, auth.ErrUsernameTaken):
 			http.Error(w, "username taken", http.StatusConflict)
-		case errors.Is(err, auth.ErrWeakPassword), errors.Is(err, auth.ErrInvalidUsername):
+		case errors.Is(err, auth.ErrWeakPassword), errors.Is(err, auth.ErrPasswordTooLong), errors.Is(err, auth.ErrInvalidUsername):
 			http.Error(w, err.Error(), http.StatusBadRequest)
 		default:
 			writeInternalError(w, r, "create user", err)

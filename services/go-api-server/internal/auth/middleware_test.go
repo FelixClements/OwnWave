@@ -23,7 +23,7 @@ func TestRequireUserRejectsMissingToken(t *testing.T) {
 	require.False(t, called)
 }
 
-func TestRequireAdminRejectsNonAdmin(t *testing.T) {
+func TestRequireAdminRejectsMissingToken(t *testing.T) {
 	s := &Service{}
 	handler := s.RequireAdmin(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
 

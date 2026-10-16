@@ -154,3 +154,30 @@ func requestWithBearer(token string) *http.Request {
 	req.Header.Set("Authorization", "Bearer "+token)
 	return req
 }
+
+func TestRequireAdminRejectsNonAdminSession(t *testing.T) {
+	pool := setupAuthDB(t)
+	svc := auth.NewService(pool)
+	ctx := context.Background()
+
+	adminToken, admin, err := svc.Register(ctx, "alice", "password123", "")
+	require.NoError(t, err)
+	invite, _, err := svc.CreateInvite(ctx, admin.ID, nil, time.Hour)
+	require.NoError(t, err)
+	userToken, _, err := svc.Register(ctx, "bob", "password123", invite)
+	require.NoError(t, err)
+
+	handler := svc.RequireAdmin(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	status := func(token string) int {
+		req := httptest.NewRequest(http.MethodGet, "/admin", nil)
+		req.Header.Set("Authorization", "Bearer "+token)
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+		return rec.Code
+	}
+
+	require.Equal(t, http.StatusForbidden, status(userToken))
+	require.Equal(t, http.StatusOK, status(adminToken))
+}

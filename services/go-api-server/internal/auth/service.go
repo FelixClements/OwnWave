@@ -22,11 +22,13 @@ var (
 	ErrInvalidInvite      = errors.New("invalid invite")
 	ErrRegistrationClosed = errors.New("registration closed")
 	ErrWeakPassword       = errors.New("password must be at least 8 characters")
+	ErrPasswordTooLong    = errors.New("password must be at most 72 bytes")
 	ErrInvalidUsername    = errors.New("username required")
 )
 
 const (
 	minPasswordLen = 8
+	maxPasswordLen = 72 // bcrypt input limit
 	registerLockID = int64(0x4F776E01)
 )
 
@@ -77,8 +79,15 @@ func validateCredentials(username, password string) error {
 	if strings.TrimSpace(username) == "" {
 		return ErrInvalidUsername
 	}
+	return validatePassword(password)
+}
+
+func validatePassword(password string) error {
 	if len(password) < minPasswordLen {
 		return ErrWeakPassword
+	}
+	if len(password) > maxPasswordLen {
+		return ErrPasswordTooLong
 	}
 	return nil
 }
@@ -366,8 +375,8 @@ func (s *Service) deleteSession(ctx context.Context, tokenHash string) error {
 }
 
 func (s *Service) ChangePassword(ctx context.Context, user User, currentPassword, newPassword string) (string, error) {
-	if len(newPassword) < minPasswordLen {
-		return "", ErrWeakPassword
+	if err := validatePassword(newPassword); err != nil {
+		return "", err
 	}
 	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(currentPassword)); err != nil {
 		return "", ErrInvalidCredentials

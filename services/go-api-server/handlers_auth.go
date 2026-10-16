@@ -24,7 +24,7 @@ func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case errors.Is(err, auth.ErrUsernameTaken), errors.Is(err, auth.ErrRegistrationClosed), errors.Is(err, auth.ErrInvalidInvite), errors.Is(err, auth.ErrForbidden):
 			http.Error(w, "forbidden", http.StatusForbidden)
-		case errors.Is(err, auth.ErrWeakPassword), errors.Is(err, auth.ErrInvalidUsername):
+		case errors.Is(err, auth.ErrWeakPassword), errors.Is(err, auth.ErrPasswordTooLong), errors.Is(err, auth.ErrInvalidUsername):
 			http.Error(w, err.Error(), http.StatusBadRequest)
 		default:
 			writeInternalError(w, r, "register", err)
@@ -151,7 +151,7 @@ func (h *Handler) ChangePassword(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "invalid current password", http.StatusUnauthorized)
 			return
 		}
-		if errors.Is(err, auth.ErrWeakPassword) {
+		if errors.Is(err, auth.ErrWeakPassword) || errors.Is(err, auth.ErrPasswordTooLong) {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}

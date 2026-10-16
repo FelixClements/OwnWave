@@ -155,6 +155,8 @@ func (s *Server) ServeTranscoded(w http.ResponseWriter, r *http.Request, path st
 		"-hide_banner",
 		"-loglevel", "error",
 		"-i", path,
+		"-map", "0:a:0",
+		"-vn",
 		"-map_metadata", "-1",
 	}
 	if gainDb != 0 {
