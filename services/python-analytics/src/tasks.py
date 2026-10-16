@@ -192,14 +192,3 @@ def rebuild_track_genres(path: str, force: bool = False) -> dict:
         conn.commit()
 
     return {"updated": updated, "skipped": skipped}
-
-
-@celery_app.task
-def rebuild_genre_stations(user_id: Optional[str] = None) -> dict:
-    """Refresh auto-generated genre stations for one user, or all users after a scan."""
-    from station_builder import rebuild_genre_stations_for_users
-
-    uid = UUID(user_id) if user_id else None
-    with db.get_conn() as conn:
-        return rebuild_genre_stations_for_users(conn, uid)
-

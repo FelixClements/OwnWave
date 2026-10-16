@@ -1,7 +1,5 @@
 package analytics
 
-import "io"
-
 // Stub records calls and returns canned responses for handler tests.
 type Stub struct {
 	Responses map[string]*Response
@@ -16,29 +14,12 @@ func NewStub() *Stub {
 	}
 }
 
-func (s *Stub) WithUser(userID string) Client {
-	s.Calls = append(s.Calls, "WithUser:"+userID)
-	return s
-}
-
-func (s *Stub) GetSimilarTracks(trackID, limit string) (*Response, error) {
-	return s.call("GetSimilarTracks:" + trackID + ":" + limit)
-}
-
 func (s *Stub) Scan(body []byte) (*Response, error) {
 	return s.call("Scan")
 }
 
 func (s *Stub) GetJob(jobID string) (*Response, error) {
 	return s.call("GetJob:" + jobID)
-}
-
-func (s *Stub) CreateStation(body []byte) (*Response, error) {
-	return s.call("CreateStation")
-}
-
-func (s *Stub) UpdateStation(stationID string, body []byte) (*Response, error) {
-	return s.call("UpdateStation:" + stationID)
 }
 
 func (s *Stub) Health() (*Response, error) {
@@ -65,20 +46,8 @@ func (s *Stub) RebuildGenres() (*Response, error) {
 	return s.call("RebuildGenres")
 }
 
-func (s *Stub) RebuildGenreStations() (*Response, error) {
-	return s.call("RebuildGenreStations")
-}
-
 func (s *Stub) SetupSummary() (*Response, error) {
 	return s.call("SetupSummary")
-}
-
-func (s *Stub) SetupStations(body io.Reader) (*Response, error) {
-	return s.call("SetupStations")
-}
-
-func (s *Stub) GetStationTracklist(stationID string) (*Response, error) {
-	return s.call("GetStationTracklist:" + stationID)
 }
 
 func (s *Stub) call(name string) (*Response, error) {

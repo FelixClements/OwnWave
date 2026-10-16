@@ -6,42 +6,17 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
-	"path/filepath"
-	"runtime"
 	"testing"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/require"
-	"github.com/testcontainers/testcontainers-go/modules/postgres"
 
 	"ownwave/api/internal/auth"
 	"ownwave/api/internal/testdb"
 )
 
-func setupAuthDB(t *testing.T) *pgxpool.Pool {
-	t.Helper()
-	ctx := context.Background()
-	container, err := postgres.Run(ctx, "pgvector/pgvector:pg15",
-		postgres.WithSQLDriver("pgx"),
-		postgres.BasicWaitStrategies(),
-	)
-	require.NoError(t, err)
-	t.Cleanup(func() { require.NoError(t, container.Terminate(ctx)) })
-
-	connStr, err := container.ConnectionString(ctx, "sslmode=disable")
-	require.NoError(t, err)
-
-	_, filename, _, ok := runtime.Caller(0)
-	require.True(t, ok)
-	migrationsPath := filepath.Join(filepath.Dir(filename), "../../../../database/migrations")
-	require.NoError(t, testdb.RunMigrations(connStr, migrationsPath))
-
-	pool, err := pgxpool.New(ctx, connStr)
-	require.NoError(t, err)
-	t.Cleanup(pool.Close)
-	return pool
-}
+func setupAuthDB(t *testing.T) *pgxpool.Pool { return testdb.NewPool(t) }
 
 func TestRegisterFirstAdminAndInviteFlow(t *testing.T) {
 	pool := setupAuthDB(t)

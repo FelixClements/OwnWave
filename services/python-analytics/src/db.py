@@ -1,5 +1,4 @@
 import time
-from datetime import datetime
 from typing import List, Optional
 from uuid import UUID
 
@@ -71,101 +70,6 @@ def get_or_create_album(
         return cur.fetchone()[0]
 
 
-def upsert_track(
-    conn: psycopg.Connection,
-    path: str,
-    title: str,
-    artist_id: Optional[UUID],
-    album_id: Optional[UUID],
-    track_number: Optional[int],
-    duration: Optional[float],
-    sample_rate: Optional[int],
-    channels: Optional[int],
-    file_size: Optional[int] = None,
-    file_mtime: Optional[datetime] = None,
-) -> UUID:
-    with conn.cursor() as cur:
-        cur.execute(
-            """
-            INSERT INTO tracks
-                (path, artist_id, album_id, title, track_number, duration_seconds,
-                 sample_rate, channels, file_size, file_mtime, updated_at)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())
-            ON CONFLICT (path) DO UPDATE SET
-                title = EXCLUDED.title,
-                artist_id = EXCLUDED.artist_id,
-                album_id = EXCLUDED.album_id,
-                track_number = EXCLUDED.track_number,
-                duration_seconds = EXCLUDED.duration_seconds,
-                sample_rate = EXCLUDED.sample_rate,
-                channels = EXCLUDED.channels,
-                file_size = EXCLUDED.file_size,
-                file_mtime = EXCLUDED.file_mtime,
-                updated_at = NOW()
-            RETURNING id
-            """,
-            (
-                path,
-                artist_id,
-                album_id,
-                title,
-                track_number,
-                duration,
-                sample_rate,
-                channels,
-                file_size,
-                file_mtime,
-            ),
-        )
-        return cur.fetchone()[0]
-
-
-def upsert_audio_features(
-    conn: psycopg.Connection,
-    track_id: UUID,
-    features: AudioFeatures,
-) -> None:
-    with conn.cursor() as cur:
-        cur.execute(
-            """
-            INSERT INTO audio_features
-                (track_id, bpm, key, loudness, energy, valence,
-                 outro_start_seconds, ideal_crossfade_seconds, intro_start_seconds,
-                 outro_end_seconds, chroma, spectral_centroid, mfcc, feature_vector, analyzed_at)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s, %s, %s, NOW())
-            ON CONFLICT (track_id) DO UPDATE SET
-                bpm = EXCLUDED.bpm,
-                key = EXCLUDED.key,
-                loudness = EXCLUDED.loudness,
-                energy = EXCLUDED.energy,
-                valence = EXCLUDED.valence,
-                outro_start_seconds = EXCLUDED.outro_start_seconds,
-                ideal_crossfade_seconds = EXCLUDED.ideal_crossfade_seconds,
-                intro_start_seconds = EXCLUDED.intro_start_seconds,
-                outro_end_seconds = EXCLUDED.outro_end_seconds,
-                chroma = EXCLUDED.chroma,
-                spectral_centroid = EXCLUDED.spectral_centroid,
-                mfcc = EXCLUDED.mfcc,
-                feature_vector = EXCLUDED.feature_vector,
-                analyzed_at = NOW()
-            """,
-            (
-                track_id,
-                features.bpm,
-                features.key,
-                features.loudness,
-                features.energy,
-                features.valence,
-                features.outro_start_seconds,
-                features.ideal_crossfade_seconds,
-                features.intro_start_seconds,
-                features.outro_end_seconds,
-                Jsonb(features.chroma) if features.chroma else None,
-                features.spectral_centroid,
-                features.mfcc,
-                features.feature_vector,
-            ),
-        )
 
 
 def get_track_by_path(conn: psycopg.Connection, path: str) -> Optional[UUID]:
@@ -310,88 +214,8 @@ def get_scan_status(conn: psycopg.Connection, job_id: UUID) -> Optional[dict]:
     return job
 
 
-def get_station_by_id(
-    conn: psycopg.Connection,
-    station_id: UUID,
-    user_id: UUID,
-) -> Optional[dict]:
-    with conn.cursor() as cur:
-        cur.execute(
-            "SELECT id, name, seed_features FROM stations WHERE id = %s AND user_id = %s",
-            (station_id, user_id),
-        )
-        row = cur.fetchone()
-        if not row:
-            return None
-        seed_features = row[2]
-        if seed_features is not None and not isinstance(seed_features, dict):
-            seed_features = dict(seed_features)
-        return {"id": row[0], "name": row[1], "seed_features": seed_features}
 
 
-def insert_station_tracks(
-    conn: psycopg.Connection,
-    station_id: UUID,
-    track_ids: List[UUID],
-) -> None:
-    with conn.cursor() as cur:
-        for pos, track_id in enumerate(track_ids, start=1):
-            cur.execute(
-                "INSERT INTO station_tracks (station_id, track_id, position) VALUES (%s, %s, %s)",
-                (station_id, track_id, pos),
-            )
-
-
-def get_all_tracks_with_features(
-    conn: psycopg.Connection,
-    user_id: UUID,
-) -> List[dict]:
-    with conn.cursor() as cur:
-        cur.execute(
-            """
-            SELECT t.id, t.title, t.artist_id, t.album_id, t.path,
-                   af.bpm, af.key, af.energy, af.valence, af.feature_vector,
-                   tc.cluster_id,
-                   array_agg(f.feedback) as feedback
-            FROM tracks t
-            JOIN audio_features af ON t.id = af.track_id
-            LEFT JOIN track_clusters tc ON t.id = tc.track_id
-            LEFT JOIN track_feedback f ON t.id = f.track_id AND f.user_id = %s
-            WHERE af.feature_vector IS NOT NULL
-            GROUP BY t.id, af.bpm, af.key, af.energy, af.valence, af.feature_vector, tc.cluster_id
-            """,
-            (user_id,),
-        )
-        columns = [desc[0] for desc in cur.description]
-        rows = cur.fetchall()
-        out = []
-        for row in rows:
-            d = dict(zip(columns, row))
-            if d.get("feature_vector") is not None:
-                d["feature_vector"] = d["feature_vector"].to_list()
-            out.append(d)
-        return out
-
-
-def get_queue(conn: psycopg.Connection, station_id: UUID) -> List[dict]:
-    with conn.cursor() as cur:
-        cur.execute(
-            """
-            SELECT t.id, t.title, t.path, t.artist_id, t.album_id,
-                   af.bpm, af.key, af.energy, af.valence,
-                   af.outro_start_seconds, af.ideal_crossfade_seconds,
-                   af.intro_start_seconds, af.outro_end_seconds,
-                   st.position
-            FROM station_tracks st
-            JOIN tracks t ON st.track_id = t.id
-            JOIN audio_features af ON t.id = af.track_id
-            WHERE st.station_id = %s
-            ORDER BY st.position
-            """,
-            (station_id,),
-        )
-        columns = [desc[0] for desc in cur.description]
-        return [dict(zip(columns, row)) for row in cur.fetchall()]
 
 
 def get_track_stats_by_paths(conn: psycopg.Connection, paths: List[str]) -> dict:
@@ -586,140 +410,11 @@ def list_genres(conn: psycopg.Connection, min_confidence: float = 0.3) -> List[d
         ]
 
 
-def get_tracks_by_genre(
-    conn: psycopg.Connection,
-    main_genre: str,
-    sub_genre: Optional[str] = None,
-    min_confidence: float = 0.0,
-    limit: int = 200,
-) -> List[UUID]:
-    with conn.cursor() as cur:
-        if sub_genre:
-            cur.execute(
-                """
-                SELECT track_id
-                FROM track_genres
-                WHERE main_genre = %s AND sub_genre = %s AND confidence >= %s
-                ORDER BY confidence DESC
-                LIMIT %s
-                """,
-                (main_genre, sub_genre, min_confidence, limit),
-            )
-        else:
-            cur.execute(
-                """
-                SELECT track_id
-                FROM track_genres
-                WHERE main_genre = %s AND confidence >= %s
-                ORDER BY confidence DESC
-                LIMIT %s
-                """,
-                (main_genre, min_confidence, limit),
-            )
-        return [r[0] for r in cur.fetchall()]
 
 
-def create_station(
-    conn: psycopg.Connection,
-    name: str,
-    user_id: UUID,
-    seed_features: Optional[dict] = None,
-    is_auto: bool = False,
-    source: Optional[str] = None,
-) -> UUID:
-    with conn.cursor() as cur:
-        cur.execute(
-            """
-            INSERT INTO stations (user_id, name, seed_features, is_auto, source, last_refreshed_at)
-            VALUES (%s, %s, %s::jsonb, %s, %s, NOW())
-            RETURNING id
-            """,
-            (user_id, name, Jsonb(seed_features) if seed_features else None, is_auto, source),
-        )
-        return cur.fetchone()[0]
 
 
-def upsert_auto_station(
-    conn: psycopg.Connection,
-    name: str,
-    user_id: UUID,
-    seed_features: Optional[dict],
-    source: str = "genre",
-) -> UUID:
-    with conn.cursor() as cur:
-        cur.execute(
-            """
-            INSERT INTO stations (user_id, name, seed_features, is_auto, source, last_refreshed_at)
-            VALUES (%s, %s, %s::jsonb, TRUE, %s, NOW())
-            ON CONFLICT (user_id, name) WHERE is_auto = TRUE DO UPDATE SET
-                seed_features = EXCLUDED.seed_features,
-                is_auto = TRUE,
-                source = EXCLUDED.source,
-                last_refreshed_at = NOW()
-            RETURNING id
-            """,
-            (user_id, name, Jsonb(seed_features) if seed_features else None, source),
-        )
-        return cur.fetchone()[0]
 
-
-def delete_orphaned_auto_stations(
-    conn: psycopg.Connection,
-    user_id: UUID,
-    valid_names: List[str],
-) -> int:
-    if not valid_names:
-        with conn.cursor() as cur:
-            cur.execute(
-                """
-                DELETE FROM stations
-                WHERE is_auto = TRUE AND source = 'genre' AND user_id = %s
-                """,
-                (user_id,),
-            )
-            return cur.rowcount
-    with conn.cursor() as cur:
-        cur.execute(
-            """
-            DELETE FROM stations
-            WHERE is_auto = TRUE
-              AND source = 'genre'
-              AND user_id = %s
-              AND name <> ALL(%s)
-            """,
-            (user_id, list(valid_names)),
-        )
-        return cur.rowcount
-
-
-def list_user_ids(conn: psycopg.Connection) -> List[UUID]:
-    with conn.cursor() as cur:
-        cur.execute("SELECT id FROM users")
-        return [row[0] for row in cur.fetchall()]
-
-
-def get_app_state(conn: psycopg.Connection, key: str) -> Optional[dict]:
-    with conn.cursor() as cur:
-        cur.execute(
-            "SELECT value FROM app_state WHERE key = %s",
-            (key,),
-        )
-        row = cur.fetchone()
-        return row[0] if row else None
-
-
-def set_app_state(conn: psycopg.Connection, key: str, value: dict) -> None:
-    with conn.cursor() as cur:
-        cur.execute(
-            """
-            INSERT INTO app_state (key, value, updated_at)
-            VALUES (%s, %s, NOW())
-            ON CONFLICT (key) DO UPDATE SET
-                value = EXCLUDED.value,
-                updated_at = NOW()
-            """,
-            (key, Jsonb(value)),
-        )
 
 
 def count_tracks(conn: psycopg.Connection) -> int:
@@ -728,13 +423,8 @@ def count_tracks(conn: psycopg.Connection) -> int:
         return cur.fetchone()[0]
 
 
-def count_users(conn: psycopg.Connection) -> int:
-    with conn.cursor() as cur:
-        cur.execute("SELECT COUNT(*) FROM users")
-        return cur.fetchone()[0]
 
-
-def get_main_genre_counts(conn: psycopg.Connection) -> List[dict]:
+def get_main_genre_counts(conn: psycopg.Connection, min_confidence: float) -> List[dict]:
     """Return main genres with how many tracks and sub-genres each has."""
     with conn.cursor() as cur:
         cur.execute(
@@ -743,9 +433,11 @@ def get_main_genre_counts(conn: psycopg.Connection) -> List[dict]:
                    COUNT(DISTINCT track_id) as track_count,
                    COUNT(DISTINCT sub_genre) as sub_count
             FROM track_genres
+            WHERE confidence >= %s
             GROUP BY main_genre
             ORDER BY track_count DESC
-            """
+            """,
+            (min_confidence,),
         )
         return [
             {"main_genre": r[0], "track_count": r[1], "sub_count": r[2]}
@@ -753,16 +445,18 @@ def get_main_genre_counts(conn: psycopg.Connection) -> List[dict]:
         ]
 
 
-def get_sub_genre_counts(conn: psycopg.Connection) -> List[dict]:
+def get_sub_genre_counts(conn: psycopg.Connection, min_confidence: float) -> List[dict]:
     with conn.cursor() as cur:
         cur.execute(
             """
             SELECT main_genre, sub_genre,
                    COUNT(DISTINCT track_id) as track_count
             FROM track_genres
+            WHERE confidence >= %s
             GROUP BY main_genre, sub_genre
             ORDER BY main_genre, sub_genre
-            """
+            """,
+            (min_confidence,),
         )
         return [
             {"main_genre": r[0], "sub_genre": r[1], "track_count": r[2]}
@@ -770,27 +464,19 @@ def get_sub_genre_counts(conn: psycopg.Connection) -> List[dict]:
         ]
 
 
-def get_uncovered_tracks(conn: psycopg.Connection) -> List[UUID]:
-    """Tracks that are not assigned to any station."""
+def count_uncategorized_tracks(conn: psycopg.Connection, min_confidence: float) -> int:
+    """Analysed tracks without a genre prediction at or above min_confidence."""
     with conn.cursor() as cur:
         cur.execute(
             """
-            SELECT t.id
+            SELECT COUNT(*)
             FROM tracks t
-            LEFT JOIN station_tracks st ON t.id = st.track_id
-            WHERE st.track_id IS NULL
-            """
+            JOIN audio_features af ON af.track_id = t.id
+            WHERE NOT EXISTS (
+                SELECT 1 FROM track_genres g
+                WHERE g.track_id = t.id AND g.confidence >= %s
+            )
+            """,
+            (min_confidence,),
         )
-        return [r[0] for r in cur.fetchall()]
-
-
-def get_station_track_ids(conn: psycopg.Connection, station_id: UUID) -> List[UUID]:
-    with conn.cursor() as cur:
-        cur.execute(
-            "SELECT track_id FROM station_tracks WHERE station_id = %s",
-            (station_id,),
-        )
-        return [r[0] for r in cur.fetchall()]
-
-
-
+        return cur.fetchone()[0]

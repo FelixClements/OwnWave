@@ -4,7 +4,6 @@ import db
 from config import MUSIC_DIR
 from db import get_conn, wait_for_db
 from scanner import scan_path
-from station_builder import build_station
 
 
 def main():
@@ -21,14 +20,6 @@ def main():
 
     watch_parser = subparsers.add_parser("watch", help="Watch a music directory and queue scans on change")
     watch_parser.add_argument("path", nargs="?", default=MUSIC_DIR, help="Path to watch")
-
-    station_parser = subparsers.add_parser("build-station", help="Build a station queue")
-    station_parser.add_argument("name", help="Station name")
-    station_parser.add_argument("--length", type=int, default=50)
-    station_parser.add_argument("--min-bpm", type=float)
-    station_parser.add_argument("--max-bpm", type=float)
-    station_parser.add_argument("--min-energy", type=float)
-    station_parser.add_argument("--max-energy", type=float)
 
     serve_parser = subparsers.add_parser("serve", help="Run the API server")
     serve_parser.add_argument("--host", default="0.0.0.0")
@@ -69,29 +60,6 @@ def main():
         from watcher import watch_directory
 
         watch_directory(args.path)
-
-    elif args.command == "build-station":
-        wait_for_db()
-        filters = {}
-        if args.min_bpm is not None:
-            filters["min_bpm"] = args.min_bpm
-        if args.max_bpm is not None:
-            filters["max_bpm"] = args.max_bpm
-        if args.min_energy is not None:
-            filters["min_energy"] = args.min_energy
-        if args.max_energy is not None:
-            filters["max_energy"] = args.max_energy
-
-        with get_conn() as conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    "SELECT id FROM users WHERE is_admin ORDER BY created_at ASC LIMIT 1"
-                )
-                row = cur.fetchone()
-            if not row:
-                raise SystemExit("no users; create an account first")
-            station_id = build_station(conn, args.name, row[0], filters or None, args.length)
-            print(f"Created station {station_id}")
 
     elif args.command == "serve":
         import uvicorn

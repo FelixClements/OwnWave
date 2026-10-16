@@ -6,6 +6,8 @@ import (
 	"strconv"
 
 	"github.com/go-chi/chi/v5"
+
+	"ownwave/api/internal/stations"
 )
 
 func (h *Handler) Rescan(w http.ResponseWriter, r *http.Request) {
@@ -61,13 +63,36 @@ func (h *Handler) AdminStations(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	stations, err := h.db.ListStationsWithQueueStatus(r.Context(), user.ID)
+	list, err := h.db.ListStations(r.Context(), user.ID)
 	if err != nil {
 		writeInternalError(w, r, "admin stations", err)
 		return
 	}
+	type stationStatus struct {
+		Station
+		TrackCount  int `json:"track_count"`
+		PlayedCount int `json:"played_count"`
+	}
+	out := make([]stationStatus, 0, len(list))
+	for _, st := range list {
+		seed, err := stations.ParseStored(st.SeedFeatures)
+		if err != nil {
+			writeInternalError(w, r, "admin stations seed", err)
+			return
+		}
+		status := stationStatus{Station: st}
+		if status.TrackCount, err = h.playback.PoolSize(r.Context(), user.ID, seed); err != nil {
+			writeInternalError(w, r, "admin stations count", err)
+			return
+		}
+		if status.PlayedCount, err = h.db.PlayedCount(r.Context(), user.ID, st.ID); err != nil {
+			writeInternalError(w, r, "admin stations played", err)
+			return
+		}
+		out = append(out, status)
+	}
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{"stations": stations})
+	json.NewEncoder(w).Encode(map[string]interface{}{"stations": out})
 }
 func (h *Handler) AdminRebuildVectors(w http.ResponseWriter, r *http.Request) {
 	resp, err := h.analytics.RebuildVectors()
@@ -90,11 +115,39 @@ func (h *Handler) AdminRebuildGenres(w http.ResponseWriter, r *http.Request) {
 	resp, err := h.analytics.RebuildGenres()
 	proxyAnalytics(w, r, resp, err)
 }
+
+// AdminRebuildGenreStations creates any missing main- and sub-genre stations
+// (with at least minTracksPerGenreStation tracks) for the calling admin.
 func (h *Handler) AdminRebuildGenreStations(w http.ResponseWriter, r *http.Request) {
 	user, ok := h.currentUser(w, r)
 	if !ok {
 		return
 	}
-	resp, err := h.analyticsFor(user.ID).RebuildGenreStations()
-	proxyAnalytics(w, r, resp, err)
+	counts, err := h.db.GenreCounts(r.Context(), h.minGenreConfidence)
+	if err != nil {
+		writeInternalError(w, r, "genre counts", err)
+		return
+	}
+	created := 0
+	for _, g := range counts {
+		if g.TrackCount < h.minTracksPerGenreStation || g.SubGenre == g.MainGenre {
+			continue
+		}
+		name := stations.TitleCase(g.MainGenre)
+		seed := stations.Seed{Type: "genre", MainGenre: g.MainGenre}
+		if g.SubGenre != "" {
+			name += " / " + stations.TitleCase(g.SubGenre)
+			seed = stations.Seed{Type: "sub_genre", MainGenre: g.MainGenre, SubGenre: g.SubGenre}
+		}
+		_, isNew, err := h.ensureGenreStation(r, user.ID, name, seed)
+		if err != nil {
+			writeInternalError(w, r, "create genre station", err)
+			return
+		}
+		if isNew {
+			created++
+		}
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{"status": "ok", "created": created})
 }

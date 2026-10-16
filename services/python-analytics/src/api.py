@@ -1,7 +1,7 @@
 import os
 import secrets
 from contextlib import contextmanager
-from typing import List, NoReturn, Optional
+from typing import NoReturn
 from uuid import UUID
 
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Request
@@ -9,14 +9,9 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 import db
-from celery_app import celery_app
-from config import ANALYTICS_API_SECRET, CELERY_BROKER_URL, MUSIC_DIR
+from config import ANALYTICS_API_SECRET, CELERY_BROKER_URL, GENRE_MIN_CONFIDENCE, MUSIC_DIR
 from library_scan import scan_library
 from library_scan.options import ScanOptions
-from similarity import get_similar_tracks
-from station_builder import build_station, setup_main_genre_stations
-from station.seed import seed_from_request
-from station.service import recompile_station
 
 app = FastAPI(title="OwnWave Analytics")
 
@@ -29,16 +24,6 @@ async def require_internal_token(request: Request, call_next):
     if not ANALYTICS_API_SECRET or not secrets.compare_digest(token, ANALYTICS_API_SECRET):
         return JSONResponse({"detail": "unauthorized"}, status_code=401)
     return await call_next(request)
-
-
-def _user_id_from_request(request: Request) -> UUID:
-    raw = request.headers.get("x-ownwave-user-id")
-    if not raw:
-        raise HTTPException(status_code=400, detail="missing user id")
-    try:
-        return UUID(raw)
-    except ValueError:
-        raise HTTPException(status_code=400, detail="invalid user id")
 
 
 def _raise_invalid_scan_path() -> NoReturn:
@@ -95,29 +80,6 @@ def startup():
 class ScanRequest(BaseModel):
     path: str = MUSIC_DIR
     force: bool = False
-
-
-class StationRequest(BaseModel):
-    name: str
-    length: int = 50
-    min_bpm: Optional[float] = None
-    max_bpm: Optional[float] = None
-    min_energy: Optional[float] = None
-    max_energy: Optional[float] = None
-    min_valence: Optional[float] = None
-    max_valence: Optional[float] = None
-    # New seed options
-    seed_type: Optional[str] = None
-    track_id: Optional[UUID] = None
-    artist_id: Optional[UUID] = None
-    album_id: Optional[UUID] = None
-    cluster_id: Optional[int] = None
-    main_genre: Optional[str] = None
-    sub_genre: Optional[str] = None
-
-
-class SetupStationsRequest(BaseModel):
-    selected_main_genres: List[str]
 
 
 @contextmanager
@@ -177,82 +139,6 @@ async def get_job(job_id: UUID):
         return status
 
 
-@app.post("/stations")
-async def create_station(request: Request, req: StationRequest):
-    user_id = _user_id_from_request(request)
-    filters = seed_from_request(req)
-
-    with _db_conn() as conn:
-        station_id = build_station(
-            conn, req.name, user_id, seed_filter=filters or None, length=req.length
-        )
-        return {"station_id": str(station_id)}
-
-
-@app.patch("/stations/{station_id}")
-async def update_station(request: Request, station_id: UUID, req: StationRequest):
-    user_id = _user_id_from_request(request)
-    filters = seed_from_request(req)
-    has_seed = bool(req.seed_type) or any(
-        getattr(req, field) is not None
-        for field in (
-            "min_bpm",
-            "max_bpm",
-            "min_energy",
-            "max_energy",
-            "min_valence",
-            "max_valence",
-        )
-    )
-    try:
-        with _db_conn() as conn:
-            result = recompile_station(
-                conn,
-                station_id,
-                user_id,
-                name=req.name,
-                seed=filters if has_seed else None,
-                length=req.length,
-            )
-            return result
-    except ValueError as exc:
-        raise HTTPException(status_code=404 if "not found" in str(exc) else 400, detail=str(exc))
-
-
-@app.get("/tracks/{track_id}/similar")
-async def similar_tracks(track_id: UUID, limit: int = 20):
-    with _db_conn() as conn:
-        tracks = get_similar_tracks(conn, track_id, limit=limit)
-        return {
-            "track_id": str(track_id),
-            "similar": [
-                {"track_id": str(tid), "distance": round(dist, 4)} for tid, dist in tracks
-            ],
-        }
-
-
-@app.get("/stations/{station_id}/tracklist")
-async def station_tracklist(station_id: UUID):
-    with _db_conn() as conn:
-        queue = db.get_queue(conn, station_id)
-        return {
-            "station_id": str(station_id),
-            "tracks": [
-                {
-                    "position": t["position"],
-                    "track_id": str(t["id"]),
-                    "title": t["title"],
-                    "path": t["path"],
-                    "bpm": t["bpm"],
-                    "key": t["key"],
-                    "energy": t["energy"],
-                    "valence": t["valence"],
-                }
-                for t in queue
-            ],
-        }
-
-
 @app.post("/rebuild-vectors")
 async def rebuild_vectors(background_tasks: BackgroundTasks):
     if _celery_available():
@@ -297,18 +183,6 @@ async def rebuild_genres(background_tasks: BackgroundTasks):
     return {"status": "pending"}
 
 
-@app.post("/rebuild-genre-stations")
-async def rebuild_genre_stations(request: Request, background_tasks: BackgroundTasks):
-    user_id = _user_id_from_request(request)
-    if _celery_available():
-        from tasks import rebuild_genre_stations
-
-        task = rebuild_genre_stations.delay(str(user_id))
-        return {"task_id": task.id, "status": "queued"}
-    background_tasks.add_task(_run_rebuild_genre_stations, user_id)
-    return {"status": "pending"}
-
-
 def _run_rebuild_vectors():
     from feature_vector import backfill_library_feature_vectors
 
@@ -319,13 +193,6 @@ def _run_rebuild_genres():
     from tasks import rebuild_track_genres
 
     rebuild_track_genres(MUSIC_DIR)
-
-
-def _run_rebuild_genre_stations(user_id: UUID):
-    from station_builder import rebuild_genre_stations
-
-    with _db_conn() as conn:
-        rebuild_genre_stations(conn, user_id)
 
 
 def _run_scan(job_id: UUID, path: str, force: bool):
@@ -346,20 +213,12 @@ def _run_scan(job_id: UUID, path: str, force: bool):
 async def setup_summary():
     with _db_conn() as conn:
         total_tracks = db.count_tracks(conn)
-        main_genres = db.get_main_genre_counts(conn)
-        sub_genres = db.get_sub_genre_counts(conn)
-        uncovered = db.get_uncovered_tracks(conn)
+        main_genres = db.get_main_genre_counts(conn, GENRE_MIN_CONFIDENCE)
+        sub_genres = db.get_sub_genre_counts(conn, GENRE_MIN_CONFIDENCE)
         return {
             "total_tracks": total_tracks,
             "main_genres": main_genres,
             "sub_genres": sub_genres,
-            "uncovered": len(uncovered),
+            # Tracks the "Uncategorized" station will hold.
+            "uncovered": db.count_uncategorized_tracks(conn, GENRE_MIN_CONFIDENCE),
         }
-
-
-@app.post("/setup/stations")
-async def setup_stations(request: Request, req: SetupStationsRequest):
-    user_id = _user_id_from_request(request)
-    with _db_conn() as conn:
-        result = setup_main_genre_stations(conn, user_id, req.selected_main_genres)
-        return result

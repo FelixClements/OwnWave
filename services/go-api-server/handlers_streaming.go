@@ -2,14 +2,12 @@ package main
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"net/http"
 	"os/exec"
 	"strings"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/jackc/pgx/v5"
 )
 
 func (h *Handler) StreamURL(w http.ResponseWriter, r *http.Request) {
@@ -73,15 +71,11 @@ func (h *Handler) StationCrossfadeURL(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	stationID := chi.URLParam(r, "id")
-	if _, err := h.db.GetStationByID(r.Context(), user.ID, stationID); err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			http.Error(w, "station not found", http.StatusNotFound)
-			return
-		}
-		writeInternalError(w, r, "get station", err)
+	station, _, ok := h.loadStation(w, r, user)
+	if !ok {
 		return
 	}
+	stationID := station.ID
 	format := r.URL.Query().Get("format")
 	if format == "" {
 		format = "flac"
@@ -108,13 +102,8 @@ func (h *Handler) StationCrossfadeStream(w http.ResponseWriter, r *http.Request)
 	if !ok {
 		return
 	}
-	stationID := chi.URLParam(r, "id")
-	if _, err := h.db.GetStationByID(r.Context(), user.ID, stationID); err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			http.Error(w, "station not found", http.StatusNotFound)
-			return
-		}
-		writeInternalError(w, r, "get station", err)
+	station, seed, ok := h.loadStation(w, r, user)
+	if !ok {
 		return
 	}
 	format := r.URL.Query().Get("format")
@@ -122,7 +111,7 @@ func (h *Handler) StationCrossfadeStream(w http.ResponseWriter, r *http.Request)
 		format = "flac"
 	}
 
-	queue, err := h.playback.BuildQueue(r.Context(), user.ID, stationID, h.recentHours)
+	queue, err := h.playback.BuildQueue(r.Context(), user.ID, station.ID, seed, h.recentHours)
 	if err != nil {
 		writeInternalError(w, r, "build crossfade queue", err)
 		return

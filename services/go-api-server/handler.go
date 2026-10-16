@@ -13,33 +13,47 @@ import (
 )
 
 type Handler struct {
-	db           *DB
-	auth         *auth.Service
-	playback     *playback.Service
-	stream       *streaming.Server
-	coverCache   *streaming.CoverCache
-	analytics    analytics.Client
-	musicDir     string
-	ffmpegPath   string
-	recentHours  int
-	cookieSecure bool
+	db                       *DB
+	auth                     *auth.Service
+	playback                 *playback.Service
+	stream                   *streaming.Server
+	coverCache               *streaming.CoverCache
+	analytics                analytics.Client
+	musicDir                 string
+	ffmpegPath               string
+	recentHours              int
+	minGenreConfidence       float64
+	minTracksPerGenreStation int
+	cookieSecure             bool
 }
 
-func NewHandler(pool *pgxpool.Pool, musicDir, ffmpegPath, pythonURL string, recentHours int) *Handler {
-	if recentHours <= 0 {
-		recentHours = 24
+// Config holds the environment-derived settings for NewHandler.
+type Config struct {
+	MusicDir                 string
+	FFmpegPath               string
+	PythonURL                string
+	RecentHours              int
+	MinGenreConfidence       float64
+	MinTracksPerGenreStation int
+}
+
+func NewHandler(pool *pgxpool.Pool, cfg Config) *Handler {
+	if cfg.RecentHours <= 0 {
+		cfg.RecentHours = 24
 	}
 	return &Handler{
-		db:           NewDB(pool),
-		auth:         auth.NewService(pool),
-		playback:     playback.NewService(pool),
-		stream:       streaming.New(streaming.Config{MusicDir: musicDir, FFmpegPath: ffmpegPath}),
-		coverCache:   streaming.NewCoverCache(500, 4),
-		analytics:    analytics.NewHTTPClient(pythonURL),
-		musicDir:     musicDir,
-		ffmpegPath:   ffmpegPath,
-		recentHours:  recentHours,
-		cookieSecure: auth.CookieSecure(),
+		db:                       NewDB(pool),
+		auth:                     auth.NewService(pool),
+		playback:                 playback.NewService(pool, cfg.MinGenreConfidence),
+		stream:                   streaming.New(streaming.Config{MusicDir: cfg.MusicDir, FFmpegPath: cfg.FFmpegPath}),
+		coverCache:               streaming.NewCoverCache(500, 4),
+		analytics:                analytics.NewHTTPClient(cfg.PythonURL),
+		musicDir:                 cfg.MusicDir,
+		ffmpegPath:               cfg.FFmpegPath,
+		recentHours:              cfg.RecentHours,
+		minGenreConfidence:       cfg.MinGenreConfidence,
+		minTracksPerGenreStation: cfg.MinTracksPerGenreStation,
+		cookieSecure:             auth.CookieSecure(),
 	}
 }
 
@@ -50,10 +64,6 @@ func (h *Handler) currentUser(w http.ResponseWriter, r *http.Request) (auth.User
 		return auth.User{}, false
 	}
 	return user, true
-}
-
-func (h *Handler) analyticsFor(userID string) analytics.Client {
-	return h.analytics.WithUser(userID)
 }
 
 func proxyAnalytics(w http.ResponseWriter, r *http.Request, resp *analytics.Response, err error) {

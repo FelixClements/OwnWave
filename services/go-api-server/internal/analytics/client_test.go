@@ -68,21 +68,6 @@ func TestHTTPClientProxiesPath(t *testing.T) {
 	}
 }
 
-func TestHTTPClientWithUserSendsHeader(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Header.Get("X-OwnWave-User-Id") != "user-1" {
-			t.Fatalf("user id = %q", r.Header.Get("X-OwnWave-User-Id"))
-		}
-		w.WriteHeader(http.StatusOK)
-	}))
-	defer server.Close()
-
-	client := NewHTTPClientWithSecret(server.URL, "s3cret").WithUser("user-1")
-	if _, err := client.CreateStation([]byte(`{}`)); err != nil {
-		t.Fatalf("CreateStation() error = %v", err)
-	}
-}
-
 func TestHTTPClientSendsInternalToken(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("X-Internal-Token") != "s3cret" {

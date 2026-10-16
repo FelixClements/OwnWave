@@ -6,6 +6,7 @@ import (
 	"strconv"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/google/uuid"
 )
 
 func (h *Handler) ListTracks(w http.ResponseWriter, r *http.Request) {
@@ -56,12 +57,22 @@ func (h *Handler) ListArtists(w http.ResponseWriter, r *http.Request) {
 }
 func (h *Handler) GetSimilarTracks(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
-	limit := r.URL.Query().Get("limit")
-	if limit == "" {
-		limit = "20"
+	if _, err := uuid.Parse(id); err != nil {
+		http.Error(w, "track not found", http.StatusNotFound)
+		return
 	}
-	resp, err := h.analytics.GetSimilarTracks(id, limit)
-	proxyAnalytics(w, r, resp, err)
+	limit, err := strconv.Atoi(r.URL.Query().Get("limit"))
+	if err != nil || limit <= 0 {
+		limit = 20
+	}
+	limit = min(limit, 100)
+	similar, err := h.db.SimilarTracks(r.Context(), id, limit)
+	if err != nil {
+		writeInternalError(w, r, "similar tracks", err)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{"track_id": id, "similar": similar})
 }
 func (h *Handler) RecordPlay(w http.ResponseWriter, r *http.Request) {
 	user, ok := h.currentUser(w, r)
