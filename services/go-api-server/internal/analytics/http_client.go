@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -42,16 +43,16 @@ func (c *HTTPClient) GetJob(ctx context.Context, jobID string) (*Response, error
 	return c.do(ctx, http.MethodGet, "/jobs/"+url.PathEscape(jobID), nil)
 }
 
+func (c *HTTPClient) ListJobs(ctx context.Context, limit int) (*Response, error) {
+	return c.do(ctx, http.MethodGet, "/jobs?limit="+strconv.Itoa(limit), nil)
+}
+
 func (c *HTTPClient) Health(ctx context.Context) (*Response, error) {
 	return c.do(ctx, http.MethodGet, "/health", nil)
 }
 
-func (c *HTTPClient) RebuildVectors(ctx context.Context) (*Response, error) {
-	return c.do(ctx, http.MethodPost, "/rebuild-vectors", nil)
-}
-
-func (c *HTTPClient) RebuildClusters(ctx context.Context) (*Response, error) {
-	return c.do(ctx, http.MethodPost, "/rebuild-clusters", nil)
+func (c *HTTPClient) RebuildAnalysis(ctx context.Context) (*Response, error) {
+	return c.do(ctx, http.MethodPost, "/rebuild-analysis", nil)
 }
 
 func (c *HTTPClient) ListGenres(ctx context.Context) (*Response, error) {

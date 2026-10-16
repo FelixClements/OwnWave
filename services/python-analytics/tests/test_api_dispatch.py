@@ -64,9 +64,9 @@ def test_rebuild_returns_503_when_broker_down(api_with_fake_db, monkeypatch):
     def broker_down(*args, **kwargs):
         raise ConnectionError("redis unreachable")
 
-    monkeypatch.setattr(api.tasks.rebuild_feature_vectors, "apply_async", broker_down)
+    monkeypatch.setattr(api.tasks.rebuild_analysis, "apply_async", broker_down)
 
     with pytest.raises(HTTPException) as exc:
-        api.rebuild_vectors()
+        api.rebuild_analysis()
 
     assert exc.value.status_code == 503

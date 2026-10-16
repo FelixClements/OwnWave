@@ -1,18 +1,32 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
-import { keys } from '@/lib/queries';
+import { isScanFinished, keys, useScanStatus, useScans } from '@/lib/queries';
+import { failedFileCount, scanDuration } from '@/lib/scan';
+import { ScanProgress, ScanStateBadge } from '@/components/ScanProgress';
 
-/** Mutation that reports its outcome with alert(); replaced by inline status later. */
-function useAdminAction<TVars = void>(fn: (vars: TVars) => Promise<unknown>, success: string, failure: string) {
-  return useMutation(fn, {
-    onSuccess: () => alert(success),
-    onError: (err: Error) => alert(`${failure}: ${err.message}`),
-  });
+type Notice = { type: 'success' | 'error'; text: string } | null;
+
+function NoticeBar({ notice }: { notice: Notice }) {
+  if (!notice) return null;
+  return (
+    <p
+      role={notice.type === 'error' ? 'alert' : 'status'}
+      className={`rounded px-3 py-2 text-sm ${
+        notice.type === 'error'
+          ? 'bg-red-900/40 text-red-400 border border-red-400/30'
+          : 'bg-green-900/40 text-spotify-green border border-spotify-green/30'
+      }`}
+    >
+      {notice.text}
+    </p>
+  );
 }
+
+const errorNotice = (prefix: string) => (err: Error): Notice => ({ type: 'error', text: `${prefix}: ${err.message}` });
 
 function StatusDot({ ok }: { ok: boolean }) {
   return (
@@ -34,39 +48,63 @@ export default function AdminPage() {
   const [inviteUrl, setInviteUrl] = useState('');
   const [newUsername, setNewUsername] = useState('');
   const [newPassword, setNewPassword] = useState('');
+  const [userNotice, setUserNotice] = useState<Notice>(null);
+  const [maintenanceNotice, setMaintenanceNotice] = useState<Notice>(null);
 
-  const scan = useAdminAction(() => api.triggerScan(), 'Scan started.', 'Scan failed');
-  const rebuildVectors = useAdminAction(() => api.adminRebuildVectors(), 'Vector rebuild queued.', 'Vector rebuild failed');
-  const rebuildClusters = useAdminAction(() => api.adminRebuildClusters(), 'Cluster rebuild queued.', 'Cluster rebuild failed');
-  const rebuildGenres = useAdminAction(() => api.adminRebuildGenres(), 'Genre rebuild queued.', 'Genre rebuild failed');
-  const rebuildGenreStations = useMutation(() => api.adminRebuildGenreStations(), {
-    onSuccess: (data) => {
-      void qc.invalidateQueries(keys.stations);
-      void qc.invalidateQueries(keys.adminStations);
-      alert(`Created ${data.created} genre station${data.created === 1 ? '' : 's'}.`);
-    },
-    onError: (err: Error) => alert('Genre station rebuild failed: ' + err.message),
-  });
   const createInvite = useMutation((vars: { username?: string }) => api.createInvite(vars.username), {
-    onSuccess: (data) => {
+    onMutate: () => setUserNotice(null),
+    onSuccess: async (data) => {
       setInviteUrl(data.invite_url);
-      void navigator.clipboard.writeText(data.invite_url);
-      alert('Invite link copied to clipboard.');
+      try {
+        await navigator.clipboard.writeText(data.invite_url);
+        setUserNotice({ type: 'success', text: 'Invite link created and copied to the clipboard.' });
+      } catch {
+        // Clipboard access needs HTTPS and permission; the link is shown below.
+        setUserNotice({ type: 'success', text: 'Invite link created.' });
+      }
     },
-    onError: (err: Error) => alert('Invite failed: ' + err.message),
+    onError: (err: Error) => setUserNotice(errorNotice('Invite failed')(err)),
   });
   const createUser = useMutation((vars: { username: string; password: string }) => api.createUser(vars.username, vars.password), {
-    onSuccess: () => {
+    onMutate: () => setUserNotice(null),
+    onSuccess: (_, vars) => {
       setNewUsername('');
       setNewPassword('');
       void qc.invalidateQueries(keys.users);
-      alert('User created.');
+      setUserNotice({ type: 'success', text: `User ${vars.username} created.` });
     },
-    onError: (err: Error) => alert('Create user failed: ' + err.message),
+    onError: (err: Error) => setUserNotice(errorNotice('Create user failed')(err)),
   });
-  const deleteUser = useMutation((vars: { id: string }) => api.deleteUser(vars.id), {
-    onSuccess: () => void qc.invalidateQueries(keys.users),
-    onError: (err: Error) => alert('Delete user failed: ' + err.message),
+  const deleteUser = useMutation((vars: { id: string; username: string }) => api.deleteUser(vars.id), {
+    onMutate: () => setUserNotice(null),
+    onSuccess: (_, vars) => {
+      void qc.invalidateQueries(keys.users);
+      setUserNotice({ type: 'success', text: `User ${vars.username} removed.` });
+    },
+    onError: (err: Error) => setUserNotice(errorNotice('Remove user failed')(err)),
+  });
+
+  const rebuildAnalysis = useMutation(() => api.adminRebuildAnalysis(), {
+    onMutate: () => setMaintenanceNotice(null),
+    onSuccess: () => setMaintenanceNotice({ type: 'success', text: 'Analysis rebuild queued.' }),
+    onError: (err: Error) => setMaintenanceNotice(errorNotice('Analysis rebuild failed')(err)),
+  });
+  const rebuildGenres = useMutation(() => api.adminRebuildGenres(), {
+    onMutate: () => setMaintenanceNotice(null),
+    onSuccess: () => setMaintenanceNotice({ type: 'success', text: 'Genre rebuild queued.' }),
+    onError: (err: Error) => setMaintenanceNotice(errorNotice('Genre rebuild failed')(err)),
+  });
+  const rebuildGenreStations = useMutation(() => api.adminRebuildGenreStations(), {
+    onMutate: () => setMaintenanceNotice(null),
+    onSuccess: (data) => {
+      void qc.invalidateQueries(keys.stations);
+      void qc.invalidateQueries(keys.adminStations);
+      setMaintenanceNotice({
+        type: 'success',
+        text: `Created ${data.created} genre station${data.created === 1 ? '' : 's'}.`,
+      });
+    },
+    onError: (err: Error) => setMaintenanceNotice(errorNotice('Genre station rebuild failed')(err)),
   });
 
   if (user && !user.is_admin) {
@@ -103,6 +141,7 @@ export default function AdminPage() {
               {createInvite.isLoading ? 'Generating...' : 'Generate invite link'}
             </button>
           </div>
+          <NoticeBar notice={userNotice} />
           {inviteUrl && (
             <p className="text-sm text-spotify-subdued break-all">
               Latest invite: <span className="text-spotify-text">{inviteUrl}</span>
@@ -165,7 +204,7 @@ export default function AdminPage() {
                         <button
                           onClick={() => {
                             if (confirm(`Remove user ${u.username}?`)) {
-                              deleteUser.mutate({ id: u.id });
+                              deleteUser.mutate({ id: u.id, username: u.username });
                             }
                           }}
                           className="text-red-400 hover:text-red-300 text-sm"
@@ -228,46 +267,140 @@ export default function AdminPage() {
         </div>
       </section>
 
+      <ScanSection />
+
       <section>
-        <h3 className="text-xl font-bold mb-4">Scan Jobs & Maintenance</h3>
-        <div className="flex flex-wrap gap-3">
-          <button
-            onClick={() => scan.mutate()}
-            disabled={scan.isLoading}
-            className="px-4 py-2 rounded bg-spotify-green text-black font-semibold hover:bg-spotify-green-hover transition disabled:opacity-50"
-          >
-            {scan.isLoading ? 'Scanning...' : 'Rescan library'}
-          </button>
-          <button
-            onClick={() => rebuildVectors.mutate()}
-            disabled={rebuildVectors.isLoading}
-            className="px-4 py-2 rounded bg-spotify-elevated text-spotify-text font-semibold hover:bg-spotify-card-hover transition disabled:opacity-50"
-          >
-            {rebuildVectors.isLoading ? 'Queueing...' : 'Rebuild vectors'}
-          </button>
-          <button
-            onClick={() => rebuildClusters.mutate()}
-            disabled={rebuildClusters.isLoading}
-            className="px-4 py-2 rounded bg-spotify-elevated text-spotify-text font-semibold hover:bg-spotify-card-hover transition disabled:opacity-50"
-          >
-            {rebuildClusters.isLoading ? 'Queueing...' : 'Rebuild clusters'}
-          </button>
-          <button
-            onClick={() => { if (confirm('Rebuild all genre predictions?')) rebuildGenres.mutate(); }}
-            disabled={rebuildGenres.isLoading}
-            className="px-4 py-2 rounded bg-spotify-elevated text-spotify-text font-semibold hover:bg-spotify-card-hover transition disabled:opacity-50"
-          >
-            {rebuildGenres.isLoading ? 'Queueing...' : 'Rebuild genres'}
-          </button>
-          <button
-            onClick={() => { if (confirm('Create missing genre stations?')) rebuildGenreStations.mutate(); }}
-            disabled={rebuildGenreStations.isLoading}
-            className="px-4 py-2 rounded bg-spotify-elevated text-spotify-text font-semibold hover:bg-spotify-card-hover transition disabled:opacity-50"
-          >
-            {rebuildGenreStations.isLoading ? 'Creating...' : 'Create genre stations'}
-          </button>
+        <h3 className="text-xl font-bold mb-4">Maintenance</h3>
+        <div className="space-y-3">
+          <div className="flex flex-wrap gap-3">
+            <button
+              onClick={() => rebuildAnalysis.mutate()}
+              disabled={rebuildAnalysis.isLoading}
+              title="Recompute similarity vectors and clusters (also runs after every scan)"
+              className="px-4 py-2 rounded bg-spotify-elevated text-spotify-text font-semibold hover:bg-spotify-card-hover transition disabled:opacity-50"
+            >
+              {rebuildAnalysis.isLoading ? 'Queueing...' : 'Rebuild analysis'}
+            </button>
+            <button
+              onClick={() => { if (confirm('Rebuild all genre predictions?')) rebuildGenres.mutate(); }}
+              disabled={rebuildGenres.isLoading}
+              className="px-4 py-2 rounded bg-spotify-elevated text-spotify-text font-semibold hover:bg-spotify-card-hover transition disabled:opacity-50"
+            >
+              {rebuildGenres.isLoading ? 'Queueing...' : 'Rebuild genres'}
+            </button>
+            <button
+              onClick={() => { if (confirm('Create missing genre stations?')) rebuildGenreStations.mutate(); }}
+              disabled={rebuildGenreStations.isLoading}
+              className="px-4 py-2 rounded bg-spotify-elevated text-spotify-text font-semibold hover:bg-spotify-card-hover transition disabled:opacity-50"
+            >
+              {rebuildGenreStations.isLoading ? 'Creating...' : 'Create genre stations'}
+            </button>
+          </div>
+          <NoticeBar notice={maintenanceNotice} />
         </div>
       </section>
     </div>
+  );
+}
+
+/**
+ * Start a library scan, follow it live, and browse recent scans. The newest
+ * scan is shown by default, so a running scan is picked up again after a
+ * reload.
+ */
+function ScanSection() {
+  const qc = useQueryClient();
+  const scans = useScans();
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [force, setForce] = useState(false);
+  const [notice, setNotice] = useState<Notice>(null);
+
+  const shownId = selectedId ?? scans.data?.[0]?.id ?? null;
+  const shown = useScanStatus(shownId);
+  const scanInProgress =
+    scans.data?.some((j) => !isScanFinished(j.status)) || (shown.data && !isScanFinished(shown.data.status));
+
+  const startScan = useMutation(() => api.triggerScan(force), {
+    onMutate: () => setNotice(null),
+    onSuccess: (data) => {
+      setSelectedId(data.job_id);
+      void qc.invalidateQueries(keys.scans);
+    },
+    onError: (err: Error) => setNotice(errorNotice('Scan could not start')(err)),
+  });
+
+  // Refresh the history (and the library) when the followed scan finishes.
+  const shownStatus = shown.data?.status;
+  useEffect(() => {
+    if (shownStatus && isScanFinished(shownStatus)) {
+      void qc.invalidateQueries(keys.scans);
+      void qc.invalidateQueries(['tracks']);
+      void qc.invalidateQueries(keys.albums);
+      void qc.invalidateQueries(keys.artists);
+    }
+  }, [shownStatus, qc]);
+
+  return (
+    <section>
+      <h3 className="text-xl font-bold mb-4">Library Scans</h3>
+      <div className="space-y-4">
+        <div className="flex flex-wrap items-center gap-4">
+          <button
+            onClick={() => startScan.mutate()}
+            disabled={startScan.isLoading || !!scanInProgress}
+            className="px-4 py-2 rounded bg-spotify-green text-black font-semibold hover:bg-spotify-green-hover transition disabled:opacity-50"
+          >
+            {startScan.isLoading ? 'Starting...' : scanInProgress ? 'Scan in progress' : 'Rescan library'}
+          </button>
+          <label className="flex items-center gap-2 text-sm text-spotify-subdued">
+            <input type="checkbox" checked={force} onChange={(e) => setForce(e.target.checked)} />
+            Re-analyze every file (slow)
+          </label>
+        </div>
+        <NoticeBar notice={notice} />
+
+        {shown.data && <ScanProgress scan={shown.data} />}
+
+        {scans.data && scans.data.length > 0 && (
+          <div className="bg-spotify-card rounded-lg overflow-x-auto border border-spotify-border">
+            <table className="w-full text-sm">
+              <thead className="bg-spotify-elevated text-spotify-subdued">
+                <tr>
+                  <th className="text-left p-3">Started</th>
+                  <th className="text-left p-3">Status</th>
+                  <th className="text-right p-3">Duration</th>
+                  <th className="text-right p-3">Found</th>
+                  <th className="text-right p-3">Imported</th>
+                  <th className="text-right p-3">Failed</th>
+                </tr>
+              </thead>
+              <tbody>
+                {scans.data.map((job) => (
+                  <tr
+                    key={job.id}
+                    onClick={() => setSelectedId(job.id)}
+                    className={`border-t border-spotify-border cursor-pointer hover:bg-spotify-card-hover ${
+                      job.id === shownId ? 'bg-spotify-elevated' : ''
+                    }`}
+                  >
+                    <td className="p-3">
+                      <button className="text-left" aria-pressed={job.id === shownId}>
+                        {job.created_at ? new Date(job.created_at).toLocaleString() : '—'}
+                      </button>
+                    </td>
+                    <td className="p-3"><ScanStateBadge status={job.status} /></td>
+                    <td className="p-3 text-right">{scanDuration(job) ?? '—'}</td>
+                    <td className="p-3 text-right">{job.stats.total_files}</td>
+                    <td className="p-3 text-right">{job.stats.imported}</td>
+                    <td className="p-3 text-right">{failedFileCount(job)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+        {scans.data?.length === 0 && <p className="text-spotify-subdued text-sm">No scans yet.</p>}
+      </div>
+    </section>
   );
 }

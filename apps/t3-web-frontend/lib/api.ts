@@ -7,6 +7,21 @@ export function coverUrl(trackId: string) {
   return `${API_BASE}/tracks/${encodeURIComponent(trackId)}/cover`;
 }
 
+/**
+ * Error text from a response body: Go answers in plain text, proxied
+ * analytics errors as JSON ({"detail": ...} or {"error": ...}).
+ */
+export function errorText(body: string): string {
+  try {
+    const parsed = JSON.parse(body);
+    const msg = parsed?.detail ?? parsed?.error;
+    if (typeof msg === 'string') return msg;
+  } catch {
+    // plain text
+  }
+  return body;
+}
+
 /** HTTP error from the Go API, carrying the response status. */
 export class ApiError extends Error {
   constructor(
@@ -126,24 +141,34 @@ export type Genre = {
 
 export type FailedPath = { path: string; error: string };
 
-export type ScanStatus = {
+export type ScanState = 'pending' | 'running' | 'completed' | 'failed';
+
+type ScanCounts = {
+  total_files: number;
+  imported: number;
+  scanned: number;
+  features: number;
+  model_success: number;
+  model_failed: number;
+};
+
+type ScanJob = {
   id: string;
   path: string;
-  status: string;
-  error?: string;
-  started_at?: string;
-  finished_at?: string;
-  created_at?: string;
-  stats: {
-    total_files: number;
-    imported: number;
-    scanned: number;
-    features: number;
-    model_success: number;
-    model_failed: number;
-    failed_paths: FailedPath[];
-  };
+  status: ScanState;
+  error?: string | null;
+  started_at?: string | null;
+  finished_at?: string | null;
+  created_at?: string | null;
+  /** Folder import jobs of this scan by outcome. */
+  folders: { total: number; done: number; failed: number };
 };
+
+/** One scan with its full list of failed files. */
+export type ScanStatus = ScanJob & { stats: ScanCounts & { failed_paths: FailedPath[] } };
+
+/** One scan in the history list; failed files are only counted. */
+export type ScanSummary = ScanJob & { stats: ScanCounts & { failed_files: number } };
 
 export type CreateStationResponse = { station_id: string };
 
@@ -185,7 +210,7 @@ class OwnWaveAPI {
       credentials: 'include',
     });
     if (!res.ok) {
-      throw new ApiError(res.status, (await res.text()).trim());
+      throw new ApiError(res.status, errorText((await res.text()).trim()));
     }
     if (res.status === 204) {
       return undefined as T;
@@ -224,6 +249,10 @@ class OwnWaveAPI {
 
   getScanStatus(jobId: string) {
     return this.request<ScanStatus>(`/admin/scan/${encodeURIComponent(jobId)}`);
+  }
+
+  listScans(limit = 10) {
+    return this.request<{ jobs: ScanSummary[] }>(`/admin/scans?limit=${limit}`).then((r) => r.jobs);
   }
 
   recordPlay(id: string, stationId?: string) {
@@ -330,12 +359,8 @@ class OwnWaveAPI {
     return this.request<{ stations: AdminStation[] }>('/admin/stations').then((r) => r.stations);
   }
 
-  adminRebuildVectors() {
-    return this.request<{ status: string }>('/admin/rebuild-vectors', { method: 'POST' });
-  }
-
-  adminRebuildClusters() {
-    return this.request<{ status: string }>('/admin/rebuild-clusters', { method: 'POST' });
+  adminRebuildAnalysis() {
+    return this.request<{ status: string }>('/admin/rebuild-analysis', { method: 'POST' });
   }
 
   adminRebuildGenres() {

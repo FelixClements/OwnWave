@@ -86,21 +86,22 @@ def create_scan_job(
     conn: psycopg.Connection,
     path: str,
     job_id: Optional[UUID] = None,
+    parent_id: Optional[UUID] = None,
 ) -> UUID:
     with conn.cursor() as cur:
         if job_id:
             cur.execute(
                 """
-                INSERT INTO scan_jobs (id, path) VALUES (%s, %s)
+                INSERT INTO scan_jobs (id, path, parent_id) VALUES (%s, %s, %s)
                 ON CONFLICT (id) DO UPDATE SET path = EXCLUDED.path
                 RETURNING id
                 """,
-                (job_id, path),
+                (job_id, path, parent_id),
             )
         else:
             cur.execute(
-                "INSERT INTO scan_jobs (path) VALUES (%s) RETURNING id",
-                (path,),
+                "INSERT INTO scan_jobs (path, parent_id) VALUES (%s, %s) RETURNING id",
+                (path, parent_id),
             )
         return cur.fetchone()[0]
 
@@ -144,81 +145,101 @@ def upsert_scan_job_progress(
         )
 
 
+_SCAN_JOB_COLUMNS = "id, path, status, error, started_at, finished_at, created_at"
+
+
+def _scan_job_row(row) -> dict:
+    return {
+        "id": str(row[0]),
+        "path": row[1],
+        "status": row[2],
+        "error": row[3],
+        "started_at": row[4].isoformat() if row[4] else None,
+        "finished_at": row[5].isoformat() if row[5] else None,
+        "created_at": row[6].isoformat() if row[6] else None,
+    }
+
+
 def get_scan_job(conn: psycopg.Connection, job_id: UUID) -> Optional[dict]:
     with conn.cursor() as cur:
+        cur.execute(f"SELECT {_SCAN_JOB_COLUMNS} FROM scan_jobs WHERE id = %s", (job_id,))
+        row = cur.fetchone()
+        return _scan_job_row(row) if row else None
+
+
+_STAT_COUNTERS = ("total_files", "imported", "scanned", "features", "model_success", "model_failed")
+
+
+def _scan_stats(conn: psycopg.Connection, job_id: UUID) -> dict:
+    """Sum the per-folder progress rows of a master job.
+
+    A scan with no music folders only has the master job's own row.
+    """
+    stats = {k: 0 for k in _STAT_COUNTERS}
+    stats["failed_paths"] = []
+    with conn.cursor() as cur:
         cur.execute(
-            "SELECT id, path, status, error, started_at, finished_at, created_at "
-            "FROM scan_jobs WHERE id = %s",
+            """
+            SELECT stats FROM scan_job_progress WHERE master_job_id = %s
+            UNION ALL
+            SELECT stats FROM scan_job_progress
+            WHERE job_id = %s
+              AND NOT EXISTS (SELECT 1 FROM scan_job_progress WHERE master_job_id = %s)
+            """,
+            (job_id, job_id, job_id),
+        )
+        for (s,) in cur.fetchall():
+            s = s or {}
+            for k in _STAT_COUNTERS:
+                stats[k] += s.get(k, 0) or 0
+            stats["failed_paths"].extend(s.get("failed_paths", []) or [])
+    return stats
+
+
+def _scan_folders(conn: psycopg.Connection, job_id: UUID) -> dict:
+    """Count a master job's folder jobs by outcome."""
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            SELECT COUNT(*),
+                   COUNT(*) FILTER (WHERE status = 'completed'),
+                   COUNT(*) FILTER (WHERE status = 'failed')
+            FROM scan_jobs WHERE parent_id = %s
+            """,
             (job_id,),
         )
-        row = cur.fetchone()
-        if not row:
-            return None
-        return {
-            "id": str(row[0]),
-            "path": row[1],
-            "status": row[2],
-            "error": row[3],
-            "started_at": row[4].isoformat() if row[4] else None,
-            "finished_at": row[5].isoformat() if row[5] else None,
-            "created_at": row[6].isoformat() if row[6] else None,
-        }
+        total, done, failed = cur.fetchone()
+    return {"total": total, "done": done, "failed": failed}
 
 
 def get_scan_status(conn: psycopg.Connection, job_id: UUID) -> Optional[dict]:
     job = get_scan_job(conn, job_id)
     if not job:
         return None
-
-    stats = {
-        "total_files": 0,
-        "imported": 0,
-        "scanned": 0,
-        "features": 0,
-        "model_success": 0,
-        "model_failed": 0,
-        "failed_paths": [],
-    }
-
-    with conn.cursor() as cur:
-        cur.execute(
-            "SELECT stats FROM scan_job_progress WHERE master_job_id = %s",
-            (job_id,),
-        )
-        for row in cur.fetchall():
-            s = row[0] or {}
-            stats["total_files"] += s.get("total_files", 0) or 0
-            stats["imported"] += s.get("imported", 0) or 0
-            stats["scanned"] += s.get("scanned", 0) or 0
-            stats["features"] += s.get("features", 0) or 0
-            stats["model_success"] += s.get("model_success", 0) or 0
-            stats["model_failed"] += s.get("model_failed", 0) or 0
-            for fp in s.get("failed_paths", []) or []:
-                stats["failed_paths"].append(fp)
-
-    # Also include the master job's own progress row if no sub-jobs yet.
-    with conn.cursor() as cur:
-        cur.execute(
-            "SELECT stats FROM scan_job_progress WHERE job_id = %s",
-            (job_id,),
-        )
-        row = cur.fetchone()
-        if row and not stats["total_files"]:
-            s = row[0] or {}
-            stats["total_files"] = s.get("total_files", 0) or 0
-            stats["imported"] = s.get("imported", 0) or 0
-            stats["scanned"] = s.get("scanned", 0) or 0
-            stats["features"] = s.get("features", 0) or 0
-            stats["model_success"] = s.get("model_success", 0) or 0
-            stats["model_failed"] = s.get("model_failed", 0) or 0
-            stats["failed_paths"] = list(s.get("failed_paths", []) or [])
-
-    job["stats"] = stats
+    job["stats"] = _scan_stats(conn, job_id)
+    job["folders"] = _scan_folders(conn, job_id)
     return job
 
 
+def list_scan_jobs(conn: psycopg.Connection, limit: int) -> List[dict]:
+    """Most recent library scans (master jobs), newest first.
 
-
+    Failed files are reduced to a count; fetch one job for the full list.
+    """
+    with conn.cursor() as cur:
+        cur.execute(
+            f"SELECT {_SCAN_JOB_COLUMNS} FROM scan_jobs "
+            "WHERE parent_id IS NULL ORDER BY created_at DESC LIMIT %s",
+            (limit,),
+        )
+        jobs = [_scan_job_row(row) for row in cur.fetchall()]
+    for job in jobs:
+        job_id = UUID(job["id"])
+        stats = _scan_stats(conn, job_id)
+        stats["failed_files"] = len(stats.pop("failed_paths"))
+        job["stats"] = stats
+        job["folders"] = _scan_folders(conn, job_id)
+    return jobs
 
 
 def get_track_stats_by_paths(conn: psycopg.Connection, paths: List[str]) -> dict:
