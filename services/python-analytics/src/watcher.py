@@ -5,11 +5,9 @@ from pathlib import Path
 from watchdog.events import FileSystemEventHandler
 from watchdog.observers import Observer
 
+from audio_metadata import SUPPORTED_EXTS
 from celery_app import celery_app
 from config import MUSIC_DIR
-
-
-MUSIC_EXTS = {".flac", ".mp3"}
 
 
 class MusicEventHandler(FileSystemEventHandler):
@@ -32,30 +30,32 @@ class MusicEventHandler(FileSystemEventHandler):
             return
 
         with self._lock:
-            now = time.monotonic()
-            if now < self._next_allowed:
-                return
-
             self._dirty = True
-            if self._timer is not None:
-                self._timer.cancel()
-
-            self._timer = threading.Timer(self.debounce_seconds, self._maybe_trigger)
-            self._timer.daemon = True
-            self._timer.start()
+            # Debounce bursts; changes during the cooldown are deferred to its
+            # end rather than dropped.
+            delay = max(self.debounce_seconds, self._next_allowed - time.monotonic())
+            self._schedule(delay)
 
     def _is_music_file(self, path: str) -> bool:
-        return Path(path).suffix.lower() in MUSIC_EXTS
+        return Path(path).suffix.lower() in SUPPORTED_EXTS
+
+    def _schedule(self, delay: float) -> None:
+        if self._timer is not None:
+            self._timer.cancel()
+        self._timer = threading.Timer(delay, self._maybe_trigger)
+        self._timer.daemon = True
+        self._timer.start()
 
     def _maybe_trigger(self):
         with self._lock:
             self._timer = None
             if not self._dirty:
                 return
-            self._dirty = False
             now = time.monotonic()
             if now < self._next_allowed:
+                self._schedule(self._next_allowed - now)
                 return
+            self._dirty = False
             self._next_allowed = now + self.cooldown_seconds
 
         print(f"[watcher] change detected, queuing scan of {self.root_path}")

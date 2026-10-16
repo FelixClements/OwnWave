@@ -19,6 +19,16 @@ class ScanResult:
     failed_paths: List[FailedPath] = field(default_factory=list)
     track_ids: List = field(default_factory=list)
 
+    def merge(self, other: "ScanResult") -> None:
+        self.total_files += other.total_files
+        self.imported += other.imported
+        self.scanned += other.scanned
+        self.features += other.features
+        self.model_success += other.model_success
+        self.model_failed += other.model_failed
+        self.failed_paths.extend(other.failed_paths)
+        self.track_ids.extend(other.track_ids)
+
     def to_dict(self):
         return {
             "total_files": self.total_files,

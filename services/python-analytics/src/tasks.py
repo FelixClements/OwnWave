@@ -2,20 +2,22 @@ from pathlib import Path
 from typing import List, Optional
 from uuid import UUID
 
-from celery import shared_task
-from celery.result import AsyncResult
+from celery import chord, group
 
 import db
 from celery_app import celery_app
-from config import MUSIC_DIR
 from folder_importer import import_folder
+from library_scan.prune import music_dirs, prune_library
 from models import ScanResult
-from audio_metadata import is_supported_audio_file
 
 
 @celery_app.task(bind=True, max_retries=3, default_retry_delay=5)
 def process_audio_folder(self, folder_path: str, master_job_id: str, force: bool = False) -> dict:
-    """Import one music folder and update its scan job."""
+    """Import one music folder and update its scan job.
+
+    Returns a failure marker instead of raising once retries are exhausted, so
+    the scan chord always reaches finalize_scan.
+    """
     job_id = UUID(self.request.id)
 
     with db.get_conn() as conn:
@@ -46,12 +48,14 @@ def process_audio_folder(self, folder_path: str, master_job_id: str, force: bool
         with db.get_conn() as conn:
             db.update_scan_job(conn, job_id, "failed", error=str(exc))
             conn.commit()
-        raise self.retry(exc=exc)
+        if self.request.retries < self.max_retries:
+            raise self.retry(exc=exc)
+        return {"folder": folder_path, "failed": True, "error": str(exc), "job_id": str(job_id)}
 
 
 @celery_app.task
 def trigger_library_scan(master_job_id: Optional[str], path: str, force: bool = False) -> dict:
-    """Split a music library into folder jobs and dispatch Celery workers."""
+    """Dispatch one import task per music folder, then finalize via a chord."""
     db.wait_for_db()
 
     with db.get_conn() as conn:
@@ -59,96 +63,70 @@ def trigger_library_scan(master_job_id: Optional[str], path: str, force: bool = 
             db.update_scan_job(conn, UUID(master_job_id), "running")
         else:
             master_job_id = str(db.create_scan_job(conn, path))
+            db.update_scan_job(conn, UUID(master_job_id), "running")
         conn.commit()
 
     root = Path(path).expanduser().resolve()
-    if not root.exists():
+    if not root.is_dir():
+        with db.get_conn() as conn:
+            db.update_scan_job(conn, UUID(master_job_id), "failed", error=f"not a directory: {root}")
+            conn.commit()
         raise FileNotFoundError(f"Music path does not exist: {root}")
 
-    if not root.is_dir():
-        # A single file or leaf folder was passed; process it directly.
-        folders = [str(root)]
-    else:
-        # Find all directories under root that contain music files and are not
-        # ancestors of any other music-containing directory. This avoids
-        # duplicate work when a parent and its children are both scanned.
-        music_dirs: List[Path] = []
-        for p in root.rglob("*"):
-            if is_supported_audio_file(p):
-                music_dirs.append(p.parent)
-
-        by_depth = sorted(set(music_dirs), key=lambda d: len(d.parts), reverse=True)
-        selected: List[str] = []
-        selected_paths: set = set()
-        for d in by_depth:
-            d_str = str(d)
-            if any(sel.startswith(d_str + "/") for sel in selected_paths):
-                continue
-            selected_paths.add(d_str)
-            selected.append(d_str)
-        folders = selected
-
+    folders = music_dirs(root)
     if not folders:
         with db.get_conn() as conn:
-            db.upsert_scan_job_progress(
-                conn, UUID(master_job_id), None, ScanResult()
-            )
+            db.upsert_scan_job_progress(conn, UUID(master_job_id), None, ScanResult())
             db.update_scan_job(conn, UUID(master_job_id), "completed")
             conn.commit()
         return {"master_job_id": master_job_id, "dispatched": 0}
 
-    subtasks = [
-        process_audio_folder.s(folder, master_job_id, force) for folder in folders
-    ]
-    results = [task.delay() for task in subtasks]
-    task_ids = [r.id for r in results]
-
-    finalize_result = finalize_scan.delay(master_job_id, task_ids, path)
+    header = group(process_audio_folder.s(folder, master_job_id, force) for folder in folders)
+    finalize = chord(header)(finalize_scan.s(master_job_id, str(root)))
 
     return {
         "master_job_id": master_job_id,
         "dispatched": len(folders),
-        "finalize_id": finalize_result.id,
+        "finalize_id": finalize.id,
     }
 
 
-@celery_app.task(bind=True, max_retries=2000, default_retry_delay=2)
-def finalize_scan(self, master_job_id: str, task_ids: List[str], root_path: str) -> dict:
-    """Poll subtask results, finalize the master scan job, and prune deleted tracks."""
-    results = [AsyncResult(tid) for tid in task_ids]
-
-    if not all(r.ready() for r in results):
-        raise self.retry(countdown=2)
-
-    failures = [r for r in results if not r.successful()]
+@celery_app.task
+def finalize_scan(results: List[dict], master_job_id: str, root_path: str) -> dict:
+    """Finish the master job, prune moved/deleted tracks, then refresh analysis."""
+    job_id = UUID(master_job_id)
+    failures = [r for r in results if not r or r.get("failed")]
+    summary = {"master_job_id": master_job_id, "total": len(results), "failed": len(failures)}
 
     with db.get_conn() as conn:
         if failures:
+            # Skip pruning: a moved file whose new folder failed to import
+            # would otherwise lose its history.
             db.update_scan_job(
-                conn,
-                UUID(master_job_id),
-                "failed",
+                conn, job_id, "failed",
                 error=f"{len(failures)} / {len(results)} folder tasks failed",
             )
             conn.commit()
-            return {
-                "master_job_id": master_job_id,
-                "total": len(results),
-                "failed": len(failures),
-            }
+        else:
+            try:
+                summary.update(prune_library(conn, Path(root_path), _job_started_at(conn, job_id)))
+                db.update_scan_job(conn, job_id, "completed")
+                conn.commit()
+            except Exception as exc:
+                conn.rollback()
+                db.update_scan_job(conn, job_id, "failed", error=f"prune failed: {exc}")
+                conn.commit()
+                raise
 
-        db.update_scan_job(conn, UUID(master_job_id), "completed")
-        conn.commit()
+    (rebuild_feature_vectors.si() | rebuild_clusters.si()).delay()
+    return summary
 
-    _prune_deleted_tracks(root_path)
 
-    rebuild_genre_stations.delay()
-
-    return {
-        "master_job_id": master_job_id,
-        "total": len(results),
-        "failed": 0,
-    }
+def _job_started_at(conn, job_id: UUID):
+    with conn.cursor() as cur:
+        cur.execute("SELECT started_at FROM scan_jobs WHERE id = %s", (job_id,))
+        row = cur.fetchone()
+        return row[0] if row else None
 
 
 @celery_app.task
@@ -225,34 +203,3 @@ def rebuild_genre_stations(user_id: Optional[str] = None) -> dict:
     with db.get_conn() as conn:
         return rebuild_genre_stations_for_users(conn, uid)
 
-
-def _prune_deleted_tracks(root_path: str) -> int:
-    """Remove database tracks whose files no longer exist under root_path."""
-    from audio_metadata import is_supported_audio_file
-
-    root = Path(root_path).expanduser().resolve()
-    if not root.exists() or not root.is_dir():
-        return 0
-
-    disk_paths = {
-        str(p) for p in root.rglob("*")
-        if is_supported_audio_file(p)
-    }
-    if not disk_paths:
-        return 0
-
-    with db.get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                "SELECT id, path FROM tracks WHERE path LIKE %s",
-                (str(root) + "/%",),
-            )
-            rows = cur.fetchall()
-
-        to_delete = [row[0] for row in rows if row[1] not in disk_paths]
-        if to_delete:
-            db.delete_tracks(conn, to_delete)
-            conn.commit()
-            print(f"[prune] removed {len(to_delete)} deleted tracks from {root_path}")
-            return len(to_delete)
-    return 0

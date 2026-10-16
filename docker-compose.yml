@@ -70,7 +70,7 @@ services:
       args:
         DOWNLOAD_GENRE_MODELS: ${DOWNLOAD_GENRE_MODELS:-false}
     platform: linux/amd64
-    command: celery -A celery_app worker -P gevent -c 50 --loglevel=info -n worker@%h
+    command: celery -A celery_app worker -P prefork -c ${WORKER_CONCURRENCY:-2} --loglevel=info -n worker@%h
     environment:
       DATABASE_URL: postgres://${POSTGRES_USER:-ownwave}:${POSTGRES_PASSWORD:-ownwave}@db:5432/${POSTGRES_DB:-ownwave}
       REDIS_URL: redis://:${REDIS_PASSWORD:-ownwave}@redis:6379/0

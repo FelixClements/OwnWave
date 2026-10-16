@@ -12,7 +12,9 @@ def get_similar_tracks(conn: psycopg.Connection, track_id: UUID, limit: int = 20
             SELECT af2.track_id, af1.feature_vector <=> af2.feature_vector AS dist
             FROM audio_features af1
             JOIN audio_features af2 ON af1.track_id != af2.track_id
-            WHERE af1.track_id = %s AND af2.feature_vector IS NOT NULL
+            WHERE af1.track_id = %s
+              AND af1.feature_vector IS NOT NULL
+              AND af2.feature_vector IS NOT NULL
             ORDER BY af1.feature_vector <=> af2.feature_vector
             LIMIT %s
             """,

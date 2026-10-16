@@ -1,5 +1,5 @@
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set
+from typing import Any, Dict, List, Optional
 from uuid import UUID
 
 import psycopg
@@ -8,7 +8,6 @@ from analyzers import analyze_file, get_analyzers
 from config import ENABLE_GENRE_ANALYSIS
 from tags import extract_genres_from_tags, read_tags
 from db import (
-    delete_tracks,
     get_conn,
     get_or_create_album,
     get_or_create_artist,
@@ -19,7 +18,7 @@ from db import (
     upsert_track_genres,
 )
 from feature_vector import build_feature_vector
-from models import AudioFeatures, FailedPath, GenrePrediction, ScanResult
+from models import FailedPath, GenrePrediction, ScanResult
 from audio_metadata import (
     get_duration,
     get_file_stats,
@@ -50,20 +49,23 @@ def import_folder(
     analyze: bool = True,
     force: bool = False,
 ) -> ScanResult:
-    """Import a single music folder and update progress after each song."""
+    """Import the audio files directly inside one folder (not its subfolders).
+
+    Never deletes tracks: removal of vanished files happens once per scan in
+    library_scan.prune, against a full listing of the library.
+    """
     folder = Path(folder_path).expanduser().resolve()
     if not folder.exists():
         raise FileNotFoundError(f"Music path does not exist: {folder}")
 
-    files = sorted(p for p in folder.rglob("*") if is_supported_audio_file(p))
+    files = sorted(p for p in folder.iterdir() if is_supported_audio_file(p))
     result = ScanResult(total_files=len(files))
 
     if not files:
-        with get_conn() as conn:
-            _remove_deleted_tracks(conn, folder, set())
-            if job_id:
+        if job_id:
+            with get_conn() as conn:
                 upsert_scan_job_progress(conn, job_id, master_job_id, result)
-            conn.commit()
+                conn.commit()
         return result
 
     analyzers = get_analyzers() if analyze else None
@@ -166,9 +168,6 @@ def import_folder(
                     if job_id:
                         upsert_scan_job_progress(conn, job_id, master_job_id, result)
                     conn.commit()
-
-            _remove_deleted_tracks(conn, folder, {str(f) for f in files})
-            conn.commit()
 
             result.track_ids = processed_ids
 
@@ -322,19 +321,3 @@ def _has_features(conn: psycopg.Connection, path_str: str) -> bool:
         )
         return cur.fetchone() is not None
 
-
-def _remove_deleted_tracks(
-    conn: psycopg.Connection,
-    folder: Path,
-    current_files: Set[str],
-) -> None:
-    with conn.cursor() as cur:
-        cur.execute(
-            "SELECT id, path FROM tracks WHERE path LIKE %s",
-            (str(folder) + "/%",),
-        )
-        rows = cur.fetchall()
-
-    to_delete = [row[0] for row in rows if row[1] not in current_files]
-    if to_delete:
-        delete_tracks(conn, to_delete)
