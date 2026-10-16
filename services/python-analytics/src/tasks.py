@@ -1,12 +1,10 @@
 import logging
 from pathlib import Path
-from typing import List, Optional
+from typing import Optional
 from uuid import UUID, uuid4
 
-from celery import chord, group
-
 import db
-from celery_app import celery_app
+import task_queue
 from folder_importer import import_folder
 from library_scan.prune import music_dirs, prune_library
 from models import ScanResult
@@ -14,129 +12,132 @@ from models import ScanResult
 log = logging.getLogger(__name__)
 
 
-@celery_app.task(bind=True, max_retries=3, default_retry_delay=5)
-def process_audio_folder(self, folder_path: str, master_job_id: str, force: bool = False) -> dict:
-    """Import one music folder and update its scan job.
-
-    Returns a failure marker instead of raising once retries are exhausted, so
-    the scan chord always reaches finalize_scan.
-    """
-    job_id = UUID(self.request.id)
-
-    with db.get_conn() as conn:
-        db.create_scan_job(conn, folder_path, job_id=job_id)
-        db.update_scan_job(conn, job_id, "running")
-        conn.commit()
-
-    try:
-        result = import_folder(
-            folder_path,
-            job_id=job_id,
-            master_job_id=UUID(master_job_id),
-            analyze=True,
-            force=force,
-        )
-
-        with db.get_conn() as conn:
-            db.update_scan_job(conn, job_id, "completed")
-            conn.commit()
-
-        return {
-            "folder": folder_path,
-            "tracks": len(result.track_ids),
-            "stats": result.to_dict(),
-            "job_id": str(job_id),
-        }
-    except Exception as exc:
-        with db.get_conn() as conn:
-            db.update_scan_job(conn, job_id, "failed", error=str(exc))
-            conn.commit()
-        if self.request.retries < self.max_retries:
-            raise self.retry(exc=exc)
-        return {"folder": folder_path, "failed": True, "error": str(exc), "job_id": str(job_id)}
+def queue_library_scan(conn, path: str, force: bool = False) -> UUID:
+    """Create a scan job and queue it inside the caller's transaction."""
+    job_id = db.create_scan_job(conn, path)
+    task_queue.enqueue(conn, "trigger_library_scan", master_job_id=str(job_id), path=path, force=force)
+    return job_id
 
 
-@celery_app.task
-def trigger_library_scan(master_job_id: Optional[str], path: str, force: bool = False) -> dict:
-    """Dispatch one import task per music folder, then finalize via a chord."""
-    db.wait_for_db()
-
-    with db.get_conn() as conn:
-        if master_job_id:
-            db.update_scan_job(conn, UUID(master_job_id), "running")
-        else:
-            master_job_id = str(db.create_scan_job(conn, path))
-            db.update_scan_job(conn, UUID(master_job_id), "running")
-        conn.commit()
-
-    root = Path(path).expanduser().resolve()
-    if not root.is_dir():
-        with db.get_conn() as conn:
-            db.update_scan_job(conn, UUID(master_job_id), "failed", error=f"not a directory: {root}")
-            conn.commit()
-        raise FileNotFoundError(f"Music path does not exist: {root}")
-
-    folders = music_dirs(root)
-    if not folders:
-        with db.get_conn() as conn:
-            db.upsert_scan_job_progress(conn, UUID(master_job_id), None, ScanResult())
-            db.update_scan_job(conn, UUID(master_job_id), "completed")
-            conn.commit()
-        return {"master_job_id": master_job_id, "dispatched": 0}
-
-    # Create the folder jobs up front so progress has a fixed denominator.
+def trigger_library_scan(master_job_id: str, path: str, force: bool = False) -> dict:
+    """Queue one import task per music folder; the last one to finish queues finalize_scan."""
     master = UUID(master_job_id)
-    folder_jobs = [(folder, uuid4()) for folder in folders]
     with db.get_conn() as conn:
-        for folder, job_id in folder_jobs:
-            db.create_scan_job(conn, folder, job_id=job_id, parent_id=master)
+        if conn.execute("SELECT 1 FROM scan_jobs WHERE parent_id = %s LIMIT 1", (master,)).fetchone():
+            # Re-run after the worker died between dispatching and acknowledging.
+            return {"master_job_id": master_job_id, "dispatched": 0}
+        db.update_scan_job(conn, master, "running")
+
+        root = Path(path).expanduser().resolve()
+        if not root.is_dir():
+            db.update_scan_job(conn, master, "failed", error=f"not a directory: {root}")
+            conn.commit()
+            return {"master_job_id": master_job_id, "dispatched": 0}
+
+        folders = music_dirs(root)
+        if not folders:
+            db.upsert_scan_job_progress(conn, master, None, ScanResult())
+            db.update_scan_job(conn, master, "completed")
+            conn.commit()
+            return {"master_job_id": master_job_id, "dispatched": 0}
+
+        # Folder jobs and their tasks are created together so progress has a
+        # fixed denominator and every folder job has a task to finish it.
+        folder_args = []
+        for folder in folders:
+            job_id = db.create_scan_job(conn, folder, job_id=uuid4(), parent_id=master)
+            folder_args.append(
+                {
+                    "folder_path": folder,
+                    "job_id": str(job_id),
+                    "master_job_id": master_job_id,
+                    "root_path": str(root),
+                    "force": force,
+                }
+            )
+        task_queue.enqueue_many(conn, "process_audio_folder", folder_args)
         conn.commit()
 
-    header = group(
-        process_audio_folder.s(folder, master_job_id, force).set(task_id=str(job_id))
-        for folder, job_id in folder_jobs
-    )
-    finalize = chord(header)(finalize_scan.s(master_job_id, str(root)))
-
-    return {
-        "master_job_id": master_job_id,
-        "dispatched": len(folders),
-        "finalize_id": finalize.id,
-    }
+    return {"master_job_id": master_job_id, "dispatched": len(folders)}
 
 
-@celery_app.task
-def finalize_scan(results: List[dict], master_job_id: str, root_path: str) -> dict:
+def process_audio_folder(folder_path: str, job_id: str, master_job_id: str, root_path: str, force: bool = False) -> dict:
+    """Import one music folder. Raising lets the queue retry it."""
+    jid = UUID(job_id)
+    with db.get_conn() as conn:
+        job = db.get_scan_job(conn, jid)
+        if job and job["status"] in ("completed", "failed"):
+            # Re-run after the worker died between finishing and acknowledging.
+            return {"folder": folder_path, "job_id": job_id, "skipped": True}
+        db.update_scan_job(conn, jid, "running")
+        conn.commit()
+
+    result = import_folder(folder_path, job_id=jid, master_job_id=UUID(master_job_id), analyze=True, force=force)
+    _finish_folder(jid, UUID(master_job_id), root_path, "completed")
+    return {"folder": folder_path, "tracks": len(result.track_ids), "job_id": job_id}
+
+
+def _process_audio_folder_failed(error: str, job_id: str, master_job_id: str, root_path: str, **_) -> None:
+    _finish_folder(UUID(job_id), UUID(master_job_id), root_path, "failed", error=error)
+
+
+def _finish_folder(job_id: UUID, master: UUID, root_path: str, status: str, error: Optional[str] = None) -> None:
+    """Record a folder's final status; the last folder of the scan queues finalize_scan.
+
+    Each finisher locks the master job before counting, so under READ
+    COMMITTED exactly one of them sees no unfinished folders left.
+    """
+    with db.get_conn() as conn:
+        changed = conn.execute(
+            """
+            UPDATE scan_jobs SET status = %s, error = %s, finished_at = NOW()
+            WHERE id = %s AND status IN ('pending', 'running')
+            """,
+            (status, error, job_id),
+        ).rowcount
+        if not changed:
+            return
+        conn.execute("SELECT 1 FROM scan_jobs WHERE id = %s FOR UPDATE", (master,))
+        unfinished = conn.execute(
+            "SELECT COUNT(*) FROM scan_jobs WHERE parent_id = %s AND status IN ('pending', 'running')",
+            (master,),
+        ).fetchone()[0]
+        if unfinished == 0:
+            task_queue.enqueue(conn, "finalize_scan", master_job_id=str(master), root_path=root_path)
+        conn.commit()
+
+
+def finalize_scan(master_job_id: str, root_path: str) -> dict:
     """Prune moved/deleted tracks, then refresh analysis.
 
     The master job stays running until rebuild_analysis completes it.
     """
     job_id = UUID(master_job_id)
-    failures = [r for r in results if not r or r.get("failed")]
-    summary = {"master_job_id": master_job_id, "total": len(results), "failed": len(failures)}
 
     with db.get_conn() as conn:
-        if failures:
+        total, failed = conn.execute(
+            "SELECT COUNT(*), COUNT(*) FILTER (WHERE status = 'failed') FROM scan_jobs WHERE parent_id = %s",
+            (job_id,),
+        ).fetchone()
+        summary = {"master_job_id": master_job_id, "total": total, "failed": failed}
+
+        if failed:
             # Skip pruning: a moved file whose new folder failed to import
             # would otherwise lose its history.
-            db.update_scan_job(
-                conn, job_id, "failed",
-                error=f"{len(failures)} / {len(results)} folder tasks failed",
-            )
-            conn.commit()
+            db.update_scan_job(conn, job_id, "failed", error=f"{failed} / {total} folder tasks failed")
         else:
             try:
                 summary.update(prune_library(conn, Path(root_path), _job_started_at(conn, job_id)))
-                conn.commit()
             except Exception as exc:
                 conn.rollback()
                 db.update_scan_job(conn, job_id, "failed", error=f"prune failed: {exc}")
                 conn.commit()
                 raise
 
-    # A failed scan is already finished; still refresh analysis for the
-    # folders that did import.
-    rebuild_analysis.delay(None if failures else master_job_id)
+        # A failed scan is already finished; still refresh analysis for the
+        # folders that did import.
+        task_queue.enqueue(conn, "rebuild_analysis", scan_job_id=None if failed else master_job_id)
+        conn.commit()
     return summary
 
 
@@ -147,7 +148,6 @@ def _job_started_at(conn, job_id: UUID):
         return row[0] if row else None
 
 
-@celery_app.task
 def rebuild_analysis(scan_job_id: Optional[str] = None) -> dict:
     """Rebuild feature vectors, then clusters.
 
@@ -173,7 +173,6 @@ def rebuild_analysis(scan_job_id: Optional[str] = None) -> dict:
     return {"vectors": vectors, "clusters": clusters}
 
 
-@celery_app.task
 def rebuild_feature_vectors() -> int:
     """Rebuild normalized feature vectors for all tracks."""
     from feature_vector import backfill_library_feature_vectors
@@ -181,7 +180,6 @@ def rebuild_feature_vectors() -> int:
     return backfill_library_feature_vectors()
 
 
-@celery_app.task
 def rebuild_clusters(n_clusters: Optional[int] = None) -> dict:
     """Rebuild track clusters."""
     from clustering import backfill_library_clusters
@@ -189,7 +187,6 @@ def rebuild_clusters(n_clusters: Optional[int] = None) -> dict:
     return backfill_library_clusters(n_clusters=n_clusters)
 
 
-@celery_app.task
 def rebuild_track_genres(path: str, force: bool = False) -> dict:
     """Batch backfill genre predictions for a path."""
     from audio_metadata import is_supported_audio_file
@@ -236,3 +233,20 @@ def rebuild_track_genres(path: str, force: bool = False) -> dict:
         conn.commit()
 
     return {"updated": updated, "skipped": skipped}
+
+
+TASKS = {
+    fn.__name__: fn
+    for fn in (
+        trigger_library_scan,
+        process_audio_folder,
+        finalize_scan,
+        rebuild_analysis,
+        rebuild_feature_vectors,
+        rebuild_clusters,
+        rebuild_track_genres,
+    )
+}
+
+# Called with the error and the task's args once a task is out of attempts.
+ON_FAILURE = {"process_audio_folder": _process_audio_folder_failed}

@@ -115,28 +115,39 @@ def test_moved_file_keeps_track_id_and_likes(db_url, tmp_path, new_relpath):
     assert likes == [(track_id,)]
 
 
-def test_celery_scan_finalizes_job_and_prunes(db_url, tmp_path, monkeypatch):
+def drain_queue():
+    import db
+    import task_queue
+
+    with db.get_conn() as conn:
+        while task_queue.run_one(conn):
+            pass
+
+
+def test_queued_scan_finalizes_job_and_prunes(db_url, tmp_path):
     import db
     import tasks
-    from celery_app import celery_app
-
-    monkeypatch.setattr(celery_app.conf, "task_always_eager", True)
-    monkeypatch.setattr(db, "wait_for_db", lambda: None)
 
     loose = write_flac(tmp_path / "loose.flac", "Loose")
     nested = write_flac(tmp_path / "Artist" / "song.flac", "Song", freq=550.0, seconds=1.5)
     with db.get_conn() as conn:
-        job_id = db.create_scan_job(conn, str(tmp_path))
+        job_id = tasks.queue_library_scan(conn, str(tmp_path))
         conn.commit()
 
-    tasks.trigger_library_scan.delay(str(job_id), str(tmp_path)).get()
+    drain_queue()
 
     assert set(tracks(db_url)) == {str(loose), str(nested)}
     with db.get_conn() as conn:
         status = db.get_scan_status(conn, job_id)
+        leftover = conn.execute("SELECT task, status, error FROM task_queue").fetchall()
     assert status["status"] == "completed"
+    assert status["folders"] == {"total": 2, "done": 2, "failed": 0}
     assert status["stats"]["total_files"] == 2
+    assert leftover == []
 
     loose.unlink()
-    tasks.trigger_library_scan.delay(None, str(tmp_path)).get()
+    with db.get_conn() as conn:
+        tasks.queue_library_scan(conn, str(tmp_path))
+        conn.commit()
+    drain_queue()
     assert set(tracks(db_url)) == {str(nested)}

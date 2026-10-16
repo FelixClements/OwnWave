@@ -1,4 +1,3 @@
-import logging
 import os
 import secrets
 from contextlib import asynccontextmanager, contextmanager
@@ -10,11 +9,9 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 import db
+import task_queue
 import tasks
 from config import ANALYTICS_API_SECRET, GENRE_MIN_CONFIDENCE, MUSIC_DIR
-
-log = logging.getLogger(__name__)
-
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -96,7 +93,7 @@ def _db_conn():
 
 
 # Routes are plain `def` so FastAPI runs them in its threadpool: they do
-# blocking database and broker I/O that would otherwise stall the event loop.
+# blocking database I/O that would otherwise stall the event loop.
 
 
 @app.get("/health")
@@ -104,32 +101,12 @@ def health():
     return {"status": "ok"}
 
 
-def _dispatch(task, *args):
-    # The API never reads task results. ignore_result also keeps the call off
-    # the redis result backend, which retries for ~20s when Redis is down and
-    # then needs a process restart to recover.
-    return task.apply_async(args, ignore_result=True)
-
-
-def _broker_unavailable(exc: Exception) -> NoReturn:
-    log.error("task queue unavailable: %s", exc)
-    raise HTTPException(status_code=503, detail="task queue unavailable")
-
-
 @app.post("/scan")
 def scan(req: ScanRequest):
     scan_path = _resolved_scan_path(req.path)
     with _db_conn() as conn:
-        job_id = db.create_scan_job(conn, scan_path)
+        job_id = tasks.queue_library_scan(conn, scan_path, req.force)
         conn.commit()
-
-    try:
-        _dispatch(tasks.trigger_library_scan, str(job_id), scan_path, req.force)
-    except Exception as exc:
-        with _db_conn() as conn:
-            db.update_scan_job(conn, job_id, "failed", error="task queue unavailable")
-            conn.commit()
-        _broker_unavailable(exc)
     return {"job_id": str(job_id), "status": "queued"}
 
 
@@ -148,22 +125,21 @@ def get_job(job_id: UUID):
         return status
 
 
-def _enqueue(task, *args):
-    try:
-        result = _dispatch(task, *args)
-    except Exception as exc:
-        _broker_unavailable(exc)
-    return {"task_id": result.id, "status": "queued"}
+def _enqueue(task: str, **args):
+    with _db_conn() as conn:
+        task_id = task_queue.enqueue(conn, task, **args)
+        conn.commit()
+    return {"task_id": str(task_id), "status": "queued"}
 
 
 @app.post("/rebuild-analysis")
 def rebuild_analysis():
-    return _enqueue(tasks.rebuild_analysis)
+    return _enqueue("rebuild_analysis")
 
 
 @app.post("/rebuild-genres")
 def rebuild_genres():
-    return _enqueue(tasks.rebuild_track_genres, MUSIC_DIR)
+    return _enqueue("rebuild_track_genres", path=MUSIC_DIR)
 
 
 @app.get("/genres")

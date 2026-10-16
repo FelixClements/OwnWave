@@ -22,7 +22,7 @@ test:
     #!/usr/bin/env bash
     set -euo pipefail
     docker compose build python go
-    docker compose up -d db redis go python
+    docker compose up -d db go python
     trap 'docker compose down' EXIT
     for i in $(seq 1 120); do
         if curl -fsS http://localhost:8080/health >/dev/null 2>&1 \

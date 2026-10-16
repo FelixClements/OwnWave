@@ -1,12 +1,12 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { useParams, useRouter } from 'next/navigation';
+import { useRouter } from 'next/navigation';
 import { useAuth } from '@/lib/auth';
 
 export default function InvitePage() {
-  const params = useParams();
-  const token = typeof params?.token === 'string' ? params.token : '';
+  // Invite links are /invite/<token>; every one of them is served this page.
+  const [token, setToken] = useState<string | null>(null);
   const { register, user } = useAuth();
   const router = useRouter();
   const [username, setUsername] = useState('');
@@ -15,10 +15,14 @@ export default function InvitePage() {
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
+    setToken(decodeURIComponent(window.location.pathname.split('/')[2] ?? ''));
+  }, []);
+
+  useEffect(() => {
     if (user) router.push('/');
   }, [user, router]);
 
-  if (user) return null;
+  if (user || token === null) return null;
 
   if (!token) {
     return (

@@ -10,7 +10,7 @@ def event(path):
 
 def test_changes_during_cooldown_are_deferred_not_dropped(monkeypatch, tmp_path):
     sent = []
-    monkeypatch.setattr(watcher.celery_app, "send_task", lambda *a, **kw: sent.append(a))
+    monkeypatch.setattr(watcher, "queue_scan", sent.append)
     handler = watcher.MusicEventHandler(str(tmp_path), debounce_seconds=0.05, cooldown_seconds=0.3)
 
     handler.on_any_event(event(str(tmp_path / "a.flac")))
@@ -27,8 +27,20 @@ def test_changes_during_cooldown_are_deferred_not_dropped(monkeypatch, tmp_path)
 
 def test_non_music_files_are_ignored(monkeypatch, tmp_path):
     sent = []
-    monkeypatch.setattr(watcher.celery_app, "send_task", lambda *a, **kw: sent.append(a))
+    monkeypatch.setattr(watcher, "queue_scan", sent.append)
     handler = watcher.MusicEventHandler(str(tmp_path), debounce_seconds=0.01, cooldown_seconds=0)
     handler.on_any_event(event(str(tmp_path / "cover.jpg")))
+    time.sleep(0.05)
+    assert sent == []
+
+
+def test_reads_are_ignored(monkeypatch, tmp_path):
+    sent = []
+    monkeypatch.setattr(watcher, "queue_scan", sent.append)
+    handler = watcher.MusicEventHandler(str(tmp_path), debounce_seconds=0.01, cooldown_seconds=0)
+    for event_type in ("opened", "closed_no_write"):
+        handler.on_any_event(
+            SimpleNamespace(is_directory=False, event_type=event_type, src_path=str(tmp_path / "a.flac"), dest_path=None)
+        )
     time.sleep(0.05)
     assert sent == []
