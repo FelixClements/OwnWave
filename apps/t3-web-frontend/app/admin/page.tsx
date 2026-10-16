@@ -1,8 +1,18 @@
 'use client';
 
 import { useState } from 'react';
-import { trpc } from '@/lib/trpc/client';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { api } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
+import { keys } from '@/lib/queries';
+
+/** Mutation that reports its outcome with alert(); replaced by inline status later. */
+function useAdminAction<TVars = void>(fn: (vars: TVars) => Promise<unknown>, success: string, failure: string) {
+  return useMutation(fn, {
+    onSuccess: () => alert(success),
+    onError: (err: Error) => alert(`${failure}: ${err.message}`),
+  });
+}
 
 function StatusDot({ ok }: { ok: boolean }) {
   return (
@@ -16,55 +26,47 @@ function StatusDot({ ok }: { ok: boolean }) {
 
 export default function AdminPage() {
   const { user } = useAuth();
-  const utils = trpc.useUtils();
-  const { data: health } = trpc.adminHealth.useQuery(undefined, { refetchInterval: 10000 });
-  const { data: stations } = trpc.adminStations.useQuery();
-  const { data: users } = trpc.listUsers.useQuery();
+  const qc = useQueryClient();
+  const { data: health } = useQuery(keys.adminHealth, () => api.adminHealth(), { refetchInterval: 10000 });
+  const { data: stations } = useQuery(keys.adminStations, () => api.adminStations());
+  const { data: users } = useQuery(keys.users, () => api.listUsers());
   const [inviteUsername, setInviteUsername] = useState('');
   const [inviteUrl, setInviteUrl] = useState('');
   const [newUsername, setNewUsername] = useState('');
   const [newPassword, setNewPassword] = useState('');
 
-  const scan = trpc.adminScan.useMutation({
-    onSuccess: () => alert('Scan started.'),
-    onError: (err) => alert('Scan failed: ' + err.message),
+  const scan = useAdminAction(() => api.triggerScan(), 'Scan started.', 'Scan failed');
+  const rebuildVectors = useAdminAction(() => api.adminRebuildVectors(), 'Vector rebuild queued.', 'Vector rebuild failed');
+  const rebuildClusters = useAdminAction(() => api.adminRebuildClusters(), 'Cluster rebuild queued.', 'Cluster rebuild failed');
+  const rebuildGenres = useAdminAction(() => api.adminRebuildGenres(), 'Genre rebuild queued.', 'Genre rebuild failed');
+  const rebuildGenreStations = useMutation(() => api.adminRebuildGenreStations(), {
+    onSuccess: (data) => {
+      void qc.invalidateQueries(keys.stations);
+      void qc.invalidateQueries(keys.adminStations);
+      alert(`Created ${data.created} genre station${data.created === 1 ? '' : 's'}.`);
+    },
+    onError: (err: Error) => alert('Genre station rebuild failed: ' + err.message),
   });
-  const rebuildVectors = trpc.adminRebuildVectors.useMutation({
-    onSuccess: () => alert('Vector rebuild queued.'),
-    onError: (err) => alert('Vector rebuild failed: ' + err.message),
-  });
-  const rebuildClusters = trpc.adminRebuildClusters.useMutation({
-    onSuccess: () => alert('Cluster rebuild queued.'),
-    onError: (err) => alert('Cluster rebuild failed: ' + err.message),
-  });
-  const rebuildGenres = trpc.adminRebuildGenres.useMutation({
-    onSuccess: () => alert('Genre rebuild queued.'),
-    onError: (err) => alert('Genre rebuild failed: ' + err.message),
-  });
-  const rebuildGenreStations = trpc.adminRebuildGenreStations.useMutation({
-    onSuccess: () => alert('Genre station rebuild queued.'),
-    onError: (err) => alert('Genre station rebuild failed: ' + err.message),
-  });
-  const createInvite = trpc.createInvite.useMutation({
+  const createInvite = useMutation((vars: { username?: string }) => api.createInvite(vars.username), {
     onSuccess: (data) => {
       setInviteUrl(data.invite_url);
       void navigator.clipboard.writeText(data.invite_url);
       alert('Invite link copied to clipboard.');
     },
-    onError: (err) => alert('Invite failed: ' + err.message),
+    onError: (err: Error) => alert('Invite failed: ' + err.message),
   });
-  const createUser = trpc.createUser.useMutation({
+  const createUser = useMutation((vars: { username: string; password: string }) => api.createUser(vars.username, vars.password), {
     onSuccess: () => {
       setNewUsername('');
       setNewPassword('');
-      void utils.listUsers.invalidate();
+      void qc.invalidateQueries(keys.users);
       alert('User created.');
     },
-    onError: (err) => alert('Create user failed: ' + err.message),
+    onError: (err: Error) => alert('Create user failed: ' + err.message),
   });
-  const deleteUser = trpc.deleteUser.useMutation({
-    onSuccess: () => void utils.listUsers.invalidate(),
-    onError: (err) => alert('Delete user failed: ' + err.message),
+  const deleteUser = useMutation((vars: { id: string }) => api.deleteUser(vars.id), {
+    onSuccess: () => void qc.invalidateQueries(keys.users),
+    onError: (err: Error) => alert('Delete user failed: ' + err.message),
   });
 
   if (user && !user.is_admin) {
@@ -230,7 +232,7 @@ export default function AdminPage() {
         <h3 className="text-xl font-bold mb-4">Scan Jobs & Maintenance</h3>
         <div className="flex flex-wrap gap-3">
           <button
-            onClick={() => scan.mutate({})}
+            onClick={() => scan.mutate()}
             disabled={scan.isLoading}
             className="px-4 py-2 rounded bg-spotify-green text-black font-semibold hover:bg-spotify-green-hover transition disabled:opacity-50"
           >
@@ -258,11 +260,11 @@ export default function AdminPage() {
             {rebuildGenres.isLoading ? 'Queueing...' : 'Rebuild genres'}
           </button>
           <button
-            onClick={() => { if (confirm('Rebuild all genre stations?')) rebuildGenreStations.mutate(); }}
+            onClick={() => { if (confirm('Create missing genre stations?')) rebuildGenreStations.mutate(); }}
             disabled={rebuildGenreStations.isLoading}
             className="px-4 py-2 rounded bg-spotify-elevated text-spotify-text font-semibold hover:bg-spotify-card-hover transition disabled:opacity-50"
           >
-            {rebuildGenreStations.isLoading ? 'Queueing...' : 'Rebuild genre stations'}
+            {rebuildGenreStations.isLoading ? 'Creating...' : 'Create genre stations'}
           </button>
         </div>
       </section>

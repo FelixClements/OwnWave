@@ -2,29 +2,12 @@
 
 import { useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
-import { trpc } from '@/lib/trpc/client';
-import { CoverImage } from '@/components/CoverImage';
+import { useInfiniteQuery, useMutation, useQuery } from '@tanstack/react-query';
+import { api } from '@/lib/api';
+import { Cover } from '@/components/Cover';
+import { keys, useScanStatus } from '@/lib/queries';
 
 type Tab = 'tracks' | 'albums' | 'artists';
-
-function Cover({ id, title, className }: { id: string; title: string; className?: string }) {
-  const [error, setError] = useState(false);
-  if (error) {
-    return (
-      <div className={className}>
-        <span className="font-bold">{title.charAt(0).toUpperCase()}</span>
-      </div>
-    );
-  }
-  return (
-    <CoverImage
-      id={id}
-      alt=""
-      className={className}
-      onError={() => setError(true)}
-    />
-  );
-}
 
 const PAGE_LIMIT = 20;
 
@@ -119,17 +102,18 @@ export default function LibraryPage() {
   const statusTimeout = useRef<NodeJS.Timeout | null>(null);
   const sentinelRef = useRef<HTMLDivElement | null>(null);
 
-  const tracksQuery = trpc.tracks.useInfiniteQuery(
-    { limit: PAGE_LIMIT, q },
+  const tracksQuery = useInfiniteQuery(
+    keys.tracks(q),
+    ({ pageParam = 0 }) => api.listTracks({ limit: PAGE_LIMIT, offset: pageParam, q }),
     {
       enabled: tab === 'tracks',
       getNextPageParam: (lastPage, allPages) =>
-        !lastPage || lastPage.length < PAGE_LIMIT ? undefined : allPages.length * PAGE_LIMIT,
-    }
+        lastPage.length < PAGE_LIMIT ? undefined : allPages.length * PAGE_LIMIT,
+    },
   );
 
-  const { data: albums } = trpc.albums.useQuery();
-  const { data: artists } = trpc.artists.useQuery();
+  const { data: albums } = useQuery(keys.albums, () => api.listAlbums());
+  const { data: artists } = useQuery(keys.artists, () => api.listArtists());
 
   const clearStatus = () => {
     if (statusTimeout.current) {
@@ -146,16 +130,9 @@ export default function LibraryPage() {
     }
   };
 
-  const scanStatus = trpc.scanStatus.useQuery(
-    { jobId: scanJobId ?? '' },
-    {
-      enabled: !!scanJobId,
-      refetchInterval: (data) =>
-        data && (data.status === 'completed' || data.status === 'failed') ? false : 1000,
-    }
-  );
+  const scanStatus = useScanStatus(scanJobId);
 
-  const rescan = trpc.rescan.useMutation({
+  const rescan = useMutation(() => api.triggerScan(), {
     onMutate: () => showStatus({ message: 'Rescanning library...', type: 'info' }, 0),
     onSuccess: (data) => {
       setScanJobId(data.job_id ?? null);

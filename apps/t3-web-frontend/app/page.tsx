@@ -4,8 +4,8 @@ import { useState, useEffect, useMemo } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useStation } from '@/lib/station';
-import { CoverImage } from '@/components/CoverImage';
-import { trpc } from '@/lib/trpc/client';
+import { Cover } from '@/components/Cover';
+import { useFeedbackMutation, useSetupStatus } from '@/lib/queries';
 
 function formatTime(seconds?: number) {
   if (!seconds || seconds <= 0) return '--:--';
@@ -40,37 +40,6 @@ function LikeButton({
         <path d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3H14zM7 22H4a2 2 0 0 1-2-2v-9a2 2 0 0 1 2-2h3v13z" />
       </svg>
     </button>
-  );
-}
-
-function Cover({
-  id,
-  title,
-  className,
-}: {
-  id: string;
-  title: string;
-  className?: string;
-}) {
-  const [error, setError] = useState(false);
-  useEffect(() => {
-    setError(false);
-  }, [id]);
-  return (
-    <div className={`${className} overflow-hidden`}>
-      {error ? (
-        <div className="w-full h-full flex items-center justify-center bg-spotify-green text-black font-bold text-xl">
-          {title.charAt(0).toUpperCase()}
-        </div>
-      ) : (
-        <CoverImage
-          id={id}
-          alt={title}
-          className="w-full h-full object-cover"
-          onError={() => setError(true)}
-        />
-      )}
-    </div>
   );
 }
 
@@ -149,71 +118,14 @@ export default function Home() {
   const { selectedStation, setSelectedStation, stations, queue, nowPlaying, isPlaying, setIsPlaying, setPlayingStation, playingStation } = useStation();
   const [searchQuery, setSearchQuery] = useState('');
 
-  const setupStatus = trpc.setupStatus.useQuery();
+  const setupStatus = useSetupStatus();
   useEffect(() => {
     if (setupStatus.data && !setupStatus.data.setup_completed) {
       router.push('/setup');
     }
   }, [setupStatus.data, router]);
 
-  const utils = trpc.useContext();
-  const recordFeedback = trpc.recordFeedback.useMutation({
-    onMutate: async (input) => {
-      if (!selectedStation) return {};
-      await utils.queue.cancel({ id: selectedStation });
-      const previous = utils.queue.getData({ id: selectedStation });
-      utils.queue.setData({ id: selectedStation }, (old) => {
-        if (!old) return old;
-        if (input.feedback === 'like') {
-          return old.map((t) => (t.id === input.id ? { ...t, liked: true } : t));
-        }
-        if (input.feedback === 'skip') {
-          const idx = old.findIndex((t) => t.id === input.id);
-          if (idx === -1) return old;
-          const moved = old[idx];
-          const rest = old.filter((_, i) => i !== idx);
-          return [...rest, moved];
-        }
-        if (input.feedback === 'ban') {
-          return old.filter((t) => t.id !== input.id);
-        }
-        return old;
-      });
-      return { previous };
-    },
-    onError: (err, input, context) => {
-      if (!selectedStation) return;
-      const previous = (context as any)?.previous;
-      if (previous) {
-        utils.queue.setData({ id: selectedStation }, previous);
-      }
-    },
-    onSuccess: () => {
-      if (selectedStation) utils.queue.invalidate({ id: selectedStation });
-    },
-  });
-  const removeFeedback = trpc.removeFeedback.useMutation({
-    onMutate: async (input) => {
-      if (input.feedback !== 'like' || !selectedStation) return {};
-      await utils.queue.cancel({ id: selectedStation });
-      const previous = utils.queue.getData({ id: selectedStation });
-      utils.queue.setData({ id: selectedStation }, (old) => {
-        if (!old) return old;
-        return old.map((t) => (t.id === input.id ? { ...t, liked: false } : t));
-      });
-      return { previous };
-    },
-    onError: (err, input, context) => {
-      if (input.feedback !== 'like' || !selectedStation) return;
-      const previous = (context as any)?.previous;
-      if (previous) {
-        utils.queue.setData({ id: selectedStation }, previous);
-      }
-    },
-    onSuccess: () => {
-      if (selectedStation) utils.queue.invalidate({ id: selectedStation });
-    },
-  });
+  const feedback = useFeedbackMutation(selectedStation);
 
   const filteredStations = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
@@ -305,7 +217,7 @@ export default function Home() {
                   <Cover
                     id={track.id}
                     title={track.title}
-                    className="w-16 h-16 rounded shadow object-cover bg-spotify-green flex items-center justify-center text-black text-xl font-bold"
+                    className="w-16 h-16 rounded shadow object-cover bg-spotify-green text-black text-xl shrink-0 overflow-hidden"
                   />
                   <div className="min-w-0">
                     <div className="text-lg font-bold text-spotify-text truncate">
@@ -322,9 +234,7 @@ export default function Home() {
                   </div>
                 </div>
                 <div className="flex flex-wrap gap-3 text-xs text-spotify-subdued">
-                  {track.bpm && (
-                    <span>{track.bpm.toFixed(0)} BPM</span>
-                  )}
+                  {track.bpm > 0 && <span>{track.bpm.toFixed(0)} BPM</span>}
                   {track.key && (
                     <span>{track.key}</span>
                   )}
@@ -363,11 +273,7 @@ export default function Home() {
                       <div className="w-8 flex justify-center shrink-0">
                         <LikeButton
                           liked={!!track.liked}
-                          onClick={() =>
-                            track.liked
-                              ? removeFeedback.mutate({ id: track.id, feedback: 'like' })
-                              : recordFeedback.mutate({ id: track.id, feedback: 'like' })
-                          }
+                          onClick={() => feedback.mutate({ id: track.id, feedback: 'like', remove: !!track.liked })}
                         />
                       </div>
                       <div className="w-12 text-right text-spotify-subdued text-xs shrink-0">

@@ -2,45 +2,43 @@
 
 import { useState } from 'react';
 import { useSearchParams } from 'next/navigation';
-import { trpc } from '@/lib/trpc/client';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { api } from '@/lib/api';
+import { Cover } from '@/components/Cover';
+import { keys } from '@/lib/queries';
 import { useStation } from '@/lib/station';
-import { CoverImage } from '@/components/CoverImage';
-
-function Cover({ id, title, className }: { id: string; title: string; className?: string }) {
-  const [error, setError] = useState(false);
-  if (error) {
-    return (
-      <div className={className}>
-        <span className="font-bold">{title.charAt(0).toUpperCase()}</span>
-      </div>
-    );
-  }
-  return <CoverImage id={id} alt="" className={className} onError={() => setError(true)} />;
-}
 
 export default function SimilarPage() {
   const search = useSearchParams() ?? undefined;
   const trackId = search?.get('track');
-  const { data: tracks } = trpc.tracks.useQuery({ limit: 1000 });
-  const { data: similar } = trpc.similar.useQuery(
-    { id: trackId ?? '' },
-    { enabled: !!trackId }
-  );
-  const utils = trpc.useContext();
+  const qc = useQueryClient();
   const { setSelectedStation } = useStation();
-  const create = trpc.createStation.useMutation({
-    onSuccess: (data) => {
-      setStationName('');
-      utils.stations.invalidate();
-      setSelectedStation(data.station_id);
-    },
-    onError: (err) => {
-      console.error('create station failed', err);
-    },
-  });
-
   const [selected, setSelected] = useState(trackId ?? '');
   const [stationName, setStationName] = useState('');
+
+  const { data: tracks } = useQuery(keys.tracks(''), () => api.listTracks({ limit: 200 }));
+  const { data: selectedTrack } = useQuery(['track', selected], () => api.getTrack(selected), {
+    enabled: !!selected && !tracks?.some((t) => t.id === selected),
+  });
+  const { data: similar } = useQuery(keys.similar(selected), () => api.getSimilarTracks(selected), {
+    enabled: !!selected,
+  });
+  const create = useMutation(
+    (vars: { name: string; trackId: string }) =>
+      api.createStation({ name: vars.name, seed_type: 'track', track_id: vars.trackId }),
+    {
+      onSuccess: (data) => {
+        setStationName('');
+        void qc.invalidateQueries(keys.stations);
+        setSelectedStation(data.station_id);
+      },
+    },
+  );
+  const options =
+    selectedTrack && !tracks?.some((t) => t.id === selectedTrack.id)
+      ? [selectedTrack, ...(tracks ?? [])]
+      : tracks;
+
 
   const handleSelect = (id: string) => {
     setSelected(id);
@@ -52,11 +50,7 @@ export default function SimilarPage() {
   const handleCreateStation = (e: React.FormEvent) => {
     e.preventDefault();
     if (!selected || !stationName.trim()) return;
-    create.mutate({
-      name: stationName.trim(),
-      seed_type: 'track',
-      track_id: selected,
-    });
+    create.mutate({ name: stationName.trim(), trackId: selected });
   };
 
   return (
@@ -72,7 +66,7 @@ export default function SimilarPage() {
           className="w-full px-3 py-2 rounded bg-spotify-elevated text-spotify-text border border-spotify-border focus:outline-none focus:border-spotify-green"
         >
           <option value="">Choose a track</option>
-          {tracks?.map((track) => (
+          {options?.map((track) => (
             <option key={track.id} value={track.id}>
               {track.title} {track.artist ? `— ${track.artist}` : ''}
             </option>
@@ -97,7 +91,7 @@ export default function SimilarPage() {
               required
             />
           </div>
-          {create.error && (
+          {create.error instanceof Error && (
             <p className="text-sm text-red-500">{create.error.message}</p>
           )}
           <button
@@ -113,32 +107,25 @@ export default function SimilarPage() {
 
       {similar && similar.length > 0 && (
         <ul className="space-y-1 bg-spotify-card rounded-lg p-4">
-          {similar.map((t) => {
-            const track = tracks?.find((tr) => tr.id === t.track_id);
-            return (
-              <li
-                key={t.track_id}
-                className="flex items-center gap-3 py-2 border-b border-spotify-border last:border-0"
-              >
-                <Cover
-                  id={t.track_id}
-                  title={track?.title ?? t.track_id}
-                  className="w-10 h-10 rounded bg-spotify-elevated object-cover flex items-center justify-center text-xs text-spotify-subdued"
-                />
-                <div className="min-w-0 flex-1">
-                  <div className="text-sm font-bold truncate">
-                    {track?.title ?? t.track_id}
-                  </div>
-                  <div className="text-xs text-spotify-subdued truncate">
-                    {track?.artist ?? 'Unknown artist'} {track?.album ? `· ${track.album}` : ''}
-                  </div>
+          {similar.map((t) => (
+            <li
+              key={t.track_id}
+              className="flex items-center gap-3 py-2 border-b border-spotify-border last:border-0"
+            >
+              <Cover
+                id={t.track_id}
+                title={t.title}
+                className="w-10 h-10 rounded bg-spotify-elevated object-cover text-xs text-spotify-subdued shrink-0 overflow-hidden"
+              />
+              <div className="min-w-0 flex-1">
+                <div className="text-sm font-bold truncate">{t.title}</div>
+                <div className="text-xs text-spotify-subdued truncate">
+                  {t.artist ?? 'Unknown artist'} {t.album ? `· ${t.album}` : ''}
                 </div>
-                <div className="text-xs text-spotify-subdued shrink-0">
-                  {t.distance.toFixed(4)}
-                </div>
-              </li>
-            );
-          })}
+              </div>
+              <div className="text-xs text-spotify-subdued shrink-0">{t.distance.toFixed(4)}</div>
+            </li>
+          ))}
         </ul>
       )}
 

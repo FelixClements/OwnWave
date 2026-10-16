@@ -1,19 +1,17 @@
-import { clampCrossfadeDuration, shouldBeginCrossfade } from './crossfade-math';
+import { crossfadeDuration, effectiveOutroStart, shouldBeginCrossfade } from './crossfade-math';
 import type { StreamResolver } from './stream-resolver';
-import type { Deck, PlaybackCallbacks, PlaybackTrack, StreamOptions } from './types';
+import type { Deck, PlaybackCallbacks, PlaybackEngine, PlaybackTrack, StreamOptions } from './types';
 
 type AudioContextCtor = typeof AudioContext;
 
-export class WebAudioCrossfadeEngine {
+/** Two-deck engine that crossfades into the next track during the outro. */
+export class WebAudioCrossfadeEngine implements PlaybackEngine {
   private queue: PlaybackTrack[] = [];
   private streamOptions: StreamOptions = { format: 'flac', bitrate: '320' };
-  private audioA: HTMLAudioElement | null = null;
-  private audioB: HTMLAudioElement | null = null;
   private ctx: AudioContext | null = null;
-  private gainA: GainNode | null = null;
-  private gainB: GainNode | null = null;
+  private gains: Record<Deck, GainNode | null> = { A: null, B: null };
   private active: Deck = 'A';
-  private currentIndex = 0;
+  private current: PlaybackTrack | null = null;
   private crossfading = false;
   private crossfadeRaf: number | null = null;
 
@@ -21,19 +19,15 @@ export class WebAudioCrossfadeEngine {
     private readonly resolver: StreamResolver,
     private readonly callbacks: PlaybackCallbacks,
     private readonly AudioCtx: AudioContextCtor,
+    private readonly decks: [HTMLAudioElement, HTMLAudioElement],
   ) {}
-
-  attach(elements: [HTMLAudioElement, HTMLAudioElement]) {
-    this.audioA = elements[0];
-    this.audioB = elements[1];
-  }
 
   setStreamOptions(options: StreamOptions) {
     this.streamOptions = options;
   }
 
   getCurrentIndex() {
-    return this.currentIndex;
+    return this.current ? this.queue.indexOf(this.current) : 0;
   }
 
   isCrossfading() {
@@ -41,203 +35,169 @@ export class WebAudioCrossfadeEngine {
   }
 
   pause() {
-    this.audioA?.pause();
-    this.audioB?.pause();
-  }
-
-  async load(queue: PlaybackTrack[], startIndex = 0) {
-    this.queue = queue;
-    this.currentIndex = startIndex;
-    this.crossfading = false;
-    this.cancelCrossfadeSchedule();
-    await this.loadAndPlay(startIndex, 'A');
+    this.decks.forEach((d) => d.pause());
   }
 
   async play() {
-    const audio = this.activeAudio();
-    if (audio) await audio.play();
-    if (this.ctx?.state === 'suspended') {
-      await this.ctx.resume();
-    }
+    await this.deck(this.active).play();
+    if (this.ctx?.state === 'suspended') await this.ctx.resume();
+  }
+
+  async load(queue: PlaybackTrack[], startIndex = 0) {
+    this.queue = [...queue];
+    this.cancelCrossfadeSchedule();
+    this.crossfading = false;
+    await this.loadAndPlay(startIndex, this.active);
   }
 
   async skipTo(index: number) {
-    if (this.crossfading || index < 0 || index >= this.queue.length) return;
-    const audio = this.activeAudio();
-    if (audio) {
-      audio.ontimeupdate = null;
-      audio.onended = null;
-    }
+    if (this.crossfading || index < 0) return;
     await this.loadAndPlay(index, this.active);
+  }
+
+  async removeTrack(id: string) {
+    const track = this.queue.find((t) => t.id === id);
+    if (!track) return;
+    const index = this.queue.indexOf(track);
+    this.queue.splice(index, 1);
+    // While crossfading the current track is already on its way out.
+    if (track === this.current && !this.crossfading) {
+      await this.loadAndPlay(index, this.active);
+    }
   }
 
   dispose() {
     this.pause();
     this.cancelCrossfadeSchedule();
-    this.ctx?.close();
+    void this.ctx?.close();
     this.ctx = null;
   }
 
-  private activeAudio() {
-    return this.active === 'A' ? this.audioA : this.audioB;
-  }
-
-  private deckAudio(target: Deck) {
-    return target === 'A' ? this.audioA : this.audioB;
-  }
-
-  private deckGain(target: Deck) {
-    return target === 'A' ? this.gainA : this.gainB;
+  private deck(target: Deck) {
+    return target === 'A' ? this.decks[0] : this.decks[1];
   }
 
   private ensureContext() {
     if (this.ctx) return;
     const ctx = new this.AudioCtx();
-    this.ctx = ctx;
-
     const master = ctx.createGain();
     master.gain.value = 0.9;
     master.connect(ctx.destination);
-
-    const gainA = ctx.createGain();
-    gainA.connect(master);
-    gainA.gain.value = 0;
-    this.gainA = gainA;
-
-    const gainB = ctx.createGain();
-    gainB.connect(master);
-    gainB.gain.value = 0;
-    this.gainB = gainB;
-
-    if (this.audioA) {
-      ctx.createMediaElementSource(this.audioA).connect(gainA);
+    for (const target of ['A', 'B'] as Deck[]) {
+      const gain = ctx.createGain();
+      gain.gain.value = 0;
+      gain.connect(master);
+      ctx.createMediaElementSource(this.deck(target)).connect(gain);
+      this.gains[target] = gain;
     }
-    if (this.audioB) {
-      ctx.createMediaElementSource(this.audioB).connect(gainB);
-    }
+    this.ctx = ctx;
   }
 
-  private async resolveUrl(trackId: string) {
-    return this.resolver.resolve(trackId, this.streamOptions);
-  }
-
-  private async loadTrack(audio: HTMLAudioElement, index: number) {
-    const track = this.queue[index];
-    if (!track) return;
-    const url = await this.resolveUrl(track.id);
-    audio.src = url;
-    audio.load();
-    this.callbacks.onTrackChange(track, index);
+  private detach(audio: HTMLAudioElement) {
+    audio.ontimeupdate = null;
+    audio.onended = null;
   }
 
   private async loadAndPlay(index: number, target: Deck) {
-    const audio = this.deckAudio(target);
-    const otherAudio = this.deckAudio(target === 'A' ? 'B' : 'A');
-    if (!audio || !otherAudio) return;
+    const track = this.queue[index];
+    const audio = this.deck(target);
+    const other = this.deck(target === 'A' ? 'B' : 'A');
+    this.detach(audio);
+    this.detach(other);
+    other.pause();
+    other.removeAttribute('src');
+
+    if (!track) {
+      audio.pause();
+      this.current = null;
+      this.callbacks.onQueueEnd();
+      return;
+    }
 
     this.ensureContext();
-    await this.loadTrack(audio, index);
-
-    otherAudio.pause();
-    otherAudio.src = '';
-
-    await audio.play();
-
-    const gain = this.deckGain(target);
-    const otherGain = this.deckGain(target === 'A' ? 'B' : 'A');
-    const ctx = this.ctx;
-    if (gain && otherGain && ctx) {
-      const now = ctx.currentTime;
-      otherGain.gain.cancelScheduledValues(now);
-      otherGain.gain.setValueAtTime(0, now);
-      gain.gain.cancelScheduledValues(now);
-      gain.gain.setValueAtTime(0, now);
-      gain.gain.linearRampToValueAtTime(1, now + 0.1);
-    }
-
+    this.current = track;
     this.active = target;
-    this.currentIndex = index;
     this.crossfading = false;
+    audio.src = await this.resolver.resolve(track.id, this.streamOptions);
+    audio.load();
+    this.callbacks.onTrackChange(track, index);
 
-    audio.ontimeupdate = () => this.handleTimeUpdate(audio, target);
-    audio.onended = () => this.handleEnded(target);
+    const ctx = this.ctx!;
+    const now = ctx.currentTime;
+    const otherGain = this.gains[target === 'A' ? 'B' : 'A']!;
+    const gain = this.gains[target]!;
+    otherGain.gain.cancelScheduledValues(now);
+    otherGain.gain.setValueAtTime(0, now);
+    gain.gain.cancelScheduledValues(now);
+    gain.gain.setValueAtTime(0, now);
+    gain.gain.linearRampToValueAtTime(1, now + 0.1);
+
+    this.attach(audio, target);
+    await audio.play();
   }
 
-  private handleTimeUpdate(audio: HTMLAudioElement, target: Deck) {
-    if (this.crossfading) return;
-    const track = this.queue[this.currentIndex];
-    if (!track) return;
-    if (shouldBeginCrossfade(audio.currentTime, track.outro_start_seconds)) {
-      const next = this.currentIndex + 1;
-      if (next < this.queue.length) {
-        void this.beginCrossfade(target, next);
+  private attach(audio: HTMLAudioElement, target: Deck) {
+    audio.ontimeupdate = () => {
+      const track = this.current;
+      if (this.crossfading || !track) return;
+      if (shouldBeginCrossfade(audio.currentTime, effectiveOutroStart(track))) {
+        const next = this.queue[this.queue.indexOf(track) + 1];
+        if (next) void this.beginCrossfade(target, track, next);
       }
-    }
+    };
+    audio.onended = () => {
+      if (this.crossfading || !this.current) return;
+      void this.loadAndPlay(this.queue.indexOf(this.current) + 1, target);
+    };
   }
 
-  private handleEnded(target: Deck) {
-    if (this.crossfading) return;
-    const next = this.currentIndex + 1;
-    if (next < this.queue.length) {
-      void this.loadAndPlay(next, target);
-    }
-  }
-
-  private async beginCrossfade(currentTarget: Deck, nextIndex: number) {
+  private async beginCrossfade(currentTarget: Deck, current: PlaybackTrack, next: PlaybackTrack) {
     if (this.crossfading) return;
     this.crossfading = true;
 
     const nextTarget: Deck = currentTarget === 'A' ? 'B' : 'A';
-    const currentAudio = this.deckAudio(currentTarget);
-    const nextAudio = this.deckAudio(nextTarget);
-    const currentGain = this.deckGain(currentTarget);
-    const nextGain = this.deckGain(nextTarget);
+    const currentAudio = this.deck(currentTarget);
+    const nextAudio = this.deck(nextTarget);
     const ctx = this.ctx;
-    const currentTrack = this.queue[this.currentIndex];
-    const nextTrack = this.queue[nextIndex];
-
-    if (!currentAudio || !nextAudio || !currentGain || !nextGain || !ctx || !nextTrack) {
+    const currentGain = this.gains[currentTarget];
+    const nextGain = this.gains[nextTarget];
+    if (!ctx || !currentGain || !nextGain) {
       this.crossfading = false;
       return;
     }
 
-    const url = await this.resolveUrl(nextTrack.id);
-    nextAudio.src = url;
-    nextAudio.load();
-    await nextAudio.play();
+    try {
+      nextAudio.src = await this.resolver.resolve(next.id, this.streamOptions);
+      nextAudio.load();
+      await nextAudio.play();
+    } catch {
+      // Couldn't start the next deck: let the current track end normally,
+      // and onended advances without a crossfade.
+      nextAudio.pause();
+      nextAudio.removeAttribute('src');
+      this.crossfading = false;
+      return;
+    }
 
-    const crossfade = clampCrossfadeDuration(
-      nextTrack.ideal_crossfade_seconds,
-      currentTrack?.outro_start_seconds ?? 0,
-      currentTrack?.outro_start_seconds
-        ? currentTrack.outro_start_seconds + nextTrack.ideal_crossfade_seconds
-        : 0,
-    );
+    const duration = crossfadeDuration(current, next);
     const now = ctx.currentTime;
-
     currentGain.gain.cancelScheduledValues(now);
     currentGain.gain.setValueAtTime(currentGain.gain.value, now);
-    currentGain.gain.linearRampToValueAtTime(0, now + crossfade);
-
+    currentGain.gain.linearRampToValueAtTime(0, now + duration);
     nextGain.gain.cancelScheduledValues(now);
     nextGain.gain.setValueAtTime(0, now);
-    nextGain.gain.linearRampToValueAtTime(1, now + crossfade);
+    nextGain.gain.linearRampToValueAtTime(1, now + duration);
 
-    const endTime = now + crossfade;
-    this.scheduleAtContextTime(ctx, endTime, () => {
+    this.scheduleAtContextTime(ctx, now + duration, () => {
+      this.detach(currentAudio);
       currentAudio.pause();
-      currentAudio.src = '';
-      currentAudio.ontimeupdate = null;
-      currentAudio.onended = null;
-
-      this.callbacks.onTrackChange(nextTrack, nextIndex);
-
-      nextAudio.ontimeupdate = () => this.handleTimeUpdate(nextAudio, nextTarget);
-      nextAudio.onended = () => this.handleEnded(nextTarget);
+      currentAudio.removeAttribute('src');
 
       this.active = nextTarget;
-      this.currentIndex = nextIndex;
+      this.current = next;
       this.crossfading = false;
+      this.attach(nextAudio, nextTarget);
+      this.callbacks.onTrackChange(next, this.queue.indexOf(next));
     });
   }
 

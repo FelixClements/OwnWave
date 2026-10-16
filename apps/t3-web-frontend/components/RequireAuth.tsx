@@ -3,7 +3,7 @@
 import { useEffect } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 import { useAuth } from '@/lib/auth';
-import { trpc } from '@/lib/trpc/client';
+import { useSetupStatus } from '@/lib/queries';
 
 function isPublicPath(path: string) {
   return path === '/login' || path === '/setup' || path.startsWith('/invite/');
@@ -14,7 +14,7 @@ export function RequireAuth({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const path = usePathname() ?? '';
 
-  const setupStatus = trpc.setupStatus.useQuery();
+  const setupStatus = useSetupStatus();
   const isLoading = loading || setupStatus.isLoading;
 
   useEffect(() => {

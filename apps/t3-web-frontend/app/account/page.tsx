@@ -1,19 +1,23 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { api } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
-import { trpc } from '@/lib/trpc/client';
+import { keys } from '@/lib/queries';
 
 export default function AccountPage() {
   const { user } = useAuth();
-  const utils = trpc.useContext();
-  const { data: me, isLoading: meLoading } = trpc.me.useQuery();
-  const updateProfile = trpc.updateProfile.useMutation({
-    onSuccess: () => {
-      utils.me.invalidate();
-    },
-  });
-  const changePassword = trpc.changePassword.useMutation();
+  const qc = useQueryClient();
+  const { data: me, isLoading: meLoading } = useQuery(keys.me, () => api.me());
+  const updateProfile = useMutation(
+    (vars: { email: string; fullName: string }) => api.updateProfile(vars.email, vars.fullName),
+    { onSuccess: () => qc.invalidateQueries(keys.me) },
+  );
+  // Direct REST call so the browser receives the rotated session cookie.
+  const changePassword = useMutation((vars: { currentPassword: string; newPassword: string }) =>
+    api.changePassword(vars.currentPassword, vars.newPassword),
+  );
 
   const [email, setEmail] = useState('');
   const [fullName, setFullName] = useState('');

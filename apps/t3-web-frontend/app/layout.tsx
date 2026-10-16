@@ -1,6 +1,6 @@
 import type { Metadata, Viewport } from 'next';
 import './globals.css';
-import { Provider } from '@/lib/trpc/Provider';
+import { QueryProvider } from '@/lib/query-provider';
 import { PWA } from '@/components/PWA';
 import { AuthProvider } from '@/lib/auth';
 import { RequireAuth } from '@/components/RequireAuth';
@@ -32,13 +32,13 @@ export default function RootLayout({
     <html lang="en">
       <body className="min-h-screen overflow-hidden antialiased">
         <ThemeProvider>
-          <Provider>
+          <QueryProvider>
             <AuthProvider>
               <RequireAuth>
                 <RootShell>{children}</RootShell>
               </RequireAuth>
             </AuthProvider>
-          </Provider>
+          </QueryProvider>
           <PWA />
         </ThemeProvider>
       </body>

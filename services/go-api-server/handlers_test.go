@@ -105,3 +105,15 @@ func TestCreateStationRejectsInvalidSeed(t *testing.T) {
 		})
 	}
 }
+
+func TestFeedbackOnlyAcceptsLikeAndBan(t *testing.T) {
+	h := newTestHandler(analytics.NewStub())
+	user := auth.User{ID: "6f1b8c6e-6a43-4e4b-9b1e-2b3f8d1a0c55"}
+	for _, body := range []string{`{"feedback":"skip"}`, `{"feedback":""}`, `{}`} {
+		req := httptest.NewRequest(http.MethodPost, "/tracks/x/feedback", strings.NewReader(body))
+		req = req.WithContext(auth.WithUser(req.Context(), user))
+		rec := httptest.NewRecorder()
+		h.RecordFeedback(rec, req)
+		require.Equal(t, http.StatusBadRequest, rec.Code, body)
+	}
+}

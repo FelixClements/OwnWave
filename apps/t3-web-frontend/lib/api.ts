@@ -1,23 +1,21 @@
-function resolveBaseURL() {
-  if (typeof window !== 'undefined') {
-    return process.env.NEXT_PUBLIC_GO_API_URL || '/api';
+import type { StationSeedType } from './station-seed-types';
+
+/** Same-origin API prefix: the Next rewrite in dev, Caddy in production. */
+export const API_BASE = '/api';
+
+export function coverUrl(trackId: string) {
+  return `${API_BASE}/tracks/${encodeURIComponent(trackId)}/cover`;
+}
+
+/** HTTP error from the Go API, carrying the response status. */
+export class ApiError extends Error {
+  constructor(
+    readonly status: number,
+    message: string,
+  ) {
+    super(message || `HTTP ${status}`);
+    this.name = 'ApiError';
   }
-  return process.env.GO_API_URL || 'http://localhost:8080';
-}
-
-const DEFAULT_BASE_URL = resolveBaseURL();
-
-export type APIAuth = {
-  cookie?: string;
-  authorization?: string;
-};
-
-export function getStreamBaseUrl() {
-  return DEFAULT_BASE_URL;
-}
-
-export function getCoverUrl(id: string) {
-  return `${DEFAULT_BASE_URL}/tracks/${id}/cover`;
 }
 
 export type Track = {
@@ -25,7 +23,6 @@ export type Track = {
   title: string;
   artist?: string;
   album?: string;
-  path?: string;
   track_number?: number;
   duration_seconds?: number;
   sample_rate?: number;
@@ -43,14 +40,16 @@ export type QueueTrack = Track & {
   key: string;
   energy: number;
   valence: number;
+  intro_start_seconds: number;
   outro_start_seconds: number;
+  outro_end_seconds: number;
   ideal_crossfade_seconds: number;
   position: number;
   liked?: boolean;
 };
 
-export type HealthResponse = { status: string };
-export type StationStatusResponse = { id: string; status: string };
+export type Feedback = 'like' | 'ban';
+
 
 export type Artist = {
   id: string;
@@ -82,6 +81,9 @@ export type AuthResponse = {
 
 export type SimilarTrack = {
   track_id: string;
+  title: string;
+  artist?: string;
+  album?: string;
   distance: number;
 };
 
@@ -94,50 +96,20 @@ export type HistoryEntry = {
   played_at: string;
 };
 
-export type StreamUrlResponse = { url: string };
-export type StreamUrlOptions = {
-  format?: 'flac' | 'mp3' | 'opus' | 'aac';
-  bitrate?: string;
-};
-
-export type ScanRequest = {
-  path?: string;
-  force?: boolean;
-};
-
 export type ScanResponse = {
   job_id: string;
   status: string;
 };
 
-export type CreateStationRequest = {
+export type StationRequest = {
   name: string;
-  length?: number;
   min_bpm?: number;
   max_bpm?: number;
   min_energy?: number;
   max_energy?: number;
   min_valence?: number;
   max_valence?: number;
-  seed_type?: 'track' | 'artist' | 'album' | 'cluster' | 'mood' | 'genre' | 'sub_genre' | 'uncategorized';
-  track_id?: string;
-  artist_id?: string;
-  album_id?: string;
-  cluster_id?: number;
-  main_genre?: string;
-  sub_genre?: string;
-};
-
-export type UpdateStationRequest = {
-  name: string;
-  length?: number;
-  min_bpm?: number;
-  max_bpm?: number;
-  min_energy?: number;
-  max_energy?: number;
-  min_valence?: number;
-  max_valence?: number;
-  seed_type?: 'track' | 'artist' | 'album' | 'cluster' | 'mood' | 'genre' | 'sub_genre' | 'uncategorized';
+  seed_type?: StationSeedType;
   track_id?: string;
   artist_id?: string;
   album_id?: string;
@@ -150,13 +122,6 @@ export type Genre = {
   main_genre: string;
   sub_genre: string;
   track_count: number;
-};
-
-export type TrackGenre = {
-  main_genre: string;
-  sub_genre: string;
-  confidence: number;
-  source: string;
 };
 
 export type FailedPath = { path: string; error: string };
@@ -182,10 +147,17 @@ export type ScanStatus = {
 
 export type CreateStationResponse = { station_id: string };
 
+export type AdminStation = {
+  id: string;
+  name: string;
+  track_count: number;
+  played_count: number;
+};
+
 export type SetupStatus = {
   setup_completed: boolean;
   has_users: boolean;
-  track_count: number;
+  track_count?: number;
 };
 
 export type SetupSummary = {
@@ -201,38 +173,24 @@ export type SetupStationsResponse = {
   uncovered: number;
 };
 
-export class OwnWaveAPI {
-  constructor(
-    private baseURL: string = DEFAULT_BASE_URL,
-    private auth: APIAuth = {},
-  ) {}
-
-  private async request<T>(path: string, opts?: RequestInit): Promise<T> {
-    const headers: Record<string, string> = {
-      ...((opts?.headers as Record<string, string>) || {}),
-    };
-    if (this.auth.authorization) {
-      headers.Authorization = this.auth.authorization;
-    }
-    if (this.auth.cookie) {
-      headers.Cookie = this.auth.cookie;
-    }
-    const res = await fetch(`${this.baseURL}${path}`, {
-      ...opts,
-      credentials: 'include',
+class OwnWaveAPI {
+  private async request<T>(path: string, opts: RequestInit & { json?: unknown } = {}): Promise<T> {
+    const { json, ...init } = opts;
+    const headers = new Headers(init.headers);
+    if (json !== undefined) headers.set('Content-Type', 'application/json');
+    const res = await fetch(`${API_BASE}${path}`, {
+      ...init,
       headers,
+      body: json !== undefined ? JSON.stringify(json) : init.body,
+      credentials: 'include',
     });
     if (!res.ok) {
-      throw new Error(`HTTP ${res.status}: ${await res.text()}`);
+      throw new ApiError(res.status, (await res.text()).trim());
     }
     if (res.status === 204) {
       return undefined as T;
     }
     return (await res.json()) as T;
-  }
-
-  health() {
-    return this.request<HealthResponse>('/health');
   }
 
   listTracks(opts?: { limit?: number; offset?: number; q?: string }) {
@@ -241,8 +199,7 @@ export class OwnWaveAPI {
     if (opts?.offset !== undefined) params.set('offset', String(opts.offset));
     if (opts?.q) params.set('q', opts.q);
     const query = params.toString();
-    const suffix = query ? `?${query}` : '';
-    return this.request<{ tracks: Track[] }>(`/tracks${suffix}`).then((r) => r.tracks);
+    return this.request<{ tracks: Track[] }>(`/tracks${query ? `?${query}` : ''}`).then((r) => r.tracks);
   }
 
   listAlbums() {
@@ -253,117 +210,96 @@ export class OwnWaveAPI {
     return this.request<{ artists: Artist[] }>('/artists').then((r) => r.artists);
   }
 
-  rescan() {
-    return this.request<{ job_id?: string }>('/rescan', { method: 'POST' });
-  }
-
-  getScanStatus(jobId: string) {
-    return this.request<ScanStatus>(`/admin/scan/${encodeURIComponent(jobId)}`);
-  }
-
   getTrack(id: string) {
     return this.request<Track>(`/tracks/${encodeURIComponent(id)}`);
-  }
-
-  listStations() {
-    return this.request<{ stations: Station[] }>('/stations').then((r) => r.stations);
   }
 
   search(q: string) {
     return this.request<SearchResults>(`/search?q=${encodeURIComponent(q)}`);
   }
 
-  getCoverUrl(id: string) {
-    return `${this.baseURL}/tracks/${id}/cover`;
+  triggerScan(force = false) {
+    return this.request<ScanResponse>('/admin/scan', { method: 'POST', json: { force } });
+  }
+
+  getScanStatus(jobId: string) {
+    return this.request<ScanStatus>(`/admin/scan/${encodeURIComponent(jobId)}`);
   }
 
   recordPlay(id: string, stationId?: string) {
-    return this.request(`/tracks/${id}/played`, {
+    return this.request<void>(`/tracks/${encodeURIComponent(id)}/played`, {
       method: 'POST',
-      body: JSON.stringify({ station_id: stationId ?? '' }),
+      json: { station_id: stationId ?? '' },
     });
   }
 
-  recordFeedback(id: string, feedback: 'like' | 'skip' | 'ban') {
-    return this.request(`/tracks/${id}/feedback`, {
-      method: 'POST',
-      body: JSON.stringify({ feedback }),
-    });
+  recordFeedback(id: string, feedback: Feedback) {
+    return this.request<void>(`/tracks/${encodeURIComponent(id)}/feedback`, { method: 'POST', json: { feedback } });
   }
 
-  deleteFeedback(id: string, feedback: 'like' | 'skip' | 'ban') {
-    return this.request(`/tracks/${id}/feedback`, {
-      method: 'DELETE',
-      body: JSON.stringify({ feedback }),
-    });
+  deleteFeedback(id: string, feedback: Feedback) {
+    return this.request<void>(`/tracks/${encodeURIComponent(id)}/feedback`, { method: 'DELETE', json: { feedback } });
   }
 
   listHistory() {
     return this.request<{ history: HistoryEntry[] }>('/history').then((r) => r.history);
   }
 
-  listFeedback(feedback: 'like' | 'skip' | 'ban') {
+  listFeedback(feedback: Feedback) {
     return this.request<{ tracks: Track[] }>(`/feedback?feedback=${feedback}`).then((r) => r.tracks);
+  }
+
+  listStations() {
+    return this.request<{ stations: Station[] }>('/stations').then((r) => r.stations);
   }
 
   getStation(id: string) {
     return this.request<Station>(`/stations/${encodeURIComponent(id)}`);
   }
 
-  updateStation(id: string, body: UpdateStationRequest) {
+  createStation(body: StationRequest) {
+    return this.request<CreateStationResponse>('/stations', { method: 'POST', json: body });
+  }
+
+  updateStation(id: string, body: StationRequest) {
     return this.request<{ station_id: string; name: string; track_count: number }>(
       `/stations/${encodeURIComponent(id)}`,
-      {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-      },
+      { method: 'PUT', json: body },
     );
   }
 
   deleteStation(id: string) {
-    return this.request<void>(`/stations/${encodeURIComponent(id)}`, {
-      method: 'DELETE',
-    });
+    return this.request<void>(`/stations/${encodeURIComponent(id)}`, { method: 'DELETE' });
   }
 
   getQueue(id: string) {
-    return this.request<{ queue: QueueTrack[] }>(
-      `/stations/${encodeURIComponent(id)}/queue`
-    ).then((r) => r.queue);
+    return this.request<{ queue: QueueTrack[] }>(`/stations/${encodeURIComponent(id)}/queue`).then((r) => r.queue);
   }
 
   getSimilarTracks(id: string, limit = 20) {
     return this.request<{ track_id: string; similar: SimilarTrack[] }>(
-      `/tracks/${encodeURIComponent(id)}/similar?limit=${limit}`
+      `/tracks/${encodeURIComponent(id)}/similar?limit=${limit}`,
     ).then((r) => r.similar);
+  }
+
+  getGenres() {
+    return this.request<{ genres: Genre[] }>('/genres').then((r) => r.genres);
   }
 
   register(username: string, password: string, inviteToken?: string) {
     return this.request<AuthResponse>('/register', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        username,
-        password,
-        invite_token: inviteToken ?? '',
-      }),
+      json: { username, password, invite_token: inviteToken ?? '' },
     });
   }
 
   login(username: string, password: string) {
-    return this.request<AuthResponse>('/login', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username, password }),
-    });
+    return this.request<AuthResponse>('/login', { method: 'POST', json: { username, password } });
   }
 
   me(): Promise<User | null> {
     return this.request<User>('/me').catch((err) => {
-      if (err instanceof Error && err.message.includes('401')) {
-        return null;
-      }
+      if (err instanceof ApiError && err.status === 401) return null;
       throw err;
     });
   }
@@ -371,8 +307,7 @@ export class OwnWaveAPI {
   updateProfile(email: string, fullName: string) {
     return this.request<{ status: string }>('/me/profile', {
       method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email, full_name: fullName }),
+      json: { email, full_name: fullName },
     });
   }
 
@@ -383,8 +318,7 @@ export class OwnWaveAPI {
   changePassword(currentPassword: string, newPassword: string) {
     return this.request<{ status: string }>('/me/password', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ current_password: currentPassword, new_password: newPassword }),
+      json: { current_password: currentPassword, new_password: newPassword },
     });
   }
 
@@ -393,17 +327,7 @@ export class OwnWaveAPI {
   }
 
   adminStations() {
-    return this.request<{ stations: { id: string; name: string; track_count: number; played_count: number }[] }>(
-      '/admin/stations'
-    ).then((r) => r.stations);
-  }
-
-  adminScan(path?: string, force?: boolean) {
-    return this.request<{ status: string }>('/admin/scan', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ path: path ?? '', force: force ?? false }),
-    });
+    return this.request<{ stations: AdminStation[] }>('/admin/stations').then((r) => r.stations);
   }
 
   adminRebuildVectors() {
@@ -419,44 +343,7 @@ export class OwnWaveAPI {
   }
 
   adminRebuildGenreStations() {
-    return this.request<{ status: string }>('/admin/rebuild-genre-stations', { method: 'POST' });
-  }
-
-  getGenres() {
-    return this.request<{ genres: Genre[] }>('/genres').then((r) => r.genres);
-  }
-
-  getTrackGenres(id: string) {
-    return this.request<{ track_id: string; genres: TrackGenre[] }>(
-      `/tracks/${encodeURIComponent(id)}/genres`
-    ).then((r) => r.genres);
-  }
-
-  getStreamUrl(id: string, opts?: StreamUrlOptions) {
-    const params = new URLSearchParams();
-    if (opts?.format) params.set('format', opts.format);
-    if (opts?.bitrate) params.set('bitrate', opts.bitrate);
-    const query = params.toString();
-    const suffix = query ? `?${query}` : '';
-    return this.request<StreamUrlResponse>(
-      `/tracks/${encodeURIComponent(id)}/stream-url${suffix}`
-    );
-  }
-
-  createStation(body: CreateStationRequest) {
-    return this.request<CreateStationResponse>('/stations', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    });
-  }
-
-  triggerScan(body: ScanRequest = {}) {
-    return this.request<ScanResponse>('/admin/scan', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    });
+    return this.request<{ status: string; created: number }>('/admin/rebuild-genre-stations', { method: 'POST' });
   }
 
   setupStatus() {
@@ -470,31 +357,23 @@ export class OwnWaveAPI {
   setupStations(selectedMainGenres: string[]) {
     return this.request<SetupStationsResponse>('/setup/stations', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ selected_main_genres: selectedMainGenres }),
+      json: { selected_main_genres: selectedMainGenres },
     });
   }
 
   setupComplete() {
-    return this.request<{ setup_completed: boolean }>('/setup/complete', {
-      method: 'POST',
-    });
+    return this.request<{ setup_completed: boolean }>('/setup/complete', { method: 'POST' });
   }
 
-  createInvite(username?: string, ttlHours?: number) {
+  createInvite(username?: string) {
     return this.request<{ invite_url: string; expires_at: string }>('/admin/invites', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username: username || null, ttl_hours: ttlHours }),
+      json: { username: username || null },
     });
   }
 
   createUser(username: string, password: string) {
-    return this.request<{ user: User }>('/admin/users', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username, password }),
-    });
+    return this.request<{ user: User }>('/admin/users', { method: 'POST', json: { username, password } });
   }
 
   listUsers() {
@@ -502,9 +381,7 @@ export class OwnWaveAPI {
   }
 
   deleteUser(id: string) {
-    return this.request<void>(`/admin/users/${encodeURIComponent(id)}`, {
-      method: 'DELETE',
-    });
+    return this.request<void>(`/admin/users/${encodeURIComponent(id)}`, { method: 'DELETE' });
   }
 }
 

@@ -1,36 +1,26 @@
 'use client';
 
 import { useState } from 'react';
-import { trpc } from '@/lib/trpc/client';
-import { CoverImage } from '@/components/CoverImage';
+import { useQuery } from '@tanstack/react-query';
+import { api } from '@/lib/api';
+import { Cover } from '@/components/Cover';
+import { keys } from '@/lib/queries';
 
-type Tab = 'history' | 'liked' | 'skipped' | 'banned';
-
-function Cover({ id, title, className }: { id: string; title: string; className?: string }) {
-  const [error, setError] = useState(false);
-  if (error) {
-    return (
-      <div className={className}>
-        <span className="font-bold">{title.charAt(0).toUpperCase()}</span>
-      </div>
-    );
-  }
-  return <CoverImage id={id} alt="" className={className} onError={() => setError(true)} />;
-}
+type Tab = 'history' | 'liked' | 'banned';
 
 export default function HistoryPage() {
   const [tab, setTab] = useState<Tab>('history');
-  const { data: history } = trpc.history.useQuery();
-  const { data: liked } = trpc.liked.useQuery();
-  const { data: skipped } = trpc.skipped.useQuery();
-  const { data: banned } = trpc.banned.useQuery();
+  const { data: history } = useQuery(keys.history, () => api.listHistory());
+  const { data: liked } = useQuery(keys.feedback('like'), () => api.listFeedback('like'));
+  const { data: banned } = useQuery(keys.feedback('ban'), () => api.listFeedback('ban'));
+  const feedbackTracks = tab === 'liked' ? liked : tab === 'banned' ? banned : undefined;
 
   return (
     <div className="space-y-6">
       <h2 className="text-2xl font-bold">History & Feedback</h2>
 
       <div className="flex gap-4 border-b border-spotify-border mb-6 overflow-x-auto">
-        {(['history', 'liked', 'skipped', 'banned'] as Tab[]).map((t) => (
+        {(['history', 'liked', 'banned'] as Tab[]).map((t) => (
           <button
             key={t}
             onClick={() => setTab(t)}
@@ -50,7 +40,7 @@ export default function HistoryPage() {
               <Cover
                 id={entry.track_id}
                 title={entry.title}
-                className="w-10 h-10 rounded bg-spotify-elevated object-cover flex items-center justify-center text-xs text-spotify-subdued"
+                className="w-10 h-10 rounded bg-spotify-elevated object-cover text-xs text-spotify-subdued shrink-0 overflow-hidden"
               />
               <div className="min-w-0 flex-1">
                 <div className="text-sm font-bold truncate">{entry.title}</div>
@@ -69,16 +59,12 @@ export default function HistoryPage() {
 
       {tab !== 'history' && (
         <ul className="space-y-1 bg-spotify-card rounded-lg p-4">
-          {{
-            liked,
-            skipped,
-            banned,
-          }[tab]?.map((track) => (
+          {feedbackTracks?.map((track) => (
             <li key={track.id} className="flex items-center gap-3 py-2 border-b border-spotify-border last:border-0">
               <Cover
                 id={track.id}
                 title={track.title}
-                className="w-10 h-10 rounded bg-spotify-elevated object-cover flex items-center justify-center text-xs text-spotify-subdued"
+                className="w-10 h-10 rounded bg-spotify-elevated object-cover text-xs text-spotify-subdued shrink-0 overflow-hidden"
               />
               <div className="min-w-0 flex-1">
                 <div className="text-sm font-bold truncate">{track.title}</div>
@@ -88,15 +74,7 @@ export default function HistoryPage() {
               </div>
             </li>
           ))}
-          {({
-            liked,
-            skipped,
-            banned,
-          }[tab]?.length === 0 || !{
-            liked,
-            skipped,
-            banned,
-          }[tab]) && <p className="text-spotify-subdued text-sm">No {tab} tracks yet.</p>}
+          {!feedbackTracks?.length && <p className="text-spotify-subdued text-sm">No {tab} tracks yet.</p>}
         </ul>
       )}
     </div>
