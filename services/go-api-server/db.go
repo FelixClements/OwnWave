@@ -204,15 +204,14 @@ type GenreCount struct {
 }
 
 // GenreCounts returns per-main-genre (SubGenre empty) and per-sub-genre track
-// counts for predictions at or above minConfidence.
-func (db *DB) GenreCounts(ctx context.Context, minConfidence float64) ([]GenreCount, error) {
+// counts.
+func (db *DB) GenreCounts(ctx context.Context) ([]GenreCount, error) {
 	rows, err := db.pool.Query(ctx, `
 		SELECT main_genre, COALESCE(sub_genre, ''), COUNT(DISTINCT track_id)
 		FROM track_genres
-		WHERE confidence >= $1
 		GROUP BY GROUPING SETS ((main_genre), (main_genre, sub_genre))
 		ORDER BY main_genre, sub_genre NULLS FIRST
-	`, minConfidence)
+	`)
 	if err != nil {
 		return nil, err
 	}

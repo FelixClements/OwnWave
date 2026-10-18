@@ -151,8 +151,10 @@ def run_worker(concurrency: int) -> None:
     if requeued:
         log.info("requeued %d interrupted tasks", requeued)
 
-    # Fork before starting any threads.
-    procs = [multiprocessing.Process(target=_work_loop, name=f"worker-{i}") for i in range(concurrency)]
+    # Spawn, not fork: TensorFlow (Discogs400 genres) deadlocks in a forked
+    # child once the parent has imported essentia.
+    ctx = multiprocessing.get_context("spawn")
+    procs = [ctx.Process(target=_work_loop, name=f"worker-{i}") for i in range(concurrency)]
     for proc in procs:
         proc.start()
 

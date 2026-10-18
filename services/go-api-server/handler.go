@@ -21,7 +21,6 @@ type Handler struct {
 	musicDir                 string
 	ffmpegPath               string
 	recentHours              int
-	minGenreConfidence       float64
 	minTracksPerGenreStation int
 	cookieSecure             bool
 }
@@ -32,7 +31,6 @@ type Config struct {
 	FFmpegPath               string
 	PythonURL                string
 	RecentHours              int
-	MinGenreConfidence       float64
 	MinTracksPerGenreStation int
 }
 
@@ -43,14 +41,13 @@ func NewHandler(pool *pgxpool.Pool, cfg Config) *Handler {
 	return &Handler{
 		db:                       NewDB(pool),
 		auth:                     auth.NewService(pool),
-		playback:                 playback.NewService(pool, cfg.MinGenreConfidence),
+		playback:                 playback.NewService(pool),
 		stream:                   streaming.New(streaming.Config{MusicDir: cfg.MusicDir, FFmpegPath: cfg.FFmpegPath}),
 		coverCache:               streaming.NewCoverCache(500, 4),
 		analytics:                analytics.NewHTTPClient(cfg.PythonURL),
 		musicDir:                 cfg.MusicDir,
 		ffmpegPath:               cfg.FFmpegPath,
 		recentHours:              cfg.RecentHours,
-		minGenreConfidence:       cfg.MinGenreConfidence,
 		minTracksPerGenreStation: cfg.MinTracksPerGenreStation,
 		cookieSecure:             auth.CookieSecure(),
 	}

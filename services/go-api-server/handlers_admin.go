@@ -132,7 +132,7 @@ func (h *Handler) AdminRebuildGenreStations(w http.ResponseWriter, r *http.Reque
 	if !ok {
 		return
 	}
-	counts, err := h.db.GenreCounts(r.Context(), h.minGenreConfidence)
+	counts, err := h.db.GenreCounts(r.Context())
 	if err != nil {
 		writeInternalError(w, r, "genre counts", err)
 		return

@@ -11,7 +11,7 @@ from pydantic import BaseModel
 import db
 import task_queue
 import tasks
-from config import ANALYTICS_API_SECRET, GENRE_MIN_CONFIDENCE, MUSIC_DIR
+from config import ANALYTICS_API_SECRET, MUSIC_DIR
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -158,12 +158,12 @@ def track_genres(track_id: UUID):
 def setup_summary():
     with _db_conn() as conn:
         total_tracks = db.count_tracks(conn)
-        main_genres = db.get_main_genre_counts(conn, GENRE_MIN_CONFIDENCE)
-        sub_genres = db.get_sub_genre_counts(conn, GENRE_MIN_CONFIDENCE)
+        main_genres = db.get_main_genre_counts(conn)
+        sub_genres = db.get_sub_genre_counts(conn)
         return {
             "total_tracks": total_tracks,
             "main_genres": main_genres,
             "sub_genres": sub_genres,
             # Tracks the "Uncategorized" station will hold.
-            "uncovered": db.count_uncategorized_tracks(conn, GENRE_MIN_CONFIDENCE),
+            "uncovered": db.count_uncategorized_tracks(conn),
         }

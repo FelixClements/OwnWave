@@ -19,8 +19,6 @@ import (
 	"ownwave/api/internal/testdb"
 )
 
-const minConfidence = 0.3
-
 type fixture struct {
 	t    *testing.T
 	pool *pgxpool.Pool
@@ -111,7 +109,7 @@ func (f *fixture) station(seed stations.Seed) string {
 
 func (f *fixture) queueIDs(stationID string, seed stations.Seed) []string {
 	f.t.Helper()
-	svc := playback.NewService(f.pool, minConfidence)
+	svc := playback.NewService(f.pool)
 	queue, err := svc.BuildQueue(f.ctx, f.user, stationID, seed, 24)
 	require.NoError(f.t, err)
 	ids := make([]string, len(queue))
@@ -143,6 +141,8 @@ func TestBuildQueue_SeedTypes(t *testing.T) {
 	cluster := 7
 	rock := f.addTrack(track{title: "Rock", artist: "Rocker", album: "Loud", bpm: 140, energy: 0.9, valence: 0.6,
 		genres: map[string]float64{"rock/punk": 0.9}, cluster: &cluster})
+	// A low-confidence genre still counts: the analytics service decides
+	// what is confident enough to store.
 	rockWeak := f.addTrack(track{title: "Maybe Rock", bpm: 100, energy: 0.5, valence: 0.5,
 		genres: map[string]float64{"rock/indie": 0.1}})
 	jazz := f.addTrack(track{title: "Jazz", artist: "Cat", bpm: 90, energy: 0.2, valence: 0.3,
@@ -156,15 +156,15 @@ func TestBuildQueue_SeedTypes(t *testing.T) {
 		seed stations.Seed
 		want []string
 	}{
-		"whole library":         {stations.Seed{}, sorted(rock, rockWeak, jazz, plain)},
-		"genre uses confidence": {stations.Seed{Type: "genre", MainGenre: "rock"}, sorted(rock)},
-		"sub genre":             {stations.Seed{Type: "sub_genre", MainGenre: "jazz", SubGenre: "bebop"}, sorted(jazz)},
-		"uncategorized":         {stations.Seed{Type: "uncategorized"}, sorted(rockWeak, plain)},
-		"artist":                {stations.Seed{Type: "artist", ArtistID: artistID}, sorted(rock, plain)},
-		"album":                 {stations.Seed{Type: "album", AlbumID: albumID}, sorted(rock)},
-		"cluster":               {stations.Seed{Type: "cluster", ClusterID: &cluster}, sorted(rock)},
-		"mood range":            {stations.Seed{Type: "mood", MinEnergy: ptr(0.4), MaxValence: ptr(0.7)}, sorted(rock, rockWeak)},
-		"bpm range with genre":  {stations.Seed{Type: "genre", MainGenre: "rock", MaxBPM: ptr(120.0)}, nil},
+		"whole library":        {stations.Seed{}, sorted(rock, rockWeak, jazz, plain)},
+		"genre":                {stations.Seed{Type: "genre", MainGenre: "rock"}, sorted(rock, rockWeak)},
+		"sub genre":            {stations.Seed{Type: "sub_genre", MainGenre: "jazz", SubGenre: "bebop"}, sorted(jazz)},
+		"uncategorized":        {stations.Seed{Type: "uncategorized"}, sorted(plain)},
+		"artist":               {stations.Seed{Type: "artist", ArtistID: artistID}, sorted(rock, plain)},
+		"album":                {stations.Seed{Type: "album", AlbumID: albumID}, sorted(rock)},
+		"cluster":              {stations.Seed{Type: "cluster", ClusterID: &cluster}, sorted(rock)},
+		"mood range":           {stations.Seed{Type: "mood", MinEnergy: ptr(0.4), MaxValence: ptr(0.7)}, sorted(rock, rockWeak)},
+		"bpm range with genre": {stations.Seed{Type: "genre", MainGenre: "rock", MaxBPM: ptr(120.0)}, sorted(rockWeak)},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -200,7 +200,7 @@ func TestBuildQueue_ExcludesBansAndFlagsLikes(t *testing.T) {
 	f.exec(`INSERT INTO track_feedback (user_id, track_id, feedback) VALUES ($1::uuid, $2::uuid, 'like'), ($1::uuid, $3::uuid, 'ban')`,
 		f.user, liked, banned)
 
-	svc := playback.NewService(f.pool, minConfidence)
+	svc := playback.NewService(f.pool)
 	station := f.station(stations.Seed{})
 	queue, err := svc.BuildQueue(f.ctx, f.user, station, stations.Seed{}, 24)
 	require.NoError(t, err)
@@ -250,7 +250,7 @@ func TestBuildQueue_PagesAndDedupes(t *testing.T) {
 	station := f.station(stations.Seed{})
 	assert.Len(t, f.queueIDs(station, stations.Seed{}), playback.QueuePageSize)
 
-	n, err := playback.NewService(f.pool, minConfidence).PoolSize(f.ctx, f.user, stations.Seed{})
+	n, err := playback.NewService(f.pool).PoolSize(f.ctx, f.user, stations.Seed{})
 	require.NoError(t, err)
 	assert.Equal(t, playback.QueuePageSize+11, n)
 }
@@ -259,7 +259,7 @@ func TestRecord_WritesHistoryAndChecksStationOwner(t *testing.T) {
 	f := newFixture(t)
 	trackID := f.addTrack(track{title: "History"})
 	station := f.station(stations.Seed{})
-	svc := playback.NewService(f.pool, minConfidence)
+	svc := playback.NewService(f.pool)
 
 	require.NoError(t, svc.Record(f.ctx, f.user, trackID, ""))
 	require.NoError(t, svc.Record(f.ctx, f.user, trackID, station))

@@ -80,7 +80,9 @@ class Discogs400GenreSource:
                 end = min(start + SNIPPET_DURATION, duration)
                 start_idx = int(start * 16000)
                 end_idx = int(end * 16000)
-                snippet = audio[start_idx:end_idx] or audio
+                snippet = audio[start_idx:end_idx]
+                if snippet.size == 0:
+                    snippet = audio
 
             embeddings = self._embed_model(snippet)
             activations = self._class_model(embeddings)
@@ -90,11 +92,13 @@ class Discogs400GenreSource:
 
             labels = self._labels or [f"class_{i}" for i in range(len(avg))]
             predictions: List[GenrePrediction] = []
-            for idx in np.argsort(avg)[::-1][:10]:
+            # Keep every label at or above the threshold, and always the best
+            # one, so each analysed track lands in some genre station.
+            for rank, idx in enumerate(np.argsort(avg)[::-1][:10]):
                 if idx >= len(labels):
                     continue
                 confidence = float(avg[idx])
-                if confidence < GENRE_MIN_CONFIDENCE:
+                if rank > 0 and confidence < GENRE_MIN_CONFIDENCE:
                     continue
                 main, sub = self._parse_label(labels[idx])
                 predictions.append(
