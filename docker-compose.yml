@@ -37,7 +37,7 @@ services:
     volumes:
       - db_data:/var/lib/postgresql/data
     ports:
-      - "127.0.0.1:5432:5432"
+      - "${DB_HOST_PORT:-127.0.0.1:5432}:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-ownwave} -d ${POSTGRES_DB:-ownwave}"]
       interval: 5s
@@ -73,6 +73,7 @@ services:
       ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost:8080,http://127.0.0.1:8080}
       PUBLIC_APP_URL: ${PUBLIC_APP_URL:-http://localhost:8080}
       OWNWAVE_DOMAIN: ${OWNWAVE_DOMAIN:-localhost}
+      OWNWAVE_COOKIE_SECURE: ${OWNWAVE_COOKIE_SECURE:-false}
       FFMPEG_PATH: ffmpeg
       PYTHON_API_URL: http://python:8000
       GENRE_MIN_CONFIDENCE: ${GENRE_MIN_CONFIDENCE:-0.3}
