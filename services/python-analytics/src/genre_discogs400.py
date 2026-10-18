@@ -80,7 +80,9 @@ class Discogs400GenreSource:
                 end = min(start + SNIPPET_DURATION, duration)
                 start_idx = int(start * 16000)
                 end_idx = int(end * 16000)
-                snippet = audio[start_idx:end_idx] or audio
+                snippet = audio[start_idx:end_idx]
+                if snippet.size == 0:
+                    snippet = audio
 
             embeddings = self._embed_model(snippet)
             activations = self._class_model(embeddings)
