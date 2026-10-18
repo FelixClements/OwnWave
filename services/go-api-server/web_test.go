@@ -33,6 +33,19 @@ func TestRouterServesAPIUnderPrefix(t *testing.T) {
 	require.Equal(t, http.StatusOK, get(r, "/health").Code)
 }
 
+func TestRouterSetsSecurityHeaders(t *testing.T) {
+	h := newTestHandler(analytics.NewStub())
+	rec := get(newRouter(h, t.TempDir()), "/api/tracks")
+	require.Contains(t, rec.Header().Get("Content-Security-Policy"), "frame-ancestors 'none'")
+	require.Equal(t, "nosniff", rec.Header().Get("X-Content-Type-Options"))
+	require.Equal(t, "DENY", rec.Header().Get("X-Frame-Options"))
+	require.Empty(t, rec.Header().Get("Strict-Transport-Security"), "no HSTS over plain HTTP")
+
+	h.cookieSecure = true
+	rec = get(newRouter(h, t.TempDir()), "/health")
+	require.Equal(t, "max-age=31536000; includeSubDomains", rec.Header().Get("Strict-Transport-Security"))
+}
+
 func TestRouterServesWebUI(t *testing.T) {
 	dir := t.TempDir()
 	writeWebFile(t, dir, "index.html", "home")

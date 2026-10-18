@@ -176,6 +176,7 @@ func main() {
 func newRouter(h *Handler, webDir string) http.Handler {
 	r := chi.NewRouter()
 	r.Use(middleware.RealIP)
+	r.Use(securityHeaders(h.cookieSecure))
 	r.Use(httpAccessLog)
 	r.Use(middleware.Recoverer)
 	r.Use(prometheusMiddleware)

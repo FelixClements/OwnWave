@@ -65,7 +65,7 @@ Prometheus metrics are available to authenticated admins at `/api/admin/metrics`
 - Python analytics is an internal service. Go authenticates to it with `X-Internal-Token` (`ANALYTICS_API_SECRET`).
 - Registration is invite-only after the first admin account is created during setup.
 - Admin maintenance endpoints require `is_admin`.
-- Caddy adds standard security headers (HSTS, CSP, frame denial, etc.). CSP still includes `'unsafe-inline'` for Next.js.
+- Go sets standard security headers (CSP, frame denial, nosniff, etc.) on every response, so they apply behind any reverse proxy. HSTS is added when `OWNWAVE_COOKIE_SECURE=true`. CSP still includes `'unsafe-inline'` for Next.js.
 
 ### Post-deploy verification checklist
 
@@ -92,7 +92,7 @@ curl -s -o /dev/null -w "%{http_code}" "$DOMAIN/api/metrics"
 
 Expected status codes: `401`, `401`, `401` or `403`, `403`, and `404` respectively.
 
-Set `OWNWAVE_COOKIE_SECURE=true` in production (the prod compose overlay does this). Generate a unique `ANALYTICS_API_SECRET` and `POSTGRES_PASSWORD`.
+Set `OWNWAVE_COOKIE_SECURE=true` in production (the prod compose overlay does this). It marks the session cookie Secure and enables HSTS. Generate a unique `ANALYTICS_API_SECRET` and `POSTGRES_PASSWORD`.
 
 Invite flow:
 
