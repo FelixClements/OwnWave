@@ -5,14 +5,15 @@ import { useRouter } from 'next/navigation';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '@/lib/auth';
 import { api } from '@/lib/api';
-import { keys, useScanStatus, useSetupStatus } from '@/lib/queries';
+import { isScanFinished, keys, useScanStatus, useScans, useSetupStatus } from '@/lib/queries';
 import { ScanProgress } from '@/components/ScanProgress';
 
 const MIN_TRACKS_PER_STATION = 5;
+const GENRES_PER_PAGE = 10;
 
 export default function SetupPage() {
   const router = useRouter();
-  const { user, register } = useAuth();
+  const { user, loading: authLoading, register } = useAuth();
 
   const [step, setStep] = useState(0);
   const [username, setUsername] = useState('');
@@ -21,9 +22,12 @@ export default function SetupPage() {
   const [scanJobId, setScanJobId] = useState<string | null>(null);
   const [selectedGenres, setSelectedGenres] = useState<Set<string>>(new Set());
   const [createStationError, setCreateStationError] = useState('');
+  const [genrePage, setGenrePage] = useState(0);
 
   const qc = useQueryClient();
   const setupStatus = useSetupStatus();
+  const isAdmin = !!user?.is_admin;
+  const scans = useScans(isAdmin);
   const setupSummary = useQuery(keys.setupSummary, () => api.setupSummary(), { enabled: step === 3 });
   const rescan = useMutation(() => api.triggerScan());
   const scanStatus = useScanStatus(scanJobId);
@@ -41,18 +45,28 @@ export default function SetupPage() {
     },
   });
 
+  // Pick the starting step. A scan still running (e.g. after a page reload)
+  // is resumed so its live progress stays visible.
   useEffect(() => {
     if (setupStatus.data?.setup_completed) {
       router.push('/');
-    } else if (setupStatus.data) {
-      const { has_users, track_count } = setupStatus.data;
-      if (step === 0) {
-        if (!has_users) setStep(1);
-        else if (track_count === 0) setStep(2);
-        else setStep(3);
-      }
+      return;
     }
-  }, [setupStatus.data, step, router]);
+    if (!setupStatus.data || step !== 0) return;
+    const { has_users, track_count } = setupStatus.data;
+    if (!has_users) {
+      setStep(1);
+      return;
+    }
+    if (authLoading || (isAdmin && scans.isLoading)) return;
+    const running = scans.data?.find((j) => !isScanFinished(j.status));
+    if (running) {
+      setScanJobId(running.id);
+      setStep(2);
+    } else {
+      setStep(track_count === 0 ? 2 : 3);
+    }
+  }, [setupStatus.data, step, router, authLoading, isAdmin, scans.isLoading, scans.data]);
 
   useEffect(() => {
     if (scanStatus.data?.status === 'completed') {
@@ -121,6 +135,14 @@ export default function SetupPage() {
   };
 
   const failedPaths = scanStatus.data?.stats.failed_paths ?? [];
+
+  const mainGenres = setupSummary.data?.main_genres ?? [];
+  const genrePageCount = Math.max(1, Math.ceil(mainGenres.length / GENRES_PER_PAGE));
+  const currentGenrePage = Math.min(genrePage, genrePageCount - 1);
+  const pageGenres = mainGenres.slice(
+    currentGenrePage * GENRES_PER_PAGE,
+    (currentGenrePage + 1) * GENRES_PER_PAGE,
+  );
 
   if (setupStatus.isLoading) {
     return <div className="p-6 text-spotify-text">Loading...</div>;
@@ -245,7 +267,7 @@ export default function SetupPage() {
               Select the main genres you want as stations. Genres with at least {MIN_TRACKS_PER_STATION} tracks are pre-selected.
             </p>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-              {setupSummary.data.main_genres.map((g) => (
+              {pageGenres.map((g) => (
                 <label
                   key={g.main_genre}
                   className="flex items-center gap-3 p-3 rounded bg-spotify-elevated cursor-pointer hover:bg-spotify-elevated-hover transition"
@@ -263,7 +285,28 @@ export default function SetupPage() {
                 </label>
               ))}
             </div>
-            {createStationError && <p className="text-red-500 text-sm">{createStationError}</p>}
+            {genrePageCount > 1 && (
+              <div className="flex items-center justify-between gap-3 text-sm">
+                <button
+                  onClick={() => setGenrePage(currentGenrePage - 1)}
+                  disabled={currentGenrePage === 0}
+                  className="px-3 py-1 rounded bg-spotify-elevated text-spotify-text font-semibold hover:bg-spotify-elevated-hover transition disabled:opacity-50"
+                >
+                  Prev
+                </button>
+                <span className="text-spotify-subdued">
+                  Page {currentGenrePage + 1} of {genrePageCount} · {selectedGenres.size} selected
+                </span>
+                <button
+                  onClick={() => setGenrePage(currentGenrePage + 1)}
+                  disabled={currentGenrePage >= genrePageCount - 1}
+                  className="px-3 py-1 rounded bg-spotify-elevated text-spotify-text font-semibold hover:bg-spotify-elevated-hover transition disabled:opacity-50"
+                >
+                  Next
+                </button>
+              </div>
+            )}
+            {createStationError &&<p className="text-red-500 text-sm">{createStationError}</p>}
             <div className="flex gap-3">
               <button
                 onClick={() => setStep(3)}
