@@ -18,12 +18,11 @@ const QueuePageSize = 200
 
 // Service records playback events and builds live station queues.
 type Service struct {
-	pool               *pgxpool.Pool
-	minGenreConfidence float64
+	pool *pgxpool.Pool
 }
 
-func NewService(pool *pgxpool.Pool, minGenreConfidence float64) *Service {
-	return &Service{pool: pool, minGenreConfidence: minGenreConfidence}
+func NewService(pool *pgxpool.Pool) *Service {
+	return &Service{pool: pool}
 }
 
 // Record appends listening history; stationID (optional) must belong to the user.
@@ -54,7 +53,7 @@ func (s *Service) poolFrom(seed stations.Seed, args *stations.Args, joins string
 			SELECT 1 FROM track_feedback b
 			WHERE b.user_id = $1::uuid AND b.track_id = t.id AND b.feedback = 'ban'
 		)
-		AND ` + seed.Where(args, s.minGenreConfidence)
+		AND ` + seed.Where(args)
 }
 
 // PoolSize counts the tracks currently matching seed for the user.

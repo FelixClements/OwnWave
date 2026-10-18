@@ -70,13 +70,6 @@ func envInt(key string, def int) int {
 	return def
 }
 
-func envFloat(key string, def float64) float64 {
-	if f, err := strconv.ParseFloat(os.Getenv(key), 64); err == nil && f >= 0 {
-		return f
-	}
-	return def
-}
-
 func main() {
 	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo})))
 	_ = godotenv.Load()
@@ -117,7 +110,6 @@ func main() {
 		FFmpegPath:               ffmpegPath,
 		PythonURL:                pythonURL,
 		RecentHours:              envInt("STATION_RECENT_HOURS", 24),
-		MinGenreConfidence:       envFloat("GENRE_MIN_CONFIDENCE", 0.3),
 		MinTracksPerGenreStation: envInt("GENRE_MIN_TRACKS_PER_STATION", 5),
 	})
 

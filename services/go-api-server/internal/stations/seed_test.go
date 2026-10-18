@@ -75,14 +75,13 @@ func TestSeedJSONRoundTrip(t *testing.T) {
 
 func TestWhereBuildsParameterizedPredicates(t *testing.T) {
 	args := Args{"user"}
-	where := Seed{Type: "genre", MainGenre: "rock", MinBPM: f(100)}.Where(&args, 0.3)
-	require.Contains(t, where, "g.confidence >= $2")
-	require.Contains(t, where, "g.main_genre = $3")
-	require.Contains(t, where, "COALESCE(af.bpm, 0) >= $4")
-	require.Equal(t, Args{"user", 0.3, "rock", 100.0}, args)
+	where := Seed{Type: "genre", MainGenre: "rock", MinBPM: f(100)}.Where(&args)
+	require.Contains(t, where, "g.main_genre = $2")
+	require.Contains(t, where, "COALESCE(af.bpm, 0) >= $3")
+	require.Equal(t, Args{"user", "rock", 100.0}, args)
 
 	args = Args{}
-	require.Equal(t, "TRUE", Seed{}.Where(&args, 0.3))
+	require.Equal(t, "TRUE", Seed{}.Where(&args))
 	require.Empty(t, args)
 }
 

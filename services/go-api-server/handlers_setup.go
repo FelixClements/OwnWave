@@ -76,7 +76,7 @@ func (h *Handler) SetupStations(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	counts, err := h.db.GenreCounts(r.Context(), h.minGenreConfidence)
+	counts, err := h.db.GenreCounts(r.Context())
 	if err != nil {
 		writeInternalError(w, r, "setup genre counts", err)
 		return

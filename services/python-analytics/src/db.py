@@ -416,17 +416,15 @@ def get_track_genres(conn: psycopg.Connection, track_id: UUID) -> List[dict]:
         ]
 
 
-def list_genres(conn: psycopg.Connection, min_confidence: float = 0.3) -> List[dict]:
+def list_genres(conn: psycopg.Connection) -> List[dict]:
     with conn.cursor() as cur:
         cur.execute(
             """
             SELECT main_genre, sub_genre, COUNT(DISTINCT track_id) as track_count
             FROM track_genres
-            WHERE confidence >= %s
             GROUP BY main_genre, sub_genre
             ORDER BY main_genre, sub_genre
-            """,
-            (min_confidence,),
+            """
         )
         return [
             {"main_genre": r[0], "sub_genre": r[1], "track_count": r[2]}
@@ -448,7 +446,7 @@ def count_tracks(conn: psycopg.Connection) -> int:
 
 
 
-def get_main_genre_counts(conn: psycopg.Connection, min_confidence: float) -> List[dict]:
+def get_main_genre_counts(conn: psycopg.Connection) -> List[dict]:
     """Return main genres with how many tracks and sub-genres each has."""
     with conn.cursor() as cur:
         cur.execute(
@@ -457,11 +455,9 @@ def get_main_genre_counts(conn: psycopg.Connection, min_confidence: float) -> Li
                    COUNT(DISTINCT track_id) as track_count,
                    COUNT(DISTINCT sub_genre) as sub_count
             FROM track_genres
-            WHERE confidence >= %s
             GROUP BY main_genre
             ORDER BY track_count DESC
-            """,
-            (min_confidence,),
+            """
         )
         return [
             {"main_genre": r[0], "track_count": r[1], "sub_count": r[2]}
@@ -469,18 +465,16 @@ def get_main_genre_counts(conn: psycopg.Connection, min_confidence: float) -> Li
         ]
 
 
-def get_sub_genre_counts(conn: psycopg.Connection, min_confidence: float) -> List[dict]:
+def get_sub_genre_counts(conn: psycopg.Connection) -> List[dict]:
     with conn.cursor() as cur:
         cur.execute(
             """
             SELECT main_genre, sub_genre,
                    COUNT(DISTINCT track_id) as track_count
             FROM track_genres
-            WHERE confidence >= %s
             GROUP BY main_genre, sub_genre
             ORDER BY main_genre, sub_genre
-            """,
-            (min_confidence,),
+            """
         )
         return [
             {"main_genre": r[0], "sub_genre": r[1], "track_count": r[2]}
@@ -488,19 +482,15 @@ def get_sub_genre_counts(conn: psycopg.Connection, min_confidence: float) -> Lis
         ]
 
 
-def count_uncategorized_tracks(conn: psycopg.Connection, min_confidence: float) -> int:
-    """Analysed tracks without a genre prediction at or above min_confidence."""
+def count_uncategorized_tracks(conn: psycopg.Connection) -> int:
+    """Analysed tracks without any stored genre."""
     with conn.cursor() as cur:
         cur.execute(
             """
             SELECT COUNT(*)
             FROM tracks t
             JOIN audio_features af ON af.track_id = t.id
-            WHERE NOT EXISTS (
-                SELECT 1 FROM track_genres g
-                WHERE g.track_id = t.id AND g.confidence >= %s
-            )
-            """,
-            (min_confidence,),
+            WHERE NOT EXISTS (SELECT 1 FROM track_genres g WHERE g.track_id = t.id)
+            """
         )
         return cur.fetchone()[0]

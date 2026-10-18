@@ -20,14 +20,12 @@ func (a *Args) Add(v any) string {
 
 // Where returns an SQL predicate restricting `tracks t` joined with
 // `audio_features af` to the seed's pool. Missing numeric features count as
-// 0, as in the original Python filter.
-func (s Seed) Where(args *Args, minGenreConfidence float64) string {
+// 0, as in the original Python filter. Every stored genre row counts: the
+// analytics service applies the confidence threshold before storing.
+func (s Seed) Where(args *Args) string {
 	var conds []string
-	// confidentGenre is the body of an EXISTS over the track's genre
-	// predictions at or above the configured confidence.
-	confidentGenre := func() string {
-		return "SELECT 1 FROM track_genres g WHERE g.track_id = t.id AND g.confidence >= " + args.Add(minGenreConfidence)
-	}
+	// trackGenre is the body of an EXISTS over the track's genres.
+	const trackGenre = "SELECT 1 FROM track_genres g WHERE g.track_id = t.id"
 
 	switch s.Type {
 	case "track":
@@ -45,14 +43,12 @@ func (s Seed) Where(args *Args, minGenreConfidence float64) string {
 	case "cluster":
 		conds = append(conds, "EXISTS (SELECT 1 FROM track_clusters c WHERE c.track_id = t.id AND c.cluster_id = "+args.Add(*s.ClusterID)+")")
 	case "genre":
-		genre := confidentGenre()
-		conds = append(conds, "EXISTS ("+genre+" AND g.main_genre = "+args.Add(s.MainGenre)+")")
+		conds = append(conds, "EXISTS ("+trackGenre+" AND g.main_genre = "+args.Add(s.MainGenre)+")")
 	case "sub_genre":
-		genre := confidentGenre()
 		main := args.Add(s.MainGenre)
-		conds = append(conds, "EXISTS ("+genre+" AND g.main_genre = "+main+" AND g.sub_genre = "+args.Add(s.SubGenre)+")")
+		conds = append(conds, "EXISTS ("+trackGenre+" AND g.main_genre = "+main+" AND g.sub_genre = "+args.Add(s.SubGenre)+")")
 	case "uncategorized":
-		conds = append(conds, "NOT EXISTS ("+confidentGenre()+")")
+		conds = append(conds, "NOT EXISTS ("+trackGenre+")")
 	}
 
 	numeric := []struct {
