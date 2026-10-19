@@ -99,3 +99,33 @@ export function filterFormToRequest(name: string, form: StationFilterForm): Stat
     cluster_id: form.cluster_id ? Number(form.cluster_id) : undefined,
   };
 }
+
+export const SEED_TYPE_LABELS: Record<StationSeedType, string> = {
+  track: 'Track',
+  artist: 'Artist',
+  album: 'Album',
+  cluster: 'Cluster',
+  mood: 'Mood',
+  genre: 'Genre',
+  sub_genre: 'Sub-genre',
+  uncategorized: 'Uncategorized',
+};
+
+function range(label: string, min?: number, max?: number, digits = 0) {
+  if (min == null && max == null) return null;
+  const f = (n: number) => n.toFixed(digits);
+  if (min != null && max != null) return `${label} ${f(min)}–${f(max)}`;
+  return min != null ? `${label} ≥ ${f(min)}` : `${label} ≤ ${f(max!)}`;
+}
+
+/** One-line summary of a seed: "Electronic › Deep House · BPM 118–126 · energy 0.50–0.90". */
+export function describeStationSeed(seed: StationSeed | null): string {
+  if (!seed) return '';
+  const parts = [
+    seed.main_genre && (seed.sub_genre ? `${seed.main_genre} › ${seed.sub_genre}` : seed.main_genre),
+    range('BPM', seed.min_bpm, seed.max_bpm),
+    range('energy', seed.min_energy, seed.max_energy, 2),
+    range('valence', seed.min_valence, seed.max_valence, 2),
+  ];
+  return parts.filter(Boolean).join(' · ');
+}
