@@ -4,7 +4,6 @@ import { QueryProvider } from '@/lib/query-provider';
 import { PWA } from '@/components/PWA';
 import { AuthProvider } from '@/lib/auth';
 import { RequireAuth } from '@/components/RequireAuth';
-import { RootShell } from '@/components/RootShell';
 import { ThemeProvider } from '@/lib/theme';
 
 export const metadata: Metadata = {
@@ -20,7 +19,7 @@ export const metadata: Metadata = {
 export const viewport: Viewport = {
   width: 'device-width',
   initialScale: 1,
-  themeColor: '#1db954',
+  themeColor: '#0d1012',
 };
 
 export default function RootLayout({
@@ -35,7 +34,7 @@ export default function RootLayout({
           <QueryProvider>
             <AuthProvider>
               <RequireAuth>
-                <RootShell>{children}</RootShell>
+                {children}
               </RequireAuth>
             </AuthProvider>
           </QueryProvider>

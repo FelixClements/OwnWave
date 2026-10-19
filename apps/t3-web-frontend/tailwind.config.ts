@@ -8,18 +8,21 @@ const config: Config = {
   theme: {
     extend: {
       colors: {
-        spotify: {
-          black: 'var(--spotify-black)',
-          bg: 'var(--spotify-bg)',
-          card: 'var(--spotify-card)',
-          'card-hover': 'var(--spotify-card-hover)',
-          green: 'var(--spotify-green)',
-          'green-hover': 'var(--spotify-green-hover)',
-          text: 'var(--spotify-text)',
-          subdued: 'var(--spotify-subdued)',
-          elevated: 'var(--spotify-elevated)',
-          border: 'var(--spotify-border)',
-        },
+        bg: 'rgb(var(--bg) / <alpha-value>)',
+        surface: 'rgb(var(--surface) / <alpha-value>)',
+        'surface-2': 'rgb(var(--surface-2) / <alpha-value>)',
+        hover: 'rgb(var(--hover) / <alpha-value>)',
+        line: 'rgb(var(--line) / <alpha-value>)',
+        fg: 'rgb(var(--fg) / <alpha-value>)',
+        muted: 'rgb(var(--muted) / <alpha-value>)',
+        accent: 'rgb(var(--accent) / <alpha-value>)',
+        'accent-fg': 'rgb(var(--accent-fg) / <alpha-value>)',
+        valence: 'rgb(var(--valence) / <alpha-value>)',
+        danger: 'rgb(var(--danger) / <alpha-value>)',
+        ok: 'rgb(var(--ok) / <alpha-value>)',
+      },
+      fontFamily: {
+        sans: ['Inter', '-apple-system', '"Segoe UI"', 'system-ui', 'sans-serif'],
       },
     },
   },
