@@ -128,11 +128,14 @@ Stop the app consumers, then restore from a backup:
 
 ## 7. Updates
 
-Pull the latest code, then rebuild:
+CI publishes the `go` and `python` images to GHCR (`ghcr.io/felixclements/ownwave/{go,python}`) on every push to `main`, tagged `latest` and the commit SHA. The published python image includes the genre models. To update, pull the new images and recreate the containers:
 
 ```bash
-git pull
-docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build --remove-orphans
+git pull   # only needed when the compose files changed
+docker compose -f docker-compose.yml -f docker-compose.prod.yml pull
+docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --remove-orphans
 ```
+
+Database migrations are baked into the `go` image and run when it starts. To roll back, set `OWNWAVE_IMAGE_TAG` to an earlier commit SHA and run the same two commands. Migrations are not rolled back. To build from source instead, add `--build` to `up`.
 
 `--remove-orphans` removes containers of services that no longer exist. Upgrading from a release that used Redis and Celery removes the `web`, `redis` and `watcher` containers. Scans that were queued in Redis are not carried over; start a new scan from the admin page if one was in progress. The unused `redis_data` volume can then be deleted with `docker volume rm <project>_redis_data`.

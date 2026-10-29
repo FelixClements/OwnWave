@@ -28,6 +28,7 @@ WORKDIR /app
 
 COPY --from=builder /app/server .
 COPY --from=web /app/out ./web
+COPY database/migrations /migrations
 RUN chown ownwave:ownwave /app/server
 
 USER ownwave
