@@ -2,7 +2,7 @@ import { forwardRef } from 'react';
 import { Spinner } from './Icons';
 
 type Variant = 'primary' | 'secondary' | 'ghost' | 'danger';
-type Size = 'sm' | 'md';
+type Size = 'sm' | 'md' | 'lg';
 
 const VARIANTS: Record<Variant, string> = {
   primary: 'bg-accent text-accent-fg border-accent font-semibold hover:brightness-110',
@@ -14,6 +14,7 @@ const VARIANTS: Record<Variant, string> = {
 const SIZES: Record<Size, string> = {
   sm: 'h-6 px-2 text-xs gap-1',
   md: 'h-[30px] px-3 text-[12.5px] gap-1.5',
+  lg: 'h-9 px-4 text-[13px] gap-2',
 };
 
 /** Classes for a button-styled element; also used on Links. */

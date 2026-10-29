@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import { useAuth } from '@/lib/auth';
 import { Button } from '@/components/ui/Button';
 import { Field, Input } from '@/components/ui/Field';
-import { Panel } from '@/components/ui/Layout';
+import { AuthCard } from '@/components/auth/AuthCard';
 
 export default function LoginPage() {
   const { login, user } = useAuth();
@@ -36,32 +36,32 @@ export default function LoginPage() {
   };
 
   return (
-    <div className="max-w-sm">
-      <h1 className="text-xl font-bold mb-1">Sign in</h1>
-      <p className="text-muted mb-5">Your self-hosted radio, from your own lossless library.</p>
-      <Panel>
-        <form onSubmit={handleSubmit} className="flex flex-col gap-3">
-          <Field label="Username">
-            {(p) => <Input {...p} value={username} onChange={(e) => setUsername(e.target.value)} autoComplete="username" required autoFocus />}
-          </Field>
-          <Field label="Password" error={error || null}>
-            {(p) => (
-              <Input
-                {...p}
-                type="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                autoComplete="current-password"
-                required
-              />
-            )}
-          </Field>
-          <Button type="submit" variant="primary" loading={loading}>
-            Sign in
-          </Button>
-        </form>
-      </Panel>
-      <p className="mt-4 text-muted">New accounts require an invite from an admin.</p>
-    </div>
+    <AuthCard
+      title="Sign in"
+      subtitle="Your self-hosted radio, from your own lossless library."
+      footer="New accounts require an invite from an admin."
+    >
+      <form onSubmit={handleSubmit} className="flex flex-col gap-4">
+        <Field label="Username">
+          {(p) => <Input {...p} className="!h-9" value={username} onChange={(e) => setUsername(e.target.value)} autoComplete="username" required autoFocus />}
+        </Field>
+        <Field label="Password" error={error || null}>
+          {(p) => (
+            <Input
+              {...p}
+              className="!h-9"
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              autoComplete="current-password"
+              required
+            />
+          )}
+        </Field>
+        <Button type="submit" variant="primary" loading={loading} size="lg" className="mt-1">
+          Sign in
+        </Button>
+      </form>
+    </AuthCard>
   );
 }
