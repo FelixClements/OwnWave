@@ -19,7 +19,7 @@ export default function SimilarPage() {
   const [selected, setSelected] = useState(trackId ?? '');
   const [stationName, setStationName] = useState('');
 
-  const { data: tracks } = useQuery(keys.tracks(''), () => api.listTracks({ limit: 200 }));
+  const { data: tracks } = useQuery(keys.trackOptions, () => api.listTracks({ limit: 200 }));
   const { data: selectedTrack } = useQuery(['track', selected], () => api.getTrack(selected), {
     enabled: !!selected && !tracks?.some((t) => t.id === selected),
   });

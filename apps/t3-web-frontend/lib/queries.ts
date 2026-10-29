@@ -12,7 +12,10 @@ export const keys = {
   station: (id: string) => ['station', id] as const,
   queue: (id: string) => ['queue', id] as const,
   genres: ['genres'] as const,
-  tracks: (q: string) => ['tracks', q] as const,
+  // Paged (infinite) and plain track lists cache different shapes, so they
+  // need distinct keys; both stay under ['tracks'] for invalidation.
+  tracks: (q: string) => ['tracks', 'pages', q] as const,
+  trackOptions: ['tracks', 'options'] as const,
   albums: ['albums'] as const,
   artists: ['artists'] as const,
   similar: (id: string) => ['similar', id] as const,
