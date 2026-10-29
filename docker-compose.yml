@@ -1,5 +1,10 @@
+# go and python images are published to GHCR by CI on every push to main.
+# Deploy with `docker compose pull && docker compose up -d`; `--build` builds
+# them from source instead. OWNWAVE_IMAGE_TAG pins a commit SHA (rollback).
+
 # Shared by the python (API) and worker services (same image, same config).
 x-python: &python
+  image: ghcr.io/felixclements/ownwave/python:${OWNWAVE_IMAGE_TAG:-latest}
   build:
     context: ./services/python-analytics
     args:
@@ -62,6 +67,7 @@ services:
 
   # API under /api plus the static web UI at /.
   go:
+    image: ghcr.io/felixclements/ownwave/go:${OWNWAVE_IMAGE_TAG:-latest}
     build:
       context: .
       dockerfile: services/go-api-server/Dockerfile
@@ -79,7 +85,6 @@ services:
       GENRE_MIN_TRACKS_PER_STATION: ${GENRE_MIN_TRACKS_PER_STATION:-5}
     volumes:
       - ${MUSIC_PATH:-./music}:/music:ro
-      - ./database/migrations:/migrations:ro
     ports:
       - "${GO_HOST_PORT:-8080}:8080"
     healthcheck:

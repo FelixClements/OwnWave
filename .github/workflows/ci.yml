@@ -117,6 +117,16 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      # Python first: its genre model download (baked in so deploys only pull)
+      # is the step most likely to fail, and then neither :latest moves.
+      - name: Build and push Python image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./services/python-analytics
+          push: true
+          build-args: DOWNLOAD_GENRE_MODELS=true
+          tags: ${{ env.PYTHON_IMAGE }}:${{ github.sha }},${{ env.PYTHON_IMAGE }}:latest
+
       - name: Build and push Go image
         uses: docker/build-push-action@v5
         with:
@@ -124,10 +134,3 @@ jobs:
           file: ./services/go-api-server/Dockerfile
           push: true
           tags: ${{ env.GO_IMAGE }}:${{ github.sha }},${{ env.GO_IMAGE }}:latest
-
-      - name: Build and push Python image
-        uses: docker/build-push-action@v5
-        with:
-          context: ./services/python-analytics
-          push: true
-          tags: ${{ env.PYTHON_IMAGE }}:${{ github.sha }},${{ env.PYTHON_IMAGE }}:latest
