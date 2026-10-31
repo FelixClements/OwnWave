@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import type { Station } from '@/lib/api';
 import { useStation } from '@/lib/station';
-import { useFeedbackMutation, useSetupStatus } from '@/lib/queries';
+import { useFeedbackMutation, usePlaylists, useSetupStatus } from '@/lib/queries';
 import { describeStationSeed, parseStationSeed, SEED_TYPE_LABELS } from '@/lib/station-seed';
 import { StationArt } from '@/components/stations/StationArt';
 import { TrackTable } from '@/components/tracks/TrackTable';
@@ -95,6 +95,8 @@ function StationView({ station }: { station: Station }) {
   const { queue, nowPlaying, isPlaying, setIsPlaying, playingStation, setPlayingStation } = useStation();
   const feedback = useFeedbackMutation(station.id);
 
+  const { data: playlists = [] } = usePlaylists();
+  const playlistNames = Object.fromEntries(playlists.map((p) => [p.id, p.name]));
   const seed = parseStationSeed(station.seed_features as Parameters<typeof parseStationSeed>[0]);
   const seedType = seed?.type ?? seed?.seed_type;
   const isThisPlaying = playingStation === station.id;
@@ -119,7 +121,7 @@ function StationView({ station }: { station: Station }) {
           )}
           <h1 className="text-xl font-bold truncate">{station.name}</h1>
           <div className="text-muted truncate">
-            {[describeStationSeed(seed), `${queue.length} queued`].filter(Boolean).join(' · ')}
+            {[describeStationSeed(seed, playlistNames), `${queue.length} queued`].filter(Boolean).join(' · ')}
           </div>
         </div>
         <Button variant="primary" onClick={togglePlay} disabled={queue.length === 0}>

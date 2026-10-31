@@ -18,14 +18,11 @@ func (a *Args) Add(v any) string {
 	return fmt.Sprintf("$%d", len(*a))
 }
 
-// Where returns an SQL predicate restricting `tracks t` joined with
+// Where returns an SQL predicate restricting `tracks t` left-joined with
 // `audio_features af` to the seed's pool. Missing numeric features count as
-// 0, as in the original Python filter. Every stored genre row counts: the
-// analytics service applies the confidence threshold before storing.
+// 0, as in the original Python filter.
 func (s Seed) Where(args *Args) string {
 	var conds []string
-	// trackGenre is the body of an EXISTS over the track's genres.
-	const trackGenre = "SELECT 1 FROM track_genres g WHERE g.track_id = t.id"
 
 	switch s.Type {
 	case "track":
@@ -42,13 +39,11 @@ func (s Seed) Where(args *Args) string {
 		conds = append(conds, "t.album_id = "+args.Add(s.AlbumID)+"::uuid")
 	case "cluster":
 		conds = append(conds, "EXISTS (SELECT 1 FROM track_clusters c WHERE c.track_id = t.id AND c.cluster_id = "+args.Add(*s.ClusterID)+")")
-	case "genre":
-		conds = append(conds, "EXISTS ("+trackGenre+" AND g.main_genre = "+args.Add(s.MainGenre)+")")
-	case "sub_genre":
-		main := args.Add(s.MainGenre)
-		conds = append(conds, "EXISTS ("+trackGenre+" AND g.main_genre = "+main+" AND g.sub_genre = "+args.Add(s.SubGenre)+")")
-	case "uncategorized":
-		conds = append(conds, "NOT EXISTS ("+trackGenre+")")
+	case "playlists":
+		conds = append(conds, `t.id IN (
+			SELECT m.track_id FROM playlist_items pi
+			JOIN spotify_track_matches m ON m.spotify_track_id = pi.spotify_track_id
+			WHERE pi.playlist_id = ANY(`+args.Add(s.PlaylistIDs)+`::uuid[]))`)
 	}
 
 	numeric := []struct {

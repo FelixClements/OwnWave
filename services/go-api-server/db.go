@@ -2,12 +2,10 @@ package main
 
 import (
 	"context"
-	"errors"
 	"math"
 	"strings"
 	"time"
 
-	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"ownwave/api/internal/playback"
@@ -27,6 +25,8 @@ type Station struct {
 	ID           string  `json:"id"`
 	Name         string  `json:"name"`
 	SeedFeatures *string `json:"seed_features,omitempty"`
+	// Shared stations have no owner: every user plays them, admins edit them.
+	Shared bool `json:"shared"`
 }
 
 func (db *DB) GetTrackByID(ctx context.Context, id string) (Track, error) {
@@ -117,12 +117,13 @@ func (db *DB) ListArtists(ctx context.Context) ([]Artist, error) {
 	return artists, rows.Err()
 }
 
+// ListStations returns the user's own stations and the shared ones.
 func (db *DB) ListStations(ctx context.Context, userID string) ([]Station, error) {
 	rows, err := db.pool.Query(ctx, `
-		SELECT id::text, name, seed_features::text
+		SELECT id::text, name, seed_features::text, user_id IS NULL
 		FROM stations
-		WHERE user_id = $1::uuid
-		ORDER BY created_at DESC
+		WHERE user_id = $1::uuid OR user_id IS NULL
+		ORDER BY user_id IS NOT NULL, lower(name)
 	`, userID)
 	if err != nil {
 		return nil, err
@@ -132,7 +133,7 @@ func (db *DB) ListStations(ctx context.Context, userID string) ([]Station, error
 	stations := make([]Station, 0)
 	for rows.Next() {
 		var s Station
-		if err := rows.Scan(&s.ID, &s.Name, &s.SeedFeatures); err != nil {
+		if err := rows.Scan(&s.ID, &s.Name, &s.SeedFeatures, &s.Shared); err != nil {
 			return nil, err
 		}
 		stations = append(stations, s)
@@ -140,51 +141,36 @@ func (db *DB) ListStations(ctx context.Context, userID string) ([]Station, error
 	return stations, rows.Err()
 }
 
+// GetStationByID returns the station if it is the user's own or shared.
 func (db *DB) GetStationByID(ctx context.Context, userID, stationID string) (Station, error) {
 	var s Station
 	err := db.pool.QueryRow(ctx, `
-		SELECT id::text, name, seed_features::text
+		SELECT id::text, name, seed_features::text, user_id IS NULL
 		FROM stations
-		WHERE id = $1::uuid AND user_id = $2::uuid
-	`, stationID, userID).Scan(&s.ID, &s.Name, &s.SeedFeatures)
+		WHERE id = $1::uuid AND (user_id = $2::uuid OR user_id IS NULL)
+	`, stationID, userID).Scan(&s.ID, &s.Name, &s.SeedFeatures, &s.Shared)
 	return s, err
 }
 
-// CreateStation stores a station; seed is the stations.Seed JSON (nil = whole library).
-func (db *DB) CreateStation(ctx context.Context, userID, name string, seed []byte) (string, error) {
+// CreateStation stores a station owned by ownerID, or a shared one when
+// ownerID is empty; seed is the stations.Seed JSON (nil = whole library).
+func (db *DB) CreateStation(ctx context.Context, ownerID, name string, seed []byte) (string, error) {
 	var id string
 	err := db.pool.QueryRow(ctx, `
 		INSERT INTO stations (user_id, name, seed_features)
-		VALUES ($1::uuid, $2, $3::jsonb)
+		VALUES (NULLIF($1, '')::uuid, $2, $3::jsonb)
 		RETURNING id::text
-	`, userID, name, seed).Scan(&id)
+	`, ownerID, name, seed).Scan(&id)
 	return id, err
 }
 
-// UpdateStation renames a station and replaces its seed.
-func (db *DB) UpdateStation(ctx context.Context, userID, stationID, name string, seed []byte) error {
+// UpdateStation renames a station and replaces its seed. Callers check
+// that the user may change it.
+func (db *DB) UpdateStation(ctx context.Context, stationID, name string, seed []byte) error {
 	_, err := db.pool.Exec(ctx, `
-		UPDATE stations SET name = $3, seed_features = $4::jsonb
-		WHERE id = $1::uuid AND user_id = $2::uuid
-	`, stationID, userID, name, seed)
+		UPDATE stations SET name = $2, seed_features = $3::jsonb WHERE id = $1::uuid
+	`, stationID, name, seed)
 	return err
-}
-
-// EnsureStation returns the user's station with this name, creating it with
-// seed when missing.
-func (db *DB) EnsureStation(ctx context.Context, userID, name string, seed []byte) (id string, created bool, err error) {
-	err = db.pool.QueryRow(ctx, `
-		SELECT id::text FROM stations WHERE user_id = $1::uuid AND name = $2
-		ORDER BY created_at LIMIT 1
-	`, userID, name).Scan(&id)
-	if err == nil {
-		return id, false, nil
-	}
-	if !errors.Is(err, pgx.ErrNoRows) {
-		return "", false, err
-	}
-	id, err = db.CreateStation(ctx, userID, name, seed)
-	return id, err == nil, err
 }
 
 // PlayedCount is the number of distinct tracks the user has played on a station.
@@ -195,36 +181,6 @@ func (db *DB) PlayedCount(ctx context.Context, userID, stationID string) (int, e
 		WHERE user_id = $1::uuid AND station_id = $2::uuid
 	`, userID, stationID).Scan(&n)
 	return n, err
-}
-
-type GenreCount struct {
-	MainGenre  string
-	SubGenre   string
-	TrackCount int
-}
-
-// GenreCounts returns per-main-genre (SubGenre empty) and per-sub-genre track
-// counts.
-func (db *DB) GenreCounts(ctx context.Context) ([]GenreCount, error) {
-	rows, err := db.pool.Query(ctx, `
-		SELECT main_genre, COALESCE(sub_genre, ''), COUNT(DISTINCT track_id)
-		FROM track_genres
-		GROUP BY GROUPING SETS ((main_genre), (main_genre, sub_genre))
-		ORDER BY main_genre, sub_genre NULLS FIRST
-	`)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	out := make([]GenreCount, 0)
-	for rows.Next() {
-		var g GenreCount
-		if err := rows.Scan(&g.MainGenre, &g.SubGenre, &g.TrackCount); err != nil {
-			return nil, err
-		}
-		out = append(out, g)
-	}
-	return out, rows.Err()
 }
 
 type SimilarTrack struct {
@@ -269,22 +225,10 @@ func (db *DB) SimilarTracks(ctx context.Context, trackID string, limit int) ([]S
 	return out, rows.Err()
 }
 
-func (db *DB) DeleteStation(ctx context.Context, userID, stationID string) error {
-	tx, err := db.pool.Begin(ctx)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback(ctx)
-
-	tag, err := tx.Exec(ctx, `DELETE FROM stations WHERE id = $1 AND user_id = $2::uuid`, stationID, userID)
-	if err != nil {
-		return err
-	}
-	if tag.RowsAffected() == 0 {
-		return pgx.ErrNoRows
-	}
-
-	return tx.Commit(ctx)
+// DeleteStation deletes a station. Callers check that the user may.
+func (db *DB) DeleteStation(ctx context.Context, stationID string) error {
+	_, err := db.pool.Exec(ctx, `DELETE FROM stations WHERE id = $1::uuid`, stationID)
+	return err
 }
 
 func (db *DB) UpdateUserProfile(ctx context.Context, userID, email, fullName string) error {

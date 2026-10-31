@@ -78,6 +78,26 @@ func decodeStationRequest(w http.ResponseWriter, r *http.Request) (stations.Requ
 	return req, true
 }
 
+// checkSeedPlaylists writes 400 unless every playlist of a playlists seed
+// exists.
+func (h *Handler) checkSeedPlaylists(w http.ResponseWriter, r *http.Request, seed stations.Seed) bool {
+	if !seed.Shared() {
+		return true
+	}
+	n, err := h.playlists.CountExisting(r.Context(), seed.PlaylistIDs)
+	if err != nil {
+		writeInternalError(w, r, "check station playlists", err)
+		return false
+	}
+	if n != len(seed.PlaylistIDs) {
+		http.Error(w, "unknown playlist", http.StatusBadRequest)
+		return false
+	}
+	return true
+}
+
+// CreateStation creates a personal station, or a shared playlist station
+// (admins only).
 func (h *Handler) CreateStation(w http.ResponseWriter, r *http.Request) {
 	user, ok := h.currentUser(w, r)
 	if !ok {
@@ -96,17 +116,38 @@ func (h *Handler) CreateStation(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
+	owner := user.ID
+	if seed.Shared() {
+		if !user.IsAdmin {
+			http.Error(w, "only admins create playlist stations", http.StatusForbidden)
+			return
+		}
+		owner = ""
+	}
+	if !h.checkSeedPlaylists(w, r, seed) {
+		return
+	}
 	raw, err := seed.JSON()
 	if err != nil {
 		writeInternalError(w, r, "encode station seed", err)
 		return
 	}
-	id, err := h.db.CreateStation(r.Context(), user.ID, req.Name, raw)
+	id, err := h.db.CreateStation(r.Context(), owner, req.Name, raw)
 	if err != nil {
 		writeInternalError(w, r, "create station", err)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"station_id": id})
+}
+
+// canChange writes 403 when the user may not change the station: shared
+// stations belong to the admins.
+func canChange(w http.ResponseWriter, user auth.User, station Station) bool {
+	if station.Shared && !user.IsAdmin {
+		http.Error(w, "only admins change shared stations", http.StatusForbidden)
+		return false
+	}
+	return true
 }
 
 func (h *Handler) UpdateStation(w http.ResponseWriter, r *http.Request) {
@@ -115,7 +156,7 @@ func (h *Handler) UpdateStation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	station, seed, ok := h.loadStation(w, r, user)
-	if !ok {
+	if !ok || !canChange(w, user, station) {
 		return
 	}
 	req, ok := decodeStationRequest(w, r)
@@ -134,13 +175,22 @@ func (h *Handler) UpdateStation(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	// Ownership follows the seed type, so a station cannot switch between
+	// personal and shared.
+	if seed.Shared() != station.Shared {
+		http.Error(w, "playlist stations are shared: create a new station instead", http.StatusBadRequest)
+		return
+	}
+	if !h.checkSeedPlaylists(w, r, seed) {
+		return
+	}
 	raw, err := seed.JSON()
 	if err != nil {
 		writeInternalError(w, r, "encode station seed", err)
 		return
 	}
 
-	if err := h.db.UpdateStation(r.Context(), user.ID, station.ID, name, raw); err != nil {
+	if err := h.db.UpdateStation(r.Context(), station.ID, name, raw); err != nil {
 		writeInternalError(w, r, "update station", err)
 		return
 	}
@@ -161,15 +211,11 @@ func (h *Handler) DeleteStation(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	id, ok := parseUUIDParam(w, r, "id")
-	if !ok {
+	station, _, ok := h.loadStation(w, r, user)
+	if !ok || !canChange(w, user, station) {
 		return
 	}
-	if err := h.db.DeleteStation(r.Context(), user.ID, id); err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			http.Error(w, "station not found", http.StatusNotFound)
-			return
-		}
+	if err := h.db.DeleteStation(r.Context(), station.ID); err != nil {
 		writeInternalError(w, r, "delete station", err)
 		return
 	}
@@ -191,14 +237,4 @@ func (h *Handler) GetQueue(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]interface{}{"queue": queue})
-}
-
-// ensureGenreStation creates the user's station for a genre seed unless one
-// with that name already exists.
-func (h *Handler) ensureGenreStation(r *http.Request, userID, name string, seed stations.Seed) (string, bool, error) {
-	raw, err := seed.JSON()
-	if err != nil {
-		return "", false, err
-	}
-	return h.db.EnsureStation(r.Context(), userID, name, raw)
 }

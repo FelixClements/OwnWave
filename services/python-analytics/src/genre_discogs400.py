@@ -93,7 +93,7 @@ class Discogs400GenreSource:
             labels = self._labels or [f"class_{i}" for i in range(len(avg))]
             predictions: List[GenrePrediction] = []
             # Keep every label at or above the threshold, and always the best
-            # one, so each analysed track lands in some genre station.
+            # one, so each analysed track gets at least one genre.
             for rank, idx in enumerate(np.argsort(avg)[::-1][:10]):
                 if idx >= len(labels):
                     continue

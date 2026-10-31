@@ -10,11 +10,8 @@ import { ScanProgress } from '@/components/scan/ScanProgress';
 import { Button } from '@/components/ui/Button';
 import { Field, Input } from '@/components/ui/Field';
 import { Panel } from '@/components/ui/Layout';
-import { titleCase } from '@/lib/format';
 
-const MIN_TRACKS_PER_STATION = 5;
-const GENRES_PER_PAGE = 10;
-const STEPS = ['Account', 'Scan', 'Review', 'Stations', 'Done'];
+const STEPS = ['Account', 'Scan', 'Review', 'Done'];
 
 function Steps({ step }: { step: number }) {
   return (
@@ -57,9 +54,6 @@ export default function SetupPage() {
   const [password, setPassword] = useState('');
   const [accountError, setAccountError] = useState('');
   const [scanJobId, setScanJobId] = useState<string | null>(null);
-  const [selectedGenres, setSelectedGenres] = useState<Set<string>>(new Set());
-  const [createStationError, setCreateStationError] = useState('');
-  const [genrePage, setGenrePage] = useState(0);
 
   const qc = useQueryClient();
   const setupStatus = useSetupStatus();
@@ -68,17 +62,9 @@ export default function SetupPage() {
   const setupSummary = useQuery(keys.setupSummary, () => api.setupSummary(), { enabled: step === 3 });
   const rescan = useMutation(() => api.triggerScan());
   const scanStatus = useScanStatus(scanJobId);
-  const setupStations = useMutation((genres: string[]) => api.setupStations(genres), {
-    onSuccess: () => {
-      void qc.invalidateQueries(keys.setupSummary);
-      void qc.invalidateQueries(keys.stations);
-      setStep(5);
-    },
-    onError: (err: Error) => setCreateStationError(err.message),
-  });
   const setupComplete = useMutation(() => api.setupComplete(), {
     onSuccess: () => {
-      window.location.href = '/';
+      window.location.href = '/playlists';
     },
   });
 
@@ -115,18 +101,6 @@ export default function SetupPage() {
     }
   }, [scanStatus.data, qc]);
 
-  useEffect(() => {
-    if (setupSummary.data && step === 3) {
-      const preselected = new Set<string>();
-      for (const g of setupSummary.data.main_genres) {
-        if (g.track_count >= MIN_TRACKS_PER_STATION) {
-          preselected.add(g.main_genre);
-        }
-      }
-      setSelectedGenres(preselected);
-    }
-  }, [setupSummary.data, step]);
-
   const handleCreateAccount = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!username.trim() || !password) return;
@@ -152,34 +126,11 @@ export default function SetupPage() {
     }
   };
 
-  const toggleGenre = (main: string) => {
-    setSelectedGenres((prev) => {
-      const next = new Set(prev);
-      if (next.has(main)) next.delete(main);
-      else next.add(main);
-      return next;
-    });
-  };
-
-  const handleCreateStations = async () => {
-    if (selectedGenres.size === 0) return;
-    setCreateStationError('');
-    setupStations.mutate(Array.from(selectedGenres));
-  };
-
   const handleComplete = async () => {
     await setupComplete.mutateAsync();
   };
 
   const failedPaths = scanStatus.data?.stats.failed_paths ?? [];
-
-  const mainGenres = setupSummary.data?.main_genres ?? [];
-  const genrePageCount = Math.max(1, Math.ceil(mainGenres.length / GENRES_PER_PAGE));
-  const currentGenrePage = Math.min(genrePage, genrePageCount - 1);
-  const pageGenres = mainGenres.slice(
-    currentGenrePage * GENRES_PER_PAGE,
-    (currentGenrePage + 1) * GENRES_PER_PAGE,
-  );
 
   if (setupStatus.isLoading) {
     return <p className="text-muted">Loading…</p>;
@@ -249,9 +200,7 @@ export default function SetupPage() {
         <Panel title="What we found">
           <dl className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-3">
             <Stat value={setupSummary.data.total_tracks} label="Tracks" />
-            <Stat value={setupSummary.data.main_genres.length} label="Main genres" />
-            <Stat value={setupSummary.data.sub_genres.length} label="Sub-genres" />
-            <Stat value={setupSummary.data.uncovered} label="Not in a station" />
+            <Stat value={failedPaths.length} label="Failed files" />
           </dl>
           {failedPaths.length > 0 && (
             <details className="mb-3">
@@ -273,73 +222,14 @@ export default function SetupPage() {
         </Panel>
       )}
 
-      {step === 4 && setupSummary.data && (
-        <Panel title="Create main-genre stations">
-          <p className="text-muted mb-3">
-            Select the main genres you want as stations. Genres with at least {MIN_TRACKS_PER_STATION} tracks are
-            pre-selected.
-          </p>
-          <fieldset>
-            <legend className="sr-only">Main genres</legend>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
-              {pageGenres.map((g) => (
-                <label
-                  key={g.main_genre}
-                  className="flex items-center gap-2.5 px-2.5 py-2 rounded-md border border-line bg-surface-2 cursor-pointer hover:bg-hover"
-                >
-                  <input
-                    type="checkbox"
-                    checked={selectedGenres.has(g.main_genre)}
-                    onChange={() => toggleGenre(g.main_genre)}
-                    className="w-4 h-4 accent-accent"
-                  />
-                  <span className="flex-1 min-w-0 truncate font-medium">{titleCase(g.main_genre)}</span>
-                  <span className="text-muted tabular-nums text-[11.5px]">{g.track_count} tracks</span>
-                </label>
-              ))}
-            </div>
-          </fieldset>
-          {genrePageCount > 1 && (
-            <div className="flex items-center justify-between gap-3 mt-3">
-              <Button size="sm" onClick={() => setGenrePage(currentGenrePage - 1)} disabled={currentGenrePage === 0}>
-                Prev
-              </Button>
-              <span className="text-muted tabular-nums" aria-live="polite">
-                Page {currentGenrePage + 1} of {genrePageCount} · {selectedGenres.size} selected
-              </span>
-              <Button
-                size="sm"
-                onClick={() => setGenrePage(currentGenrePage + 1)}
-                disabled={currentGenrePage >= genrePageCount - 1}
-              >
-                Next
-              </Button>
-            </div>
-          )}
-          {createStationError && (
-            <p role="alert" className="text-danger mt-3">
-              {createStationError}
-            </p>
-          )}
-          <div className="flex gap-2 mt-4">
-            <Button onClick={() => setStep(3)}>Back</Button>
-            <Button
-              variant="primary"
-              onClick={handleCreateStations}
-              loading={setupStations.isLoading}
-              disabled={selectedGenres.size === 0}
-            >
-              Create stations
-            </Button>
-          </div>
-        </Panel>
-      )}
-
-      {step === 5 && (
+      {step === 4 && (
         <Panel title="Setup complete">
-          <p className="text-muted mb-3">Your stations are ready. They update automatically as your library changes.</p>
+          <p className="text-muted mb-3">
+            Stations are built from Spotify playlists. Add playlists next, then group them into stations on the
+            Stations page.
+          </p>
           <Button variant="primary" onClick={handleComplete} loading={setupComplete.isLoading}>
-            Go to stations
+            Add playlists
           </Button>
         </Panel>
       )}

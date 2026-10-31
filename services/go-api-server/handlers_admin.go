@@ -124,38 +124,3 @@ func (h *Handler) AdminRebuildGenres(w http.ResponseWriter, r *http.Request) {
 	resp, err := h.analytics.RebuildGenres(r.Context())
 	proxyAnalytics(w, r, resp, err)
 }
-
-// AdminRebuildGenreStations creates any missing main- and sub-genre stations
-// (with at least minTracksPerGenreStation tracks) for the calling admin.
-func (h *Handler) AdminRebuildGenreStations(w http.ResponseWriter, r *http.Request) {
-	user, ok := h.currentUser(w, r)
-	if !ok {
-		return
-	}
-	counts, err := h.db.GenreCounts(r.Context())
-	if err != nil {
-		writeInternalError(w, r, "genre counts", err)
-		return
-	}
-	created := 0
-	for _, g := range counts {
-		if g.TrackCount < h.minTracksPerGenreStation || g.SubGenre == g.MainGenre {
-			continue
-		}
-		name := stations.TitleCase(g.MainGenre)
-		seed := stations.Seed{Type: "genre", MainGenre: g.MainGenre}
-		if g.SubGenre != "" {
-			name += " / " + stations.TitleCase(g.SubGenre)
-			seed = stations.Seed{Type: "sub_genre", MainGenre: g.MainGenre, SubGenre: g.SubGenre}
-		}
-		_, isNew, err := h.ensureGenreStation(r, user.ID, name, seed)
-		if err != nil {
-			writeInternalError(w, r, "create genre station", err)
-			return
-		}
-		if isNew {
-			created++
-		}
-	}
-	writeJSON(w, http.StatusOK, map[string]interface{}{"status": "ok", "created": created})
-}

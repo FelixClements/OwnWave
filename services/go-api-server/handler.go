@@ -2,36 +2,38 @@ package main
 
 import (
 	"net/http"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"ownwave/api/internal/analytics"
 	"ownwave/api/internal/auth"
 	"ownwave/api/internal/playback"
+	"ownwave/api/internal/playlists"
+	"ownwave/api/internal/spotify"
 	"ownwave/api/internal/streaming"
 )
 
 type Handler struct {
-	db                       *DB
-	auth                     *auth.Service
-	playback                 *playback.Service
-	stream                   *streaming.Server
-	coverCache               *streaming.CoverCache
-	analytics                analytics.Client
-	musicDir                 string
-	ffmpegPath               string
-	recentHours              int
-	minTracksPerGenreStation int
-	cookieSecure             bool
+	db           *DB
+	auth         *auth.Service
+	playback     *playback.Service
+	playlists    *playlists.Service
+	stream       *streaming.Server
+	coverCache   *streaming.CoverCache
+	analytics    analytics.Client
+	musicDir     string
+	ffmpegPath   string
+	recentHours  int
+	cookieSecure bool
 }
 
 // Config holds the environment-derived settings for NewHandler.
 type Config struct {
-	MusicDir                 string
-	FFmpegPath               string
-	PythonURL                string
-	RecentHours              int
-	MinTracksPerGenreStation int
+	MusicDir    string
+	FFmpegPath  string
+	PythonURL   string
+	RecentHours int
 }
 
 func NewHandler(pool *pgxpool.Pool, cfg Config) *Handler {
@@ -39,17 +41,17 @@ func NewHandler(pool *pgxpool.Pool, cfg Config) *Handler {
 		cfg.RecentHours = 24
 	}
 	return &Handler{
-		db:                       NewDB(pool),
-		auth:                     auth.NewService(pool),
-		playback:                 playback.NewService(pool),
-		stream:                   streaming.New(streaming.Config{MusicDir: cfg.MusicDir, FFmpegPath: cfg.FFmpegPath}),
-		coverCache:               streaming.NewCoverCache(500, 4),
-		analytics:                analytics.NewHTTPClient(cfg.PythonURL),
-		musicDir:                 cfg.MusicDir,
-		ffmpegPath:               cfg.FFmpegPath,
-		recentHours:              cfg.RecentHours,
-		minTracksPerGenreStation: cfg.MinTracksPerGenreStation,
-		cookieSecure:             auth.CookieSecure(),
+		db:           NewDB(pool),
+		auth:         auth.NewService(pool),
+		playback:     playback.NewService(pool),
+		playlists:    playlists.NewService(pool, spotify.Client{HTTP: &http.Client{Timeout: 20 * time.Second}}),
+		stream:       streaming.New(streaming.Config{MusicDir: cfg.MusicDir, FFmpegPath: cfg.FFmpegPath}),
+		coverCache:   streaming.NewCoverCache(500, 4),
+		analytics:    analytics.NewHTTPClient(cfg.PythonURL),
+		musicDir:     cfg.MusicDir,
+		ffmpegPath:   cfg.FFmpegPath,
+		recentHours:  cfg.RecentHours,
+		cookieSecure: auth.CookieSecure(),
 	}
 }
 

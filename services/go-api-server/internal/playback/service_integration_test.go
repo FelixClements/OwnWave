@@ -52,7 +52,6 @@ func (f *fixture) newUser() string {
 type track struct {
 	title, artist, album string
 	bpm, energy, valence float64
-	genres               map[string]float64 // "main/sub" -> confidence
 	cluster              *int
 	vector               string // pgvector literal, e.g. "[1,0,...]"
 }
@@ -80,24 +79,22 @@ func (f *fixture) addTrack(tr track) string {
 	f.exec(`INSERT INTO audio_features (track_id, bpm, key, energy, valence, loudness, feature_vector)
 		VALUES ($1::uuid, $2, 'C', $3, $4, -10, $5::vector)`, id, tr.bpm, tr.energy, tr.valence, vector)
 
-	for genre, conf := range tr.genres {
-		main, sub := splitGenre(genre)
-		f.exec(`INSERT INTO track_genres (track_id, main_genre, sub_genre, confidence, source)
-			VALUES ($1::uuid, $2, $3, $4, 'test')`, id, main, sub, conf)
-	}
 	if tr.cluster != nil {
 		f.exec(`INSERT INTO track_clusters (track_id, cluster_id) VALUES ($1::uuid, $2)`, id, *tr.cluster)
 	}
 	return id
 }
 
-func splitGenre(g string) (string, string) {
-	for i := range g {
-		if g[i] == '/' {
-			return g[:i], g[i+1:]
-		}
+// playlist stores a playlist whose items map Spotify track ids to local
+// track ids ("" = no local file).
+func (f *fixture) playlist(name string, items map[string]string) string {
+	id := f.scalar(`INSERT INTO playlists (spotify_id, name) VALUES ($1, $2) RETURNING id::text`, uuid.NewString(), name)
+	for spotifyID, trackID := range items {
+		f.exec(`INSERT INTO playlist_items (playlist_id, spotify_track_id, title) VALUES ($1::uuid, $2, $2)`, id, spotifyID)
+		f.exec(`INSERT INTO spotify_track_matches (spotify_track_id, track_id, method) VALUES ($1, NULLIF($2, '')::uuid, 'exact')
+			ON CONFLICT (spotify_track_id) DO NOTHING`, spotifyID, trackID)
 	}
-	return g, g
+	return id
 }
 
 func (f *fixture) station(seed stations.Seed) string {
@@ -139,15 +136,13 @@ func ptr[T any](v T) *T { return &v }
 func TestBuildQueue_SeedTypes(t *testing.T) {
 	f := newFixture(t)
 	cluster := 7
-	rock := f.addTrack(track{title: "Rock", artist: "Rocker", album: "Loud", bpm: 140, energy: 0.9, valence: 0.6,
-		genres: map[string]float64{"rock/punk": 0.9}, cluster: &cluster})
-	// A low-confidence genre still counts: the analytics service decides
-	// what is confident enough to store.
-	rockWeak := f.addTrack(track{title: "Maybe Rock", bpm: 100, energy: 0.5, valence: 0.5,
-		genres: map[string]float64{"rock/indie": 0.1}})
-	jazz := f.addTrack(track{title: "Jazz", artist: "Cat", bpm: 90, energy: 0.2, valence: 0.3,
-		genres: map[string]float64{"jazz/bebop": 0.8}})
+	rock := f.addTrack(track{title: "Rock", artist: "Rocker", album: "Loud", bpm: 140, energy: 0.9, valence: 0.6, cluster: &cluster})
+	rockWeak := f.addTrack(track{title: "Maybe Rock", bpm: 100, energy: 0.5, valence: 0.5})
+	jazz := f.addTrack(track{title: "Jazz", artist: "Cat", bpm: 90, energy: 0.2, valence: 0.3})
 	plain := f.addTrack(track{title: "Plain", artist: "Rocker", album: "Other", bpm: 120, energy: 0.6, valence: 0.9})
+	// Two playlists sharing a track; one track has no local file.
+	rockList := f.playlist("rock", map[string]string{"sp-rock": rock, "sp-weak": rockWeak, "sp-missing": ""})
+	moreRock := f.playlist("more", map[string]string{"sp-rock": rock, "sp-jazz": jazz})
 
 	artistID := f.scalar(`SELECT artist_id::text FROM tracks WHERE id = $1::uuid`, rock)
 	albumID := f.scalar(`SELECT album_id::text FROM tracks WHERE id = $1::uuid`, rock)
@@ -157,14 +152,13 @@ func TestBuildQueue_SeedTypes(t *testing.T) {
 		want []string
 	}{
 		"whole library":        {stations.Seed{}, sorted(rock, rockWeak, jazz, plain)},
-		"genre":                {stations.Seed{Type: "genre", MainGenre: "rock"}, sorted(rock, rockWeak)},
-		"sub genre":            {stations.Seed{Type: "sub_genre", MainGenre: "jazz", SubGenre: "bebop"}, sorted(jazz)},
-		"uncategorized":        {stations.Seed{Type: "uncategorized"}, sorted(plain)},
+		"playlist":             {stations.Seed{Type: "playlists", PlaylistIDs: []string{rockList}}, sorted(rock, rockWeak)},
+		"playlists union":      {stations.Seed{Type: "playlists", PlaylistIDs: []string{rockList, moreRock}}, sorted(rock, rockWeak, jazz)},
 		"artist":               {stations.Seed{Type: "artist", ArtistID: artistID}, sorted(rock, plain)},
 		"album":                {stations.Seed{Type: "album", AlbumID: albumID}, sorted(rock)},
 		"cluster":              {stations.Seed{Type: "cluster", ClusterID: &cluster}, sorted(rock)},
 		"mood range":           {stations.Seed{Type: "mood", MinEnergy: ptr(0.4), MaxValence: ptr(0.7)}, sorted(rock, rockWeak)},
-		"bpm range with genre": {stations.Seed{Type: "genre", MainGenre: "rock", MaxBPM: ptr(120.0)}, sorted(rockWeak)},
+		"bpm range with lists": {stations.Seed{Type: "playlists", PlaylistIDs: []string{rockList}, MaxBPM: ptr(120.0)}, sorted(rockWeak)},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -269,4 +263,17 @@ func TestRecord_WritesHistoryAndChecksStationOwner(t *testing.T) {
 	other := f.newUser()
 	require.Error(t, svc.Record(f.ctx, other, trackID, station))
 	assert.Equal(t, "2", f.scalar(`SELECT COUNT(*)::text FROM listening_history WHERE track_id = $1::uuid`, trackID))
+
+	shared := f.scalar(`INSERT INTO stations (name, seed_features) VALUES ('Shared', NULL) RETURNING id::text`)
+	require.NoError(t, svc.Record(f.ctx, other, trackID, shared))
+}
+
+func TestBuildQueue_IncludesUnanalysedTracks(t *testing.T) {
+	f := newFixture(t)
+	analysed := f.addTrack(track{title: "Analysed"})
+	unanalysed := f.addTrack(track{title: "Not yet"})
+	f.exec(`DELETE FROM audio_features WHERE track_id = $1::uuid`, unanalysed)
+
+	got := f.queueIDs(f.station(stations.Seed{}), stations.Seed{})
+	assert.Equal(t, sorted(analysed, unanalysed), sorted(got...))
 }

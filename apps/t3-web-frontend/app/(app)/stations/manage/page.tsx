@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { api, type StationRequest } from '@/lib/api';
+import { useAuth } from '@/lib/auth';
 import {
   describeStationSeed,
   emptyStationFilterForm,
@@ -10,8 +11,9 @@ import {
   parseStationSeed,
   SEED_TYPE_LABELS,
   seedToFilterForm,
+  STATION_SEED_TYPES,
 } from '@/lib/station-seed';
-import { keys, useGenres, useQueue, useStationQuery, useStations } from '@/lib/queries';
+import { keys, usePlaylists, useQueue, useStationQuery, useStations } from '@/lib/queries';
 import { useStation } from '@/lib/station';
 import { StationArt } from '@/components/stations/StationArt';
 import { StationForm } from '@/components/stations/StationForm';
@@ -22,11 +24,18 @@ import { EmptyRow, Table, Td, Th } from '@/components/ui/Table';
 
 type Editor = { mode: 'create' } | { mode: 'edit'; id: string } | null;
 
+// Playlist stations are shared, so only admins create them and a station
+// never switches between personal and shared.
+const PERSONAL_SEED_TYPES = STATION_SEED_TYPES.filter((t) => t !== 'playlists');
+
 export default function ManageStationsPage() {
   const qc = useQueryClient();
   const { selectedStation, setSelectedStation, playingStation, setIsPlaying } = useStation();
+  const { user } = useAuth();
+  const isAdmin = !!user?.is_admin;
   const { data: stations } = useStations();
-  const { data: genres = [] } = useGenres();
+  const { data: playlists = [] } = usePlaylists();
+  const playlistNames = Object.fromEntries(playlists.map((p) => [p.id, p.name]));
   const [editor, setEditor] = useState<Editor>(null);
   const [previewId, setPreviewId] = useState<string | null>(null);
   const [notice, setNotice] = useState<NoticeValue>(null);
@@ -79,7 +88,7 @@ export default function ManageStationsPage() {
     <>
       <PageHeader
         title="Stations"
-        subtitle="A station holds every library track matching its seed and filters."
+        subtitle="A station holds every library track matching its seed and filters. Playlist stations are shared with everyone."
         actions={
           <Button
             variant="primary"
@@ -120,17 +129,25 @@ export default function ManageStationsPage() {
                 const seed = parseStationSeed(s.seed_features as Parameters<typeof parseStationSeed>[0]);
                 const seedType = seed?.type ?? seed?.seed_type;
                 const editing = editingId === s.id;
+                const canChange = !s.shared || isAdmin;
                 return (
                   <tr key={s.id} className={editing || previewId === s.id ? 'bg-accent/[0.08]' : 'hover:bg-hover/50'}>
                     <Td>
                       <StationArt name={s.name} />
                     </Td>
-                    <Td className="font-medium">{s.name}</Td>
+                    <Td className="font-medium">
+                      {s.name}
+                      {s.shared && (
+                        <Badge tone="accent" className="ml-2">
+                          Shared
+                        </Badge>
+                      )}
+                    </Td>
                     <Td className="hidden sm:table-cell">
                       {seedType ? <Badge>{SEED_TYPE_LABELS[seedType]}</Badge> : <span className="text-muted">—</span>}
                     </Td>
-                    <Td className="hidden lg:table-cell text-muted" title={describeStationSeed(seed)}>
-                      {describeStationSeed(seed) || '—'}
+                    <Td className="hidden lg:table-cell text-muted" title={describeStationSeed(seed, playlistNames)}>
+                      {describeStationSeed(seed, playlistNames) || '—'}
                     </Td>
                     <Td align="right">
                       <div className="inline-flex gap-1">
@@ -141,26 +158,30 @@ export default function ManageStationsPage() {
                         >
                           Preview
                         </Button>
-                        <Button
-                          size="sm"
-                          onClick={() => {
-                            setFormError(null);
-                            setEditor({ mode: 'edit', id: s.id });
-                          }}
-                          aria-label={`Edit ${s.name}`}
-                        >
-                          Edit
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant="danger"
-                          aria-label={`Delete ${s.name}`}
-                          onClick={() => {
-                            if (confirm(`Delete station “${s.name}”?`)) remove.mutate(s.id);
-                          }}
-                        >
-                          Delete
-                        </Button>
+                        {canChange && (
+                          <>
+                            <Button
+                              size="sm"
+                              onClick={() => {
+                                setFormError(null);
+                                setEditor({ mode: 'edit', id: s.id });
+                              }}
+                              aria-label={`Edit ${s.name}`}
+                            >
+                              Edit
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="danger"
+                              aria-label={`Delete ${s.name}`}
+                              onClick={() => {
+                                if (confirm(`Delete station “${s.name}”${s.shared ? ' for everyone' : ''}?`)) remove.mutate(s.id);
+                              }}
+                            >
+                              Delete
+                            </Button>
+                          </>
+                        )}
                       </div>
                     </Td>
                   </tr>
@@ -196,7 +217,8 @@ export default function ManageStationsPage() {
                 key="create"
                 title="New station"
                 initialForm={emptyStationFilterForm()}
-                genres={genres}
+                seedTypes={isAdmin ? [...STATION_SEED_TYPES] : PERSONAL_SEED_TYPES}
+                playlists={playlists}
                 submitLabel="Create"
                 submitting={create.isLoading}
                 error={formError}
@@ -211,7 +233,8 @@ export default function ManageStationsPage() {
                 initialForm={seedToFilterForm(
                   parseStationSeed(editingStation.seed_features as Parameters<typeof parseStationSeed>[0]),
                 )}
-                genres={genres}
+                seedTypes={editingStation.shared ? ['playlists'] : PERSONAL_SEED_TYPES}
+                playlists={playlists}
                 submitLabel="Save"
                 submitting={update.isLoading}
                 error={formError}

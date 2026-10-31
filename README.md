@@ -5,7 +5,8 @@ An open-source, self-hosted smart radio. Turn a local library of lossless audio 
 ## What it does
 
 - Scans a local music folder and extracts rich metadata and audio features (BPM, key, energy, valence).
-- Builds stations from a seed (genre, artist, album, similar track, or mood). A station is live: it holds every library track matching its seed, plays them shuffled with tracks you have not heard recently first, and reshuffles when the queue runs out.
+- Builds stations from Spotify playlists: admins add public playlist URLs, OwnWave syncs them daily and finds each track in the local library, and a station plays the local matches of one or more playlists. Playlists only grow: tracks Spotify rotates out are kept. Personal stations from a seed (artist, album, similar track, or mood) work too.
+- A station is live: it holds every library track matching its seed, plays them shuffled with tracks you have not heard recently first, and reshuffles when the queue runs out.
 - Streams raw FLAC or on-the-fly transcodes to MP3, Opus, or AAC per client.
 - Tracks listening history and likes; banned tracks are never queued again.
 - Provides a responsive web player and an admin dashboard for monitoring and maintenance.

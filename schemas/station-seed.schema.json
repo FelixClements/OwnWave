@@ -13,9 +13,7 @@
         "album",
         "cluster",
         "mood",
-        "genre",
-        "sub_genre",
-        "uncategorized"
+        "playlists"
       ]
     },
     "seed_type": {
@@ -26,9 +24,7 @@
         "album",
         "cluster",
         "mood",
-        "genre",
-        "sub_genre",
-        "uncategorized"
+        "playlists"
       ],
       "description": "Legacy alias for type; normalized to type on read"
     },
@@ -36,8 +32,7 @@
     "artist_id": { "type": "string", "format": "uuid" },
     "album_id": { "type": "string", "format": "uuid" },
     "cluster_id": { "type": "integer" },
-    "main_genre": { "type": "string", "minLength": 1 },
-    "sub_genre": { "type": "string", "minLength": 1 },
+    "playlist_ids": { "type": "array", "items": { "type": "string", "format": "uuid" }, "minItems": 1, "uniqueItems": true },
     "min_bpm": { "type": "number", "minimum": 0 },
     "max_bpm": { "type": "number", "minimum": 0 },
     "min_energy": { "type": "number", "minimum": 0, "maximum": 1 },

@@ -13,8 +13,7 @@ export type StationFilterForm = {
   min_valence: string;
   max_valence: string;
   seed_type: string;
-  main_genre: string;
-  sub_genre: string;
+  playlist_ids: string[];
   // Seed ids have no form inputs; they are carried over from the stored seed.
   track_id: string;
   artist_id: string;
@@ -33,8 +32,7 @@ export const emptyStationFilterForm = (): StationFilterForm => ({
   min_valence: '',
   max_valence: '',
   seed_type: '',
-  main_genre: '',
-  sub_genre: '',
+  playlist_ids: [],
   track_id: '',
   artist_id: '',
   album_id: '',
@@ -66,8 +64,7 @@ export function seedToFilterForm(seed: StationSeed | null): StationFilterForm {
     min_valence: seed.min_valence != null ? String(seed.min_valence) : '',
     max_valence: seed.max_valence != null ? String(seed.max_valence) : '',
     seed_type: seedType,
-    main_genre: seed.main_genre ?? '',
-    sub_genre: seed.sub_genre ?? '',
+    playlist_ids: seed.playlist_ids ?? [],
     track_id: seed.track_id ?? '',
     artist_id: seed.artist_id ?? '',
     album_id: seed.album_id ?? '',
@@ -91,8 +88,7 @@ export function filterFormToRequest(name: string, form: StationFilterForm): Stat
     max_energy: toNum(form.max_energy),
     min_valence: toNum(form.min_valence),
     max_valence: toNum(form.max_valence),
-    main_genre: form.main_genre || undefined,
-    sub_genre: form.sub_genre || undefined,
+    playlist_ids: form.seed_type === 'playlists' ? form.playlist_ids : undefined,
     track_id: form.track_id || undefined,
     artist_id: form.artist_id || undefined,
     album_id: form.album_id || undefined,
@@ -106,9 +102,7 @@ export const SEED_TYPE_LABELS: Record<StationSeedType, string> = {
   album: 'Album',
   cluster: 'Cluster',
   mood: 'Mood',
-  genre: 'Genre',
-  sub_genre: 'Sub-genre',
-  uncategorized: 'Uncategorized',
+  playlists: 'Playlists',
 };
 
 function range(label: string, min?: number, max?: number, digits = 0) {
@@ -118,11 +112,14 @@ function range(label: string, min?: number, max?: number, digits = 0) {
   return min != null ? `${label} ≥ ${f(min)}` : `${label} ≤ ${f(max!)}`;
 }
 
-/** One-line summary of a seed: "Electronic › Deep House · BPM 118–126 · energy 0.50–0.90". */
-export function describeStationSeed(seed: StationSeed | null): string {
+/**
+ * One-line summary of a seed: "Rock Classics, 90s Rock · BPM 118–126 · energy 0.50–0.90".
+ * playlistNames resolves playlist ids; unknown ids are skipped.
+ */
+export function describeStationSeed(seed: StationSeed | null, playlistNames: Record<string, string> = {}): string {
   if (!seed) return '';
   const parts = [
-    seed.main_genre && (seed.sub_genre ? `${seed.main_genre} › ${seed.sub_genre}` : seed.main_genre),
+    (seed.playlist_ids ?? []).map((id) => playlistNames[id]).filter(Boolean).join(', '),
     range('BPM', seed.min_bpm, seed.max_bpm),
     range('energy', seed.min_energy, seed.max_energy, 2),
     range('valence', seed.min_valence, seed.max_valence, 2),

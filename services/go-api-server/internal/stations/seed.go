@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"reflect"
 	"strings"
 
 	"github.com/google/uuid"
@@ -13,45 +14,43 @@ import (
 
 // Types are the supported seed types (keep in sync with
 // schemas/station-seed.schema.json).
-var Types = []string{"track", "artist", "album", "cluster", "mood", "genre", "sub_genre", "uncategorized"}
+var Types = []string{"track", "artist", "album", "cluster", "mood", "playlists"}
 
 // ErrInvalidSeed wraps every seed validation failure.
 var ErrInvalidSeed = errors.New("invalid station seed")
 
 // Seed is the filter stored in stations.seed_features. An empty seed matches
-// the whole library.
+// the whole library. A "playlists" seed belongs to a shared station.
 type Seed struct {
-	Type       string   `json:"type,omitempty"`
-	TrackID    string   `json:"track_id,omitempty"`
-	ArtistID   string   `json:"artist_id,omitempty"`
-	AlbumID    string   `json:"album_id,omitempty"`
-	ClusterID  *int     `json:"cluster_id,omitempty"`
-	MainGenre  string   `json:"main_genre,omitempty"`
-	SubGenre   string   `json:"sub_genre,omitempty"`
-	MinBPM     *float64 `json:"min_bpm,omitempty"`
-	MaxBPM     *float64 `json:"max_bpm,omitempty"`
-	MinEnergy  *float64 `json:"min_energy,omitempty"`
-	MaxEnergy  *float64 `json:"max_energy,omitempty"`
-	MinValence *float64 `json:"min_valence,omitempty"`
-	MaxValence *float64 `json:"max_valence,omitempty"`
+	Type        string   `json:"type,omitempty"`
+	TrackID     string   `json:"track_id,omitempty"`
+	ArtistID    string   `json:"artist_id,omitempty"`
+	AlbumID     string   `json:"album_id,omitempty"`
+	ClusterID   *int     `json:"cluster_id,omitempty"`
+	PlaylistIDs []string `json:"playlist_ids,omitempty"`
+	MinBPM      *float64 `json:"min_bpm,omitempty"`
+	MaxBPM      *float64 `json:"max_bpm,omitempty"`
+	MinEnergy   *float64 `json:"min_energy,omitempty"`
+	MaxEnergy   *float64 `json:"max_energy,omitempty"`
+	MinValence  *float64 `json:"min_valence,omitempty"`
+	MaxValence  *float64 `json:"max_valence,omitempty"`
 }
 
 // Request is the create/update station body sent by the web app.
 type Request struct {
-	Name       string   `json:"name"`
-	SeedType   string   `json:"seed_type"`
-	TrackID    string   `json:"track_id"`
-	ArtistID   string   `json:"artist_id"`
-	AlbumID    string   `json:"album_id"`
-	ClusterID  *int     `json:"cluster_id"`
-	MainGenre  string   `json:"main_genre"`
-	SubGenre   string   `json:"sub_genre"`
-	MinBPM     *float64 `json:"min_bpm"`
-	MaxBPM     *float64 `json:"max_bpm"`
-	MinEnergy  *float64 `json:"min_energy"`
-	MaxEnergy  *float64 `json:"max_energy"`
-	MinValence *float64 `json:"min_valence"`
-	MaxValence *float64 `json:"max_valence"`
+	Name        string   `json:"name"`
+	SeedType    string   `json:"seed_type"`
+	TrackID     string   `json:"track_id"`
+	ArtistID    string   `json:"artist_id"`
+	AlbumID     string   `json:"album_id"`
+	ClusterID   *int     `json:"cluster_id"`
+	PlaylistIDs []string `json:"playlist_ids"`
+	MinBPM      *float64 `json:"min_bpm"`
+	MaxBPM      *float64 `json:"max_bpm"`
+	MinEnergy   *float64 `json:"min_energy"`
+	MaxEnergy   *float64 `json:"max_energy"`
+	MinValence  *float64 `json:"min_valence"`
+	MaxValence  *float64 `json:"max_valence"`
 }
 
 // HasSeed reports whether the request carries any seed fields; updates
@@ -82,13 +81,31 @@ func (r Request) Seed() (Seed, error) {
 		s.AlbumID = r.AlbumID
 	case "cluster":
 		s.ClusterID = r.ClusterID
-	case "genre":
-		s.MainGenre = r.MainGenre
-	case "sub_genre":
-		s.MainGenre, s.SubGenre = r.MainGenre, r.SubGenre
+	case "playlists":
+		s.PlaylistIDs = canonicalIDs(r.PlaylistIDs)
 	}
 	return s, s.Validate()
 }
+
+// canonicalIDs lowercases and dedupes ids so stored seeds can be searched
+// by id; invalid ids are kept for Validate to reject.
+func canonicalIDs(ids []string) []string {
+	out := make([]string, 0, len(ids))
+	seen := map[string]bool{}
+	for _, id := range ids {
+		if u, err := uuid.Parse(id); err == nil {
+			id = u.String()
+		}
+		if !seen[id] {
+			seen[id] = true
+			out = append(out, id)
+		}
+	}
+	return out
+}
+
+// Shared reports whether the seed belongs to a shared station.
+func (s Seed) Shared() bool { return s.Type == "playlists" }
 
 // ParseStored decodes stations.seed_features, accepting the legacy
 // "seed_type" key. A NULL/empty value is the whole-library seed.
@@ -112,7 +129,7 @@ func ParseStored(raw *string) (Seed, error) {
 }
 
 // IsEmpty reports whether the seed matches the whole library.
-func (s Seed) IsEmpty() bool { return s == (Seed{}) }
+func (s Seed) IsEmpty() bool { return reflect.ValueOf(s).IsZero() }
 
 // JSON returns the value to store in stations.seed_features (nil for empty).
 func (s Seed) JSON() ([]byte, error) {
@@ -134,7 +151,7 @@ func (s Seed) Validate() error {
 	}
 
 	switch s.Type {
-	case "", "mood", "uncategorized":
+	case "", "mood":
 	case "track":
 		if err := requireUUID("track_id", s.TrackID); err != nil {
 			return err
@@ -151,13 +168,14 @@ func (s Seed) Validate() error {
 		if s.ClusterID == nil {
 			return invalid("cluster_id is required")
 		}
-	case "genre":
-		if strings.TrimSpace(s.MainGenre) == "" {
-			return invalid("main_genre is required")
+	case "playlists":
+		if len(s.PlaylistIDs) == 0 {
+			return invalid("pick at least one playlist")
 		}
-	case "sub_genre":
-		if strings.TrimSpace(s.MainGenre) == "" || strings.TrimSpace(s.SubGenre) == "" {
-			return invalid("main_genre and sub_genre are required")
+		for _, id := range s.PlaylistIDs {
+			if err := requireUUID("playlist_ids", id); err != nil {
+				return err
+			}
 		}
 	default:
 		return invalid("unsupported seed type %q", s.Type)
@@ -183,16 +201,4 @@ func (s Seed) Validate() error {
 		}
 	}
 	return nil
-}
-
-// TitleCase mirrors how genre station names are displayed ("hip hop" ->
-// "Hip Hop").
-func TitleCase(s string) string {
-	parts := strings.Split(s, " ")
-	for i, p := range parts {
-		if r := []rune(p); len(r) > 0 {
-			parts[i] = strings.ToUpper(string(r[0])) + strings.ToLower(string(r[1:]))
-		}
-	}
-	return strings.Join(parts, " ")
 }

@@ -11,7 +11,8 @@ export const keys = {
   stations: ['stations'] as const,
   station: (id: string) => ['station', id] as const,
   queue: (id: string) => ['queue', id] as const,
-  genres: ['genres'] as const,
+  playlists: ['playlists'] as const,
+  playlist: (id: string) => ['playlist', id] as const,
   // Paged (infinite) and plain track lists cache different shapes, so they
   // need distinct keys; both stay under ['tracks'] for invalidation.
   tracks: (q: string) => ['tracks', 'pages', q] as const,
@@ -30,7 +31,11 @@ export const keys = {
 
 export const useSetupStatus = () => useQuery(keys.setupStatus, () => api.setupStatus());
 export const useStations = () => useQuery(keys.stations, () => api.listStations());
-export const useGenres = () => useQuery(keys.genres, () => api.getGenres());
+export const usePlaylists = () => useQuery(keys.playlists, () => api.listPlaylists());
+
+export function usePlaylist(id: string | null) {
+  return useQuery(keys.playlist(id ?? ''), () => api.getPlaylist(id!), { enabled: !!id });
+}
 
 export function useStationQuery(id: string | null) {
   return useQuery(keys.station(id ?? ''), () => api.getStation(id!), { enabled: !!id });

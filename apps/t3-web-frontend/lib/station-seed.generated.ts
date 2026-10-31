@@ -9,17 +9,19 @@
  * Canonical station seed filter stored in stations.seed_features
  */
 export interface StationSeed {
-  type?: "track" | "artist" | "album" | "cluster" | "mood" | "genre" | "sub_genre" | "uncategorized";
+  type?: "track" | "artist" | "album" | "cluster" | "mood" | "playlists";
   /**
    * Legacy alias for type; normalized to type on read
    */
-  seed_type?: "track" | "artist" | "album" | "cluster" | "mood" | "genre" | "sub_genre" | "uncategorized";
+  seed_type?: "track" | "artist" | "album" | "cluster" | "mood" | "playlists";
   track_id?: string;
   artist_id?: string;
   album_id?: string;
   cluster_id?: number;
-  main_genre?: string;
-  sub_genre?: string;
+  /**
+   * @minItems 1
+   */
+  playlist_ids?: [string, ...string[]];
   min_bpm?: number;
   max_bpm?: number;
   min_energy?: number;

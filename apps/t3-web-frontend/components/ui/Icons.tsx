@@ -56,6 +56,13 @@ export const StationsIcon = (p: IconProps) => (
     <circle cx="15" cy="13.5" r="2.5" />
   </Stroke>
 );
+export const PlaylistIcon = (p: IconProps) => (
+  <Stroke {...p}>
+    <path d="M4 6h11M4 11h11M4 16h7" />
+    <circle cx="17.5" cy="17" r="2.5" />
+    <path d="M20 17V8l-2.5 1" />
+  </Stroke>
+);
 export const ShieldIcon = (p: IconProps) => (
   <Stroke {...p}>
     <path d="M12 3 4 6v6c0 4.5 3.4 8.2 8 9 4.6-.8 8-4.5 8-9V6z" />
