@@ -7,9 +7,7 @@ export const STATION_SEED_TYPES = [
   'album',
   'cluster',
   'mood',
-  'genre',
-  'sub_genre',
-  'uncategorized',
+  'playlists',
 ] as const;
 
 export type StationSeedType = (typeof STATION_SEED_TYPES)[number];

@@ -106,11 +106,10 @@ func main() {
 	}
 
 	h := NewHandler(db, Config{
-		MusicDir:                 musicDir,
-		FFmpegPath:               ffmpegPath,
-		PythonURL:                pythonURL,
-		RecentHours:              envInt("STATION_RECENT_HOURS", 24),
-		MinTracksPerGenreStation: envInt("GENRE_MIN_TRACKS_PER_STATION", 5),
+		MusicDir:    musicDir,
+		FFmpegPath:  ffmpegPath,
+		PythonURL:   pythonURL,
+		RecentHours: envInt("STATION_RECENT_HOURS", 24),
 	})
 
 	go func() {
@@ -122,6 +121,20 @@ func main() {
 				slog.Error("failed to purge expired auth records", "error", err)
 			} else if purged > 0 {
 				slog.Info("purged expired auth records", "count", purged)
+			}
+		}
+	}()
+
+	// Spotify rotates editorial playlists every week or two and the embed
+	// page only shows the current tracks, so sync daily to catch them all.
+	// Checking hourly picks up stale playlists soon after a restart and
+	// matches files added by a library scan within the hour.
+	go func() {
+		ticker := time.NewTicker(1 * time.Hour)
+		defer ticker.Stop()
+		for ; ; <-ticker.C {
+			if err := h.playlists.SyncStale(context.Background(), 24*time.Hour); err != nil {
+				slog.Error("playlist sync", "error", err)
 			}
 		}
 	}()
@@ -198,7 +211,6 @@ func newRouter(h *Handler, webDir string) http.Handler {
 			r.Use(h.requireSetupAccess)
 			r.Post("/setup/complete", h.SetupComplete)
 			r.Get("/setup/summary", h.SetupSummary)
-			r.Post("/setup/stations", h.SetupStations)
 		})
 
 		r.Group(func(r chi.Router) {
@@ -234,6 +246,9 @@ func newRouter(h *Handler, webDir string) http.Handler {
 			r.Get("/genres", h.ListGenres)
 			r.Get("/tracks/{id}/genres", h.GetTrackGenres)
 
+			r.Get("/playlists", h.ListPlaylists)
+			r.Get("/playlists/{id}", h.GetPlaylist)
+
 			r.Get("/stations", h.ListStations)
 			r.Get("/stations/{id}", h.GetStation)
 			r.Put("/stations/{id}", h.UpdateStation)
@@ -251,7 +266,9 @@ func newRouter(h *Handler, webDir string) http.Handler {
 			r.Get("/admin/stations", h.AdminStations)
 			r.Post("/admin/rebuild-analysis", h.AdminRebuildAnalysis)
 			r.Post("/admin/rebuild-genres", h.AdminRebuildGenres)
-			r.Post("/admin/rebuild-genre-stations", h.AdminRebuildGenreStations)
+			r.Post("/admin/playlists", h.AddPlaylist)
+			r.Post("/admin/playlists/{id}/sync", h.SyncPlaylist)
+			r.Delete("/admin/playlists/{id}", h.DeletePlaylist)
 			r.Handle("/admin/metrics", metricsHandler())
 			r.Get("/admin/users", h.ListUsers)
 			r.Post("/admin/users", h.CreateUser)

@@ -89,11 +89,13 @@ func TestMetricsUseRoutePattern(t *testing.T) {
 func TestCreateStationRejectsInvalidSeed(t *testing.T) {
 	h := newTestHandler(analytics.NewStub())
 	cases := map[string]string{
-		"missing name":       `{"seed_type":"genre","main_genre":"rock"}`,
-		"genre without name": `{"name":"x","seed_type":"genre"}`,
-		"bad track id":       `{"name":"x","seed_type":"track","track_id":"nope"}`,
-		"unknown type":       `{"name":"x","seed_type":"vibes"}`,
-		"energy range":       `{"name":"x","seed_type":"mood","min_energy":2}`,
+		"missing name":    `{"seed_type":"mood"}`,
+		"genre is gone":   `{"name":"x","seed_type":"genre","main_genre":"rock"}`,
+		"no playlists":    `{"name":"x","seed_type":"playlists"}`,
+		"bad playlist id": `{"name":"x","seed_type":"playlists","playlist_ids":["nope"]}`,
+		"bad track id":    `{"name":"x","seed_type":"track","track_id":"nope"}`,
+		"unknown type":    `{"name":"x","seed_type":"vibes"}`,
+		"energy range":    `{"name":"x","seed_type":"mood","min_energy":2}`,
 	}
 	for name, body := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -104,6 +106,16 @@ func TestCreateStationRejectsInvalidSeed(t *testing.T) {
 			require.Equal(t, http.StatusBadRequest, rec.Code, rec.Body.String())
 		})
 	}
+}
+
+func TestOnlyAdminsCreatePlaylistStations(t *testing.T) {
+	h := newTestHandler(analytics.NewStub())
+	body := `{"name":"Rock","seed_type":"playlists","playlist_ids":["6f1b8c6e-6a43-4e4b-9b1e-2b3f8d1a0c55"]}`
+	req := httptest.NewRequest(http.MethodPost, "/stations", strings.NewReader(body))
+	req = req.WithContext(auth.WithUser(req.Context(), auth.User{ID: "6f1b8c6e-6a43-4e4b-9b1e-2b3f8d1a0c55"}))
+	rec := httptest.NewRecorder()
+	h.CreateStation(rec, req)
+	require.Equal(t, http.StatusForbidden, rec.Code, rec.Body.String())
 }
 
 func TestFeedbackOnlyAcceptsLikeAndBan(t *testing.T) {

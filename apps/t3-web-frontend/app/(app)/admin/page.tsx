@@ -199,7 +199,6 @@ function HealthSection() {
 }
 
 function MaintenanceSection() {
-  const qc = useQueryClient();
   const [notice, setNotice] = useState<NoticeValue>(null);
   const rebuildAnalysis = useMutation(() => api.adminRebuildAnalysis(), {
     onMutate: () => setNotice(null),
@@ -210,15 +209,6 @@ function MaintenanceSection() {
     onMutate: () => setNotice(null),
     onSuccess: () => setNotice({ type: 'success', text: 'Genre rebuild queued.' }),
     onError: (err: Error) => setNotice(errorNotice('Genre rebuild failed')(err)),
-  });
-  const rebuildGenreStations = useMutation(() => api.adminRebuildGenreStations(), {
-    onMutate: () => setNotice(null),
-    onSuccess: (data) => {
-      void qc.invalidateQueries(keys.stations);
-      void qc.invalidateQueries(keys.adminStations);
-      setNotice({ type: 'success', text: `Created ${data.created} genre station${data.created === 1 ? '' : 's'}.` });
-    },
-    onError: (err: Error) => setNotice(errorNotice('Genre station rebuild failed')(err)),
   });
 
   return (
@@ -238,14 +228,6 @@ function MaintenanceSection() {
           loading={rebuildGenres.isLoading}
         >
           Rebuild genres
-        </Button>
-        <Button
-          onClick={() => {
-            if (confirm('Create missing genre stations?')) rebuildGenreStations.mutate();
-          }}
-          loading={rebuildGenreStations.isLoading}
-        >
-          Create genre stations
         </Button>
       </div>
       <Notice notice={notice} />

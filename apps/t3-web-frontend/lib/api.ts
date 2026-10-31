@@ -48,6 +48,33 @@ export type Station = {
   id: string;
   name: string;
   seed_features?: string | Record<string, unknown> | null;
+  /** Shared stations are played by everyone and changed by admins only. */
+  shared: boolean;
+};
+
+/** A synced Spotify playlist. It only grows: rotated-out tracks stay. */
+export type Playlist = {
+  id: string;
+  spotify_id: string;
+  name: string;
+  track_count: number;
+  matched_count: number;
+  last_synced_at?: string;
+  last_sync_error?: string;
+};
+
+export type PlaylistItem = {
+  spotify_track_id: string;
+  title: string;
+  artists: string[];
+  duration_ms?: number;
+  first_seen_at: string;
+  last_seen_at: string;
+  /** The matched local track, if any. */
+  track_id?: string;
+  local_title?: string;
+  local_artist?: string;
+  match_method?: 'exact' | 'fuzzy';
 };
 
 export type QueueTrack = Track & {
@@ -129,14 +156,7 @@ export type StationRequest = {
   artist_id?: string;
   album_id?: string;
   cluster_id?: number;
-  main_genre?: string;
-  sub_genre?: string;
-};
-
-export type Genre = {
-  main_genre: string;
-  sub_genre: string;
-  track_count: number;
+  playlist_ids?: string[];
 };
 
 export type FailedPath = { path: string; error: string };
@@ -187,15 +207,6 @@ export type SetupStatus = {
 
 export type SetupSummary = {
   total_tracks: number;
-  main_genres: { main_genre: string; track_count: number; sub_count: number }[];
-  sub_genres: { main_genre: string; sub_genre: string; track_count: number }[];
-  uncovered: number;
-};
-
-export type SetupStationsResponse = {
-  created: number;
-  station_ids: string[];
-  uncovered: number;
 };
 
 class OwnWaveAPI {
@@ -305,14 +316,30 @@ class OwnWaveAPI {
     return this.request<{ queue: QueueTrack[] }>(`/stations/${encodeURIComponent(id)}/queue`).then((r) => r.queue);
   }
 
+  listPlaylists() {
+    return this.request<{ playlists: Playlist[] }>('/playlists').then((r) => r.playlists);
+  }
+
+  getPlaylist(id: string) {
+    return this.request<{ playlist: Playlist; items: PlaylistItem[] }>(`/playlists/${encodeURIComponent(id)}`);
+  }
+
+  addPlaylist(url: string) {
+    return this.request<Playlist>('/admin/playlists', { method: 'POST', json: { url } });
+  }
+
+  syncPlaylist(id: string) {
+    return this.request<Playlist>(`/admin/playlists/${encodeURIComponent(id)}/sync`, { method: 'POST' });
+  }
+
+  deletePlaylist(id: string) {
+    return this.request<void>(`/admin/playlists/${encodeURIComponent(id)}`, { method: 'DELETE' });
+  }
+
   getSimilarTracks(id: string, limit = 20) {
     return this.request<{ track_id: string; similar: SimilarTrack[] }>(
       `/tracks/${encodeURIComponent(id)}/similar?limit=${limit}`,
     ).then((r) => r.similar);
-  }
-
-  getGenres() {
-    return this.request<{ genres: Genre[] }>('/genres').then((r) => r.genres);
   }
 
   register(username: string, password: string, inviteToken?: string) {
@@ -367,23 +394,12 @@ class OwnWaveAPI {
     return this.request<{ status: string }>('/admin/rebuild-genres', { method: 'POST' });
   }
 
-  adminRebuildGenreStations() {
-    return this.request<{ status: string; created: number }>('/admin/rebuild-genre-stations', { method: 'POST' });
-  }
-
   setupStatus() {
     return this.request<SetupStatus>('/setup/status');
   }
 
   setupSummary() {
     return this.request<SetupSummary>('/setup/summary');
-  }
-
-  setupStations(selectedMainGenres: string[]) {
-    return this.request<SetupStationsResponse>('/setup/stations', {
-      method: 'POST',
-      json: { selected_main_genres: selectedMainGenres },
-    });
   }
 
   setupComplete() {

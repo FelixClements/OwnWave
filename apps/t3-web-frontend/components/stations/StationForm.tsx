@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import type { Genre } from '@/lib/api';
+import type { Playlist } from '@/lib/api';
 import { ID_SEED_TYPES, SEED_TYPE_LABELS, type StationFilterForm } from '@/lib/station-seed';
 import type { StationSeedType } from '@/lib/station-seed-types';
 import { Button } from '@/components/ui/Button';
@@ -17,13 +17,15 @@ const RANGES: { key: RangeKey; label: string; step: string; max?: string; placeh
 
 /**
  * Create/edit form for a station seed. Mount it with a `key` per station so
- * its state resets when switching stations.
+ * its state resets when switching stations. seedTypes lists the seed types
+ * this station may use (playlist stations are shared and admin-only).
  */
 export function StationForm({
   title,
   initialName = '',
   initialForm,
-  genres,
+  seedTypes: allowedSeedTypes,
+  playlists,
   submitLabel,
   submitting,
   error,
@@ -33,7 +35,8 @@ export function StationForm({
   title: string;
   initialName?: string;
   initialForm: StationFilterForm;
-  genres: Genre[];
+  seedTypes: StationSeedType[];
+  playlists: Playlist[];
   submitLabel: string;
   submitting: boolean;
   error?: string | null;
@@ -45,12 +48,15 @@ export function StationForm({
   const set = (patch: Partial<StationFilterForm>) => setForm((f) => ({ ...f, ...patch }));
 
   // Id-based seeds have no picker here; offer them only when the station already uses one.
-  const seedTypes = (Object.keys(SEED_TYPE_LABELS) as StationSeedType[]).filter(
-    (t) => !ID_SEED_TYPES.includes(t) || t === initialForm.seed_type,
-  );
-  const mainGenres = Array.from(new Set(genres.map((g) => g.main_genre)));
-  const subGenres = genres.filter((g) => g.main_genre === form.main_genre && g.sub_genre !== g.main_genre);
-  const needsGenre = form.seed_type === 'genre' || form.seed_type === 'sub_genre';
+  const seedTypes = allowedSeedTypes.filter((t) => !ID_SEED_TYPES.includes(t) || t === initialForm.seed_type);
+  const onlyPlaylists = seedTypes.length === 1 && seedTypes[0] === 'playlists';
+  const togglePlaylist = (id: string) =>
+    set({
+      playlist_ids: form.playlist_ids.includes(id)
+        ? form.playlist_ids.filter((p) => p !== id)
+        : [...form.playlist_ids, id],
+    });
+  const missingPlaylists = form.seed_type === 'playlists' && form.playlist_ids.length === 0;
 
   return (
     <form
@@ -73,8 +79,8 @@ export function StationForm({
 
       <Field label="Seed">
         {(p) => (
-          <Select {...p} value={form.seed_type} onChange={(e) => set({ seed_type: e.target.value })}>
-            <option value="">Any (filters only)</option>
+          <Select {...p} value={form.seed_type} onChange={(e) => set({ seed_type: e.target.value })} disabled={onlyPlaylists}>
+            {!onlyPlaylists && <option value="">Any (filters only)</option>}
             {seedTypes.map((t) => (
               <option key={t} value={t}>
                 {SEED_TYPE_LABELS[t]}
@@ -84,35 +90,34 @@ export function StationForm({
         )}
       </Field>
 
-      {needsGenre && (
-        <div className="grid grid-cols-2 gap-2">
-          <Field label="Main genre">
-            {(p) => (
-              <Select {...p} value={form.main_genre} onChange={(e) => set({ main_genre: e.target.value, sub_genre: '' })} required>
-                <option value="">Select genre</option>
-                {mainGenres.map((g) => (
-                  <option key={g} value={g}>
-                    {g}
-                  </option>
-                ))}
-              </Select>
-            )}
-          </Field>
-          {form.seed_type === 'sub_genre' && (
-            <Field label="Sub-genre">
-              {(p) => (
-                <Select {...p} value={form.sub_genre} onChange={(e) => set({ sub_genre: e.target.value })} required>
-                  <option value="">Select sub-genre</option>
-                  {subGenres.map((g) => (
-                    <option key={g.sub_genre} value={g.sub_genre}>
-                      {g.sub_genre}
-                    </option>
-                  ))}
-                </Select>
-              )}
-            </Field>
+      {form.seed_type === 'playlists' && (
+        <fieldset>
+          <legend className="text-[11.5px] font-semibold text-muted mb-1">Playlists</legend>
+          {playlists.length === 0 ? (
+            <p className="text-muted">No playlists yet. Add Spotify playlists on the Playlists page first.</p>
+          ) : (
+            <div className="max-h-64 overflow-y-auto space-y-1">
+              {playlists.map((p) => (
+                <label
+                  key={p.id}
+                  className="flex items-center gap-2.5 px-2.5 py-1.5 rounded-md border border-line bg-surface-2 cursor-pointer hover:bg-hover"
+                >
+                  <input
+                    type="checkbox"
+                    checked={form.playlist_ids.includes(p.id)}
+                    onChange={() => togglePlaylist(p.id)}
+                    className="w-4 h-4 accent-accent"
+                  />
+                  <span className="flex-1 min-w-0 truncate font-medium">{p.name}</span>
+                  <span className="text-muted tabular-nums text-[11.5px]">
+                    {p.matched_count}/{p.track_count}
+                  </span>
+                </label>
+              ))}
+            </div>
           )}
-        </div>
+          <p className="text-[11.5px] text-muted mt-1">The station plays every local match of the picked playlists.</p>
+        </fieldset>
       )}
 
       {RANGES.map(({ key, label, step, max, placeholder }) => {
@@ -162,7 +167,7 @@ export function StationForm({
 
       <div className="flex justify-end gap-2">
         <Button onClick={onCancel}>Cancel</Button>
-        <Button type="submit" variant="primary" loading={submitting} disabled={!name.trim()}>
+        <Button type="submit" variant="primary" loading={submitting} disabled={!name.trim() || missingPlaylists}>
           {submitLabel}
         </Button>
       </div>

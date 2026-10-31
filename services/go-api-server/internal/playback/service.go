@@ -25,13 +25,14 @@ func NewService(pool *pgxpool.Pool) *Service {
 	return &Service{pool: pool}
 }
 
-// Record appends listening history; stationID (optional) must belong to the user.
+// Record appends listening history; stationID (optional) must be the user's
+// own station or a shared one.
 func (s *Service) Record(ctx context.Context, userID, trackID, stationID string) error {
 	if stationID != "" {
-		var owned int
+		var visible int
 		if err := s.pool.QueryRow(ctx, `
-			SELECT 1 FROM stations WHERE id = $1::uuid AND user_id = $2::uuid
-		`, stationID, userID).Scan(&owned); err != nil {
+			SELECT 1 FROM stations WHERE id = $1::uuid AND (user_id = $2::uuid OR user_id IS NULL)
+		`, stationID, userID).Scan(&visible); err != nil {
 			return err
 		}
 	}
@@ -42,12 +43,13 @@ func (s *Service) Record(ctx context.Context, userID, trackID, stationID string)
 	return err
 }
 
-// poolFrom selects the analysed tracks matching seed, minus the user's bans.
+// poolFrom selects the tracks matching seed, minus the user's bans. Tracks
+// not analysed yet are included; their features read as 0.
 // args[0] must be the user id; joins are inserted before the WHERE clause.
 func (s *Service) poolFrom(seed stations.Seed, args *stations.Args, joins string) string {
 	return `
 		FROM tracks t
-		JOIN audio_features af ON af.track_id = t.id
+		LEFT JOIN audio_features af ON af.track_id = t.id
 		` + joins + `
 		WHERE NOT EXISTS (
 			SELECT 1 FROM track_feedback b
