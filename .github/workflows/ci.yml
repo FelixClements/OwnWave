@@ -63,15 +63,17 @@ jobs:
           go test -tags=integration ./internal/playlists/...
           go test -tags=integration .
 
-      - name: Test frontend
+      - name: Test web UI
         run: |
-          cd apps/t3-web-frontend
+          cd apps/web
           npm ci
+          # The typed API client must match services/go-api-server/openapi.yaml.
+          npm run check:api
           npm test
 
-      - name: Build frontend
+      - name: Build web UI
         run: |
-          cd apps/t3-web-frontend
+          cd apps/web
           npm run build
 
       - name: Set up Python

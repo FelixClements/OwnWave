@@ -11,13 +11,13 @@ An open-source, self-hosted smart radio. Turn a local library of lossless audio 
 - Streams the original file or a cached transcode per client: Opus at 160, 96 or 64 kbps (phones on mobile data) or AAC 128 kbps, with seeking.
 - Apps sign in with long-lived device tokens; a browse tree and voice search serve Android Auto. The API is described in [`services/go-api-server/openapi.yaml`](services/go-api-server/openapi.yaml).
 - Tracks listening history and likes; banned tracks are never queued again.
-- Provides a responsive web player and an admin dashboard for monitoring and maintenance.
+- Provides a Spotify-style responsive web player (desktop and phone) and an admin dashboard for scans, genres and users.
 
 ## Architecture
 
 | Layer | Technology | Role |
 |-------|------------|------|
-| `apps/t3-web-frontend` | Next.js (static export), Tailwind, React Query | Web UI and player (crossfade in the browser), served by the Go API |
+| `apps/web` | Vite, React, Tailwind, React Query, typed client from the OpenAPI spec | Web UI and player (gapless, optional crossfade, lock-screen controls), served by the Go API |
 | `services/go-api-server` | Go, Chi, pgx, FFmpeg | API (under `/api`), auth, streaming, stations and queues; serves the web UI |
 | `services/python-analytics` | Python, FastAPI, Essentia, librosa | Internal API plus a worker that scans the library, extracts audio features and scores station genres |
 | `database` | Postgres + pgvector | Data and the worker's task queue |
@@ -42,14 +42,18 @@ cd services/go-api-server
 go test ./...
 go build .
 
-# Frontend (static export to out/)
-cd apps/t3-web-frontend
+# Web UI (Vite + React; builds to dist/, which the Go image serves)
+cd apps/web
 npm install
+npm test
 npm run build
 
-# Frontend with hot reload: start the stack, then run Next's dev server,
+# Web UI with hot reload: start the stack, then run Vite's dev server,
 # which proxies /api to Go at GO_API_URL (default http://localhost:8080)
 npm run dev
+
+# After changing services/go-api-server/openapi.yaml, regenerate the typed client
+npm run generate:api
 
 # Full smoke test (builds Docker images and checks /health)
 just test

@@ -30,7 +30,7 @@ Status: proposal, 2026-11-03. Decisions taken with the owner:
 |------|------|--------|
 | `services/go-api-server` | Go, Chi, pgx, FFmpeg | Keep. Add device tokens, quality profiles, station pools, genre suggestions, browse API for Android Auto. |
 | `services/python-analytics` | Python, Essentia | Rewrite the genre pipeline. Drop the librosa/k-means features stations do not use. |
-| `apps/web` | Vite + React + TanStack Query/Router + Tailwind | New Spotify-style SPA, served by Go as today. Replaces `apps/t3-web-frontend`. |
+| `apps/web` | Vite + React + TanStack Query + react-router + Tailwind | New Spotify-style SPA, served by Go as today. Replaced `apps/t3-web-frontend` (Phase 4). |
 | `apps/android` | Kotlin, Compose, Media3 ExoPlayer, `MediaLibraryService` | New. Phone app plus Android Auto. |
 | `database` | Postgres + pgvector | New migrations for genres, pools, suggestions, devices. |
 
@@ -89,6 +89,10 @@ Status: implemented on branch `phase3/client-api` (migration 020), stacked on Ph
 Android Auto loads artwork itself and cannot send the Bearer header, so the Android app proxies artwork through its own content provider (Phase 5).
 
 ## Phase 4: web UI
+
+Status: implemented on branch `phase4/web-ui`, stacked on Phase 3. `apps/t3-web-frontend` is deleted. react-router is used instead of TanStack Router (simpler code-based routing). The API client is typed from `openapi.yaml` (openapi-typescript + openapi-fetch); CI fails when it is out of date. The CSP no longer allows inline scripts.
+
+Player: two audio elements (the next track preloads, which also warms the server's transcode cache), optional crossfade, Media Session controls, plays counted after 30 s or half the track, quality picked per connection (Wi-Fi vs mobile data where the browser reports it).
 
 Spotify-inspired, dark-first, responsive:
 

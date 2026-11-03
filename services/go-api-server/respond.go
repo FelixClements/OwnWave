@@ -35,9 +35,10 @@ func writeInternalError(w http.ResponseWriter, r *http.Request, msg string, err 
 	http.Error(w, "internal server error", http.StatusInternalServerError)
 }
 
-// contentSecurityPolicy still allows inline scripts and styles, which the
-// static Next.js export needs.
-const contentSecurityPolicy = "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self'; font-src 'self' data:; object-src 'none'; base-uri 'self'; frame-ancestors 'none'"
+// contentSecurityPolicy allows only same-origin scripts (the Vite build has
+// no inline scripts). Inline styles stay allowed: the UI sets colours taken
+// from artwork as style attributes.
+const contentSecurityPolicy = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self'; font-src 'self' data:; object-src 'none'; base-uri 'self'; frame-ancestors 'none'"
 
 // securityHeaders sets the browser security headers on every response, so they
 // apply behind any reverse proxy. HSTS is only sent when the app is served over

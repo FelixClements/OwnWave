@@ -1,0 +1,70 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html,
+  body,
+  #root {
+    @apply h-full bg-base text-ink antialiased;
+  }
+  body {
+    @apply font-sans;
+    -webkit-tap-highlight-color: transparent;
+  }
+  ::selection {
+    @apply bg-accent/40;
+  }
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: #3f3f46 transparent;
+  }
+}
+
+/* Thin range slider that fills with the accent colour up to --pct. */
+.ow-slider {
+  @apply h-4 cursor-pointer appearance-none bg-transparent;
+}
+.ow-slider::-webkit-slider-runnable-track {
+  height: 4px;
+  border-radius: 2px;
+  background: linear-gradient(to right, #f5f5f7 var(--pct), #4b4b52 var(--pct));
+}
+.ow-slider:hover::-webkit-slider-runnable-track,
+.ow-slider:focus-visible::-webkit-slider-runnable-track {
+  background: linear-gradient(to right, #2dd4bf var(--pct), #4b4b52 var(--pct));
+}
+.ow-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  height: 12px;
+  width: 12px;
+  margin-top: -4px;
+  border-radius: 9999px;
+  background: #f5f5f7;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+.ow-slider:hover::-webkit-slider-thumb,
+.ow-slider:focus-visible::-webkit-slider-thumb {
+  opacity: 1;
+}
+.ow-slider::-moz-range-track {
+  height: 4px;
+  border-radius: 2px;
+  background: #4b4b52;
+}
+.ow-slider::-moz-range-progress {
+  height: 4px;
+  border-radius: 2px;
+  background: #f5f5f7;
+}
+.ow-slider:hover::-moz-range-progress {
+  background: #2dd4bf;
+}
+.ow-slider::-moz-range-thumb {
+  height: 12px;
+  width: 12px;
+  border: 0;
+  border-radius: 9999px;
+  background: #f5f5f7;
+}
