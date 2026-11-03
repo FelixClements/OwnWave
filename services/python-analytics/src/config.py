@@ -10,9 +10,15 @@ DATABASE_URL = os.environ["DATABASE_URL"]
 ANALYTICS_API_SECRET = os.environ.get("ANALYTICS_API_SECRET", "")
 MUSIC_DIR = os.environ.get("MUSIC_DIR", "/music")
 
+# Audio genre model (Discogs400). Off by default: it needs the model files.
 ENABLE_GENRE_ANALYSIS = os.environ.get("ENABLE_GENRE_ANALYSIS", "false").lower() == "true"
 GENRE_MODEL_DIR = os.environ.get("GENRE_MODEL_DIR", "/app/models")
-GENRE_SNIPPET_START = float(os.environ.get("GENRE_SNIPPET_START", "30"))
-GENRE_SNIPPET_DURATION = float(os.environ.get("GENRE_SNIPPET_DURATION", "30"))
-GENRE_MIN_CONFIDENCE = float(os.environ.get("GENRE_MIN_CONFIDENCE", "0.3"))
-GENRE_FULL_TRACK_MODE = os.environ.get("GENRE_FULL_TRACK_MODE", "false").lower() == "true"
+# Length of each of the three analysis windows (at 20%, 50% and 75% of a track).
+GENRE_WINDOW_SECONDS = float(os.environ.get("GENRE_WINDOW_SECONDS", "20"))
+
+# Artist genre tags from musicbrainz.org (sends artist names to MusicBrainz).
+MUSICBRAINZ_ENABLED = os.environ.get("MUSICBRAINZ_ENABLED", "true").lower() == "true"
+MUSICBRAINZ_URL = os.environ.get("MUSICBRAINZ_URL", "https://musicbrainz.org")
+MUSICBRAINZ_USER_AGENT = os.environ.get(
+    "MUSICBRAINZ_USER_AGENT", "OwnWave/1.0 ( https://github.com/FelixClements/OwnWave )"
+)

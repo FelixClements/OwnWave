@@ -17,10 +17,8 @@ x-python: &python
     MUSIC_DIR: /music
     ENABLE_GENRE_ANALYSIS: ${ENABLE_GENRE_ANALYSIS:-false}
     GENRE_MODEL_DIR: ${GENRE_MODEL_DIR:-/app/models}
-    GENRE_SNIPPET_START: ${GENRE_SNIPPET_START:-30}
-    GENRE_SNIPPET_DURATION: ${GENRE_SNIPPET_DURATION:-30}
-    GENRE_MIN_CONFIDENCE: ${GENRE_MIN_CONFIDENCE:-0.3}
-    GENRE_FULL_TRACK_MODE: ${GENRE_FULL_TRACK_MODE:-false}
+    GENRE_WINDOW_SECONDS: ${GENRE_WINDOW_SECONDS:-20}
+    MUSICBRAINZ_ENABLED: ${MUSICBRAINZ_ENABLED:-true}
   volumes:
     - ${MUSIC_PATH:-./music}:/music:ro
   # go runs the database migrations, so it must be healthy first.

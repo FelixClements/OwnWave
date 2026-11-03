@@ -26,6 +26,9 @@ def main():
     clusters_parser = subparsers.add_parser("rebuild-clusters", help="Rebuild track clusters")
     clusters_parser.add_argument("--n-clusters", type=int, help="Number of K-Means clusters")
 
+    subparsers.add_parser("score-genres", help="Re-blend every track's station genres")
+    subparsers.add_parser("genre-report", help="Print the genre distribution and audio/tag agreement")
+
     args = parser.parse_args()
 
     if args.command == "scan":
@@ -57,6 +60,25 @@ def main():
         wait_for_db()
         result = backfill_library_clusters(n_clusters=args.n_clusters)
         print(f"Rebuilt clusters: {result}")
+
+    elif args.command == "score-genres":
+        from tasks import score_genres
+
+        wait_for_db()
+        print(score_genres())
+
+    elif args.command == "genre-report":
+        import json
+
+        import db
+        from config import GENRE_MODEL_DIR
+        from genre_audio import load_labels
+        from genre_scoring import agreement_report, distribution
+
+        wait_for_db()
+        with db.get_conn() as conn:
+            report = {"distribution": distribution(conn), "agreement": agreement_report(conn, load_labels(GENRE_MODEL_DIR))}
+        print(json.dumps(report, indent=2))
 
 
 if __name__ == "__main__":

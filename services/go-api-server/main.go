@@ -266,6 +266,7 @@ func newRouter(h *Handler, webDir string) http.Handler {
 			r.Get("/admin/stations", h.AdminStations)
 			r.Post("/admin/rebuild-analysis", h.AdminRebuildAnalysis)
 			r.Post("/admin/rebuild-genres", h.AdminRebuildGenres)
+			r.Get("/admin/genres/report", h.AdminGenreReport)
 			r.Post("/admin/playlists", h.AddPlaylist)
 			r.Post("/admin/playlists/{id}/sync", h.SyncPlaylist)
 			r.Delete("/admin/playlists/{id}", h.DeletePlaylist)

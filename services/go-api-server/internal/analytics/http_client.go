@@ -67,6 +67,10 @@ func (c *HTTPClient) RebuildGenres(ctx context.Context) (*Response, error) {
 	return c.do(ctx, http.MethodPost, "/rebuild-genres", nil)
 }
 
+func (c *HTTPClient) GenreReport(ctx context.Context) (*Response, error) {
+	return c.do(ctx, http.MethodGet, "/genres/report", nil)
+}
+
 func (c *HTTPClient) SetupSummary(ctx context.Context) (*Response, error) {
 	return c.do(ctx, http.MethodGet, "/setup/summary", nil)
 }
