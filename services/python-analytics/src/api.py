@@ -16,6 +16,11 @@ from config import ANALYTICS_API_SECRET, GENRE_MODEL_DIR, MUSIC_DIR
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     db.wait_for_db()
+    from genre_scoring import sync_catalog
+
+    with db.get_conn() as conn:
+        sync_catalog(conn)
+        conn.commit()
     yield
 
 

@@ -14,7 +14,6 @@ import {
   RadioIcon,
   SettingsIcon,
   ShieldIcon,
-  SimilarIcon,
   StationsIcon,
 } from '@/components/ui/Icons';
 
@@ -22,7 +21,6 @@ const NAV = [
   { href: '/', label: 'Listen', icon: RadioIcon },
   { href: '/library', label: 'Library', icon: LibraryIcon },
   { href: '/history', label: 'History', icon: HistoryIcon },
-  { href: '/similar', label: 'Similar', icon: SimilarIcon },
   { href: '/playlists', label: 'Playlists', icon: PlaylistIcon },
   { href: '/stations/manage', label: 'Stations', icon: StationsIcon },
   { href: '/admin', label: 'Admin', icon: ShieldIcon, admin: true },

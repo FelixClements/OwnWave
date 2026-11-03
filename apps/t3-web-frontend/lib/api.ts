@@ -1,4 +1,3 @@
-import type { StationSeedType } from './station-seed-types';
 
 /** Same-origin API prefix: the Next rewrite in dev, Caddy in production. */
 export const API_BASE = '/api';
@@ -44,12 +43,44 @@ export type Track = {
   channels?: number;
 };
 
+/**
+ * A station plays the local matches of its playlists, limited to its
+ * station genres when it has any.
+ */
 export type Station = {
   id: string;
   name: string;
-  seed_features?: string | Record<string, unknown> | null;
   /** Shared stations are played by everyone and changed by admins only. */
   shared: boolean;
+  playlist_ids: string[];
+  /** Station genre ids; empty means every genre. */
+  genres: string[];
+  track_count: number;
+  updated_at: string;
+};
+
+/** A station OwnWave proposes from the synced playlists. */
+export type StationSuggestion = {
+  playlist_ids: string[];
+  playlist_names: string[];
+  /** '' = every genre of the pool. */
+  genre: string;
+  genre_name?: string;
+  track_count: number;
+  name: string;
+};
+
+/** How many matched tracks of a playlist pool carry each station genre. */
+export type PoolGenres = {
+  tracks: number;
+  genres: { id: string; name: string; tracks: number }[];
+};
+
+/** Station genres with library-wide counts (from the analytics service). */
+export type GenreDistribution = {
+  scored_tracks: number;
+  genres: { genre: string; name: string; primary_tracks: number; tracks: number; station: boolean }[];
+  warnings: string[];
 };
 
 /** A synced Spotify playlist. It only grows: rotated-out tracks stay. */
@@ -121,14 +152,6 @@ export type AuthResponse = {
   user: User;
 };
 
-export type SimilarTrack = {
-  track_id: string;
-  title: string;
-  artist?: string;
-  album?: string;
-  distance: number;
-};
-
 export type HistoryEntry = {
   track_id: string;
   title: string;
@@ -144,19 +167,9 @@ export type ScanResponse = {
 };
 
 export type StationRequest = {
-  name: string;
-  min_bpm?: number;
-  max_bpm?: number;
-  min_energy?: number;
-  max_energy?: number;
-  min_valence?: number;
-  max_valence?: number;
-  seed_type?: StationSeedType;
-  track_id?: string;
-  artist_id?: string;
-  album_id?: string;
-  cluster_id?: number;
+  name?: string;
   playlist_ids?: string[];
+  genres?: string[];
 };
 
 export type FailedPath = { path: string; error: string };
@@ -190,14 +203,7 @@ export type ScanStatus = ScanJob & { stats: ScanCounts & { failed_paths: FailedP
 /** One scan in the history list; failed files are only counted. */
 export type ScanSummary = ScanJob & { stats: ScanCounts & { failed_files: number } };
 
-export type CreateStationResponse = { station_id: string };
-
-export type AdminStation = {
-  id: string;
-  name: string;
-  track_count: number;
-  played_count: number;
-};
+export type AdminStation = Station & { played_count: number };
 
 export type SetupStatus = {
   setup_completed: boolean;
@@ -298,14 +304,31 @@ class OwnWaveAPI {
   }
 
   createStation(body: StationRequest) {
-    return this.request<CreateStationResponse>('/stations', { method: 'POST', json: body });
+    return this.request<Station>('/stations', { method: 'POST', json: body });
   }
 
   updateStation(id: string, body: StationRequest) {
-    return this.request<{ station_id: string; name: string; track_count: number }>(
-      `/stations/${encodeURIComponent(id)}`,
-      { method: 'PUT', json: body },
-    );
+    return this.request<Station>(`/stations/${encodeURIComponent(id)}`, { method: 'PUT', json: body });
+  }
+
+  /** Genre breakdown of a playlist pool, for picking a station's genres. */
+  stationGenres(playlistIds: string[]) {
+    return this.request<PoolGenres>(`/stations/genres?playlist_ids=${playlistIds.map(encodeURIComponent).join(',')}`);
+  }
+
+  listStationSuggestions() {
+    return this.request<{ suggestions: StationSuggestion[]; min_tracks: number }>('/admin/station-suggestions');
+  }
+
+  dismissStationSuggestion(s: Pick<StationSuggestion, 'playlist_ids' | 'genre'>) {
+    return this.request<void>('/admin/station-suggestions/dismiss', {
+      method: 'POST',
+      json: { playlist_ids: s.playlist_ids, genre: s.genre },
+    });
+  }
+
+  listGenres() {
+    return this.request<GenreDistribution>('/genres');
   }
 
   deleteStation(id: string) {
@@ -320,8 +343,10 @@ class OwnWaveAPI {
     return this.request<{ playlists: Playlist[] }>('/playlists').then((r) => r.playlists);
   }
 
-  getPlaylist(id: string) {
-    return this.request<{ playlist: Playlist; items: PlaylistItem[] }>(`/playlists/${encodeURIComponent(id)}`);
+  /** items: 'missing' lists only the tracks with no local file. */
+  getPlaylist(id: string, items?: 'matched' | 'missing') {
+    const q = items ? `?items=${items}` : '';
+    return this.request<{ playlist: Playlist; items: PlaylistItem[] }>(`/playlists/${encodeURIComponent(id)}${q}`);
   }
 
   addPlaylist(url: string) {
@@ -334,12 +359,6 @@ class OwnWaveAPI {
 
   deletePlaylist(id: string) {
     return this.request<void>(`/admin/playlists/${encodeURIComponent(id)}`, { method: 'DELETE' });
-  }
-
-  getSimilarTracks(id: string, limit = 20) {
-    return this.request<{ track_id: string; similar: SimilarTrack[] }>(
-      `/tracks/${encodeURIComponent(id)}/similar?limit=${limit}`,
-    ).then((r) => r.similar);
   }
 
   register(username: string, password: string, inviteToken?: string) {

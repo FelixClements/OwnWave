@@ -332,7 +332,6 @@ def upsert_audio_features_batch(
                 Jsonb(rec["chroma"]) if rec.get("chroma") else None,
                 rec.get("spectral_centroid"),
                 rec.get("mfcc"),
-                rec.get("feature_vector"),
             )
         )
     if not values:
@@ -343,8 +342,8 @@ def upsert_audio_features_batch(
             INSERT INTO audio_features
                 (track_id, bpm, key, loudness, energy, valence,
                  outro_start_seconds, ideal_crossfade_seconds, intro_start_seconds,
-                 outro_end_seconds, chroma, spectral_centroid, mfcc, feature_vector, analyzed_at)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())
+                 outro_end_seconds, chroma, spectral_centroid, mfcc, analyzed_at)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())
             ON CONFLICT (track_id) DO UPDATE SET
                 bpm = EXCLUDED.bpm,
                 key = EXCLUDED.key,
@@ -358,7 +357,6 @@ def upsert_audio_features_batch(
                 chroma = EXCLUDED.chroma,
                 spectral_centroid = EXCLUDED.spectral_centroid,
                 mfcc = EXCLUDED.mfcc,
-                feature_vector = EXCLUDED.feature_vector,
                 analyzed_at = NOW()
             """,
             values,

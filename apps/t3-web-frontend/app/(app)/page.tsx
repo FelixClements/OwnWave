@@ -5,8 +5,8 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import type { Station } from '@/lib/api';
 import { useStation } from '@/lib/station';
-import { useFeedbackMutation, usePlaylists, useSetupStatus } from '@/lib/queries';
-import { describeStationSeed, parseStationSeed, SEED_TYPE_LABELS } from '@/lib/station-seed';
+import { useFeedbackMutation, useGenreNames, usePlaylists, useSetupStatus } from '@/lib/queries';
+import { describeStation } from '@/lib/station-describe';
 import { StationArt } from '@/components/stations/StationArt';
 import { TrackTable } from '@/components/tracks/TrackTable';
 import { Button, buttonClass } from '@/components/ui/Button';
@@ -97,8 +97,7 @@ function StationView({ station }: { station: Station }) {
 
   const { data: playlists = [] } = usePlaylists();
   const playlistNames = Object.fromEntries(playlists.map((p) => [p.id, p.name]));
-  const seed = parseStationSeed(station.seed_features as Parameters<typeof parseStationSeed>[0]);
-  const seedType = seed?.type ?? seed?.seed_type;
+  const genreNames = useGenreNames();
   const isThisPlaying = playingStation === station.id;
   const active = isPlaying && isThisPlaying;
 
@@ -116,12 +115,12 @@ function StationView({ station }: { station: Station }) {
       <div className="flex flex-wrap items-center gap-3.5 mb-4">
         <StationArt name={station.name} className="w-16 h-16 rounded-xl" />
         <div className="flex-1 min-w-0">
-          {seedType && (
-            <div className="text-[11px] uppercase tracking-widest text-muted truncate">{SEED_TYPE_LABELS[seedType]} station</div>
-          )}
+          <div className="text-[11px] uppercase tracking-widest text-muted truncate">
+            {station.shared ? 'Shared station' : 'Your station'} · {station.track_count} tracks
+          </div>
           <h1 className="text-xl font-bold truncate">{station.name}</h1>
           <div className="text-muted truncate">
-            {[describeStationSeed(seed, playlistNames), `${queue.length} queued`].filter(Boolean).join(' · ')}
+            {[describeStation(station, playlistNames, genreNames), `${queue.length} queued`].filter(Boolean).join(' · ')}
           </div>
         </div>
         <Button variant="primary" onClick={togglePlay} disabled={queue.length === 0}>

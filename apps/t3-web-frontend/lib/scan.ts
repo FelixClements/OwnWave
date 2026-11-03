@@ -27,7 +27,7 @@ export function scanPhase(scan: Scan): ScanPhase {
       if (finished < total) {
         return { label: `Importing folders: ${finished} of ${total}`, progress: finished / total };
       }
-      return { label: 'Analyzing library (similarity and clusters)…', progress: 1 };
+      return { label: 'Finishing scan…', progress: 1 };
   }
 }
 

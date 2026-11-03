@@ -200,34 +200,23 @@ function HealthSection() {
 
 function MaintenanceSection() {
   const [notice, setNotice] = useState<NoticeValue>(null);
-  const rebuildAnalysis = useMutation(() => api.adminRebuildAnalysis(), {
-    onMutate: () => setNotice(null),
-    onSuccess: () => setNotice({ type: 'success', text: 'Analysis rebuild queued.' }),
-    onError: (err: Error) => setNotice(errorNotice('Analysis rebuild failed')(err)),
-  });
   const rebuildGenres = useMutation(() => api.adminRebuildGenres(), {
     onMutate: () => setNotice(null),
-    onSuccess: () => setNotice({ type: 'success', text: 'Genre rebuild queued.' }),
-    onError: (err: Error) => setNotice(errorNotice('Genre rebuild failed')(err)),
+    onSuccess: () => setNotice({ type: 'success', text: 'Genre refresh queued.' }),
+    onError: (err: Error) => setNotice(errorNotice('Genre refresh failed')(err)),
   });
 
   return (
     <Panel title="Maintenance">
       <div className="flex flex-wrap gap-2 mb-3">
         <Button
-          onClick={() => rebuildAnalysis.mutate()}
-          loading={rebuildAnalysis.isLoading}
-          title="Recompute similarity vectors and clusters (also runs after every scan)"
-        >
-          Rebuild analysis
-        </Button>
-        <Button
           onClick={() => {
-            if (confirm('Rebuild all genre predictions?')) rebuildGenres.mutate();
+            if (confirm('Look up artist genres on MusicBrainz and re-score every track?')) rebuildGenres.mutate();
           }}
           loading={rebuildGenres.isLoading}
+          title="Also runs after every scan. Audio is re-analysed by a scan when the model changes."
         >
-          Rebuild genres
+          Refresh genres
         </Button>
       </div>
       <Notice notice={notice} />

@@ -65,8 +65,11 @@ Status: implemented on branch `phase1/genre-engine` (migration 018).
 
 ## Phase 2: playlists and stations
 
+Status: implemented on branch `phase2/stations` (migration 019), stacked on Phase 1.
+
+
 1. Matcher: add `mixed` to version noise; dedupe library duplicates (prefer the highest quality file); keep exact/fuzzy logic.
-2. Missing list per playlist: unmatched items with title, artist, first seen. Export as CSV/text. Re-match automatically after each library scan.
+2. Missing list per playlist: unmatched items with title, artist, first seen (`GET /api/playlists/{id}?items=missing`), view only. Unmatched items are re-matched by the hourly sync, so files added by a scan are found within the hour.
 3. Sync: keep the embed scraper (`open.spotify.com/embed/playlist/<id>`). The user pastes the normal public URL (`open.spotify.com/playlist/<id>`); OwnWave extracts the id and builds the embed URL itself. This already works today (`spotify.ParsePlaylistID`, covered by `TestParsePlaylistID`) and must stay that way. The embed shows up to about 100 tracks. Daily sync plus "sync now". Growth-only semantics stay as today.
 4. Pools: a station's pool is 1..n playlists. "Combine playlists into a station" = create a station whose pool has several playlists.
 5. Genre split: after a sync or analysis, compute matched tracks per station genre per pool. Suggest a station when a genre has at least 25 tracks (configurable). The suggestion list shows track counts and sample covers; accepting creates a normal station.

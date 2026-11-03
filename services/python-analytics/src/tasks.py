@@ -151,43 +151,13 @@ def _job_started_at(conn, job_id: UUID):
 
 
 def rebuild_analysis(scan_job_id: Optional[str] = None) -> dict:
-    """Rebuild feature vectors, then clusters, then queue the genre refresh.
-
-    With scan_job_id, this is the last step of that scan: the job completes
-    or fails with it.
-    """
-    try:
-        from clustering import backfill_library_clusters
-        from feature_vector import backfill_library_feature_vectors
-
-        vectors = backfill_library_feature_vectors()
-        clusters = backfill_library_clusters()
-    except Exception as exc:
-        if scan_job_id:
-            with db.get_conn() as conn:
-                db.update_scan_job(conn, UUID(scan_job_id), "failed", error=f"analysis failed: {exc}")
-                conn.commit()
-        raise
+    """Last step of a scan: complete its job, then queue the genre refresh."""
     with db.get_conn() as conn:
         if scan_job_id:
             db.update_scan_job(conn, UUID(scan_job_id), "completed")
         queue_genre_refresh(conn)
         conn.commit()
-    return {"vectors": vectors, "clusters": clusters}
-
-
-def rebuild_feature_vectors() -> int:
-    """Rebuild normalized feature vectors for all tracks."""
-    from feature_vector import backfill_library_feature_vectors
-
-    return backfill_library_feature_vectors()
-
-
-def rebuild_clusters(n_clusters: Optional[int] = None) -> dict:
-    """Rebuild track clusters."""
-    from clustering import backfill_library_clusters
-
-    return backfill_library_clusters(n_clusters=n_clusters)
+    return {"scan_job_id": scan_job_id}
 
 
 # Artist names looked up per fetch_artist_genres run (about 1.1 s each).
@@ -291,8 +261,6 @@ TASKS = {
         process_audio_folder,
         finalize_scan,
         rebuild_analysis,
-        rebuild_feature_vectors,
-        rebuild_clusters,
         fetch_artist_genres,
         score_genres,
     )

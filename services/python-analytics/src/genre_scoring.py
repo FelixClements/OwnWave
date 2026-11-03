@@ -111,8 +111,27 @@ def artist_mb_tags(credit: Optional[str], by_key: Dict[str, List[dict]]) -> Opti
     return tags
 
 
+def sync_catalog(conn) -> None:
+    """Write the station genres to station_genres, where the API reads names
+    and which genres may be used for stations. The caller commits."""
+    with conn.cursor() as cur:
+        cur.executemany(
+            """
+            INSERT INTO station_genres (id, name, position, is_station) VALUES (%s, %s, %s, %s)
+            ON CONFLICT (id) DO UPDATE SET
+                name = EXCLUDED.name, position = EXCLUDED.position, is_station = EXCLUDED.is_station
+            """,
+            [
+                (g, name, i, g not in tx.NON_STATION_GENRES)
+                for i, (g, name) in enumerate(tx.STATION_GENRES.items())
+            ],
+        )
+        cur.execute("DELETE FROM station_genres WHERE id <> ALL(%s)", (list(tx.STATION_GENRES),))
+
+
 def score_library(conn, labels: Optional[List[str]]) -> dict:
     """Recompute track_station_genres for every track. The caller commits."""
+    sync_catalog(conn)
     mb = _mb_tags_by_key(conn)
     rows = conn.execute(_TRACKS_SQL).fetchall()
     values = []

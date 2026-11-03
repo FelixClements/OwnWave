@@ -2,31 +2,19 @@
 
 import { useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { api, type StationRequest } from '@/lib/api';
+import { api, type StationRequest, type StationSuggestion } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
-import {
-  describeStationSeed,
-  emptyStationFilterForm,
-  filterFormToRequest,
-  parseStationSeed,
-  SEED_TYPE_LABELS,
-  seedToFilterForm,
-  STATION_SEED_TYPES,
-} from '@/lib/station-seed';
-import { keys, usePlaylists, useQueue, useStationQuery, useStations } from '@/lib/queries';
+import { describeStation } from '@/lib/station-describe';
+import { keys, useGenreNames, usePlaylists, useQueue, useStationQuery, useStations, useStationSuggestions } from '@/lib/queries';
 import { useStation } from '@/lib/station';
 import { StationArt } from '@/components/stations/StationArt';
-import { StationForm } from '@/components/stations/StationForm';
+import { StationForm, type StationFormValue } from '@/components/stations/StationForm';
 import { TrackTable } from '@/components/tracks/TrackTable';
 import { Button } from '@/components/ui/Button';
 import { Badge, Notice, PageHeader, Panel, type NoticeValue } from '@/components/ui/Layout';
 import { EmptyRow, Table, Td, Th } from '@/components/ui/Table';
 
 type Editor = { mode: 'create' } | { mode: 'edit'; id: string } | null;
-
-// Playlist stations are shared, so only admins create them and a station
-// never switches between personal and shared.
-const PERSONAL_SEED_TYPES = STATION_SEED_TYPES.filter((t) => t !== 'playlists');
 
 export default function ManageStationsPage() {
   const qc = useQueryClient();
@@ -36,6 +24,7 @@ export default function ManageStationsPage() {
   const { data: stations } = useStations();
   const { data: playlists = [] } = usePlaylists();
   const playlistNames = Object.fromEntries(playlists.map((p) => [p.id, p.name]));
+  const genreNames = useGenreNames();
   const [editor, setEditor] = useState<Editor>(null);
   const [previewId, setPreviewId] = useState<string | null>(null);
   const [notice, setNotice] = useState<NoticeValue>(null);
@@ -51,10 +40,11 @@ export default function ManageStationsPage() {
   };
 
   const create = useMutation((body: StationRequest) => api.createStation(body), {
-    onSuccess: (_data, body) => {
+    onSuccess: (station) => {
       closeEditor();
-      setNotice({ type: 'success', text: `Created “${body.name}”.` });
+      setNotice({ type: 'success', text: `Created “${station.name}” (${station.track_count} tracks).` });
       void qc.invalidateQueries(keys.stations);
+      void qc.invalidateQueries(keys.stationSuggestions);
     },
     onError: (err: Error) => setFormError(err.message),
   });
@@ -64,6 +54,7 @@ export default function ManageStationsPage() {
       closeEditor();
       setNotice({ type: 'success', text: `Saved “${data.name}” (${data.track_count} tracks).` });
       void qc.invalidateQueries(keys.stations);
+      void qc.invalidateQueries(keys.stationSuggestions);
       void qc.invalidateQueries(keys.station(id));
       void qc.invalidateQueries(keys.queue(id));
     },
@@ -73,6 +64,7 @@ export default function ManageStationsPage() {
   const remove = useMutation((id: string) => api.deleteStation(id), {
     onSuccess: (_, id) => {
       void qc.invalidateQueries(keys.stations);
+      void qc.invalidateQueries(keys.stationSuggestions);
       if (previewId === id) setPreviewId(null);
       if (editingId === id) closeEditor();
       if (id === selectedStation) setSelectedStation(null);
@@ -88,7 +80,11 @@ export default function ManageStationsPage() {
     <>
       <PageHeader
         title="Stations"
-        subtitle="A station holds every library track matching its seed and filters. Playlist stations are shared with everyone."
+        subtitle={
+          isAdmin
+            ? 'A station plays the local matches of its playlists, optionally only some genres. Your stations are shared with everyone.'
+            : 'A station plays the local matches of its playlists, optionally only some genres.'
+        }
         actions={
           <Button
             variant="primary"
@@ -105,6 +101,8 @@ export default function ManageStationsPage() {
         <Notice notice={notice} />
       </div>
 
+      {isAdmin && <Suggestions onAccepted={(name) => setNotice({ type: 'success', text: `Created “${name}”.` })} />}
+
       {/* Side-by-side only when the table keeps room for its filter and action columns. */}
       <div className={`grid gap-4 items-start ${editor ? '2xl:grid-cols-[1fr_380px]' : ''}`}>
         <div className="min-w-0 space-y-4">
@@ -115,10 +113,10 @@ export default function ManageStationsPage() {
                   <span className="sr-only">Art</span>
                 </Th>
                 <Th>Name</Th>
-                <Th style={{ width: '96px' }} className="hidden sm:table-cell">
-                  Seed
+                <Th style={{ width: '80px' }} align="right" className="hidden sm:table-cell">
+                  Tracks
                 </Th>
-                <Th className="hidden lg:table-cell w-[40%]">Filters</Th>
+                <Th className="hidden lg:table-cell w-[40%]">Plays</Th>
                 <Th align="right" style={{ width: '196px' }}>
                   <span className="sr-only">Actions</span>
                 </Th>
@@ -126,8 +124,7 @@ export default function ManageStationsPage() {
             </thead>
             <tbody>
               {stations?.map((s) => {
-                const seed = parseStationSeed(s.seed_features as Parameters<typeof parseStationSeed>[0]);
-                const seedType = seed?.type ?? seed?.seed_type;
+                const description = describeStation(s, playlistNames, genreNames);
                 const editing = editingId === s.id;
                 const canChange = !s.shared || isAdmin;
                 return (
@@ -143,11 +140,11 @@ export default function ManageStationsPage() {
                         </Badge>
                       )}
                     </Td>
-                    <Td className="hidden sm:table-cell">
-                      {seedType ? <Badge>{SEED_TYPE_LABELS[seedType]}</Badge> : <span className="text-muted">—</span>}
+                    <Td align="right" className="hidden sm:table-cell tabular-nums">
+                      {s.track_count}
                     </Td>
-                    <Td className="hidden lg:table-cell text-muted" title={describeStationSeed(seed, playlistNames)}>
-                      {describeStationSeed(seed, playlistNames) || '—'}
+                    <Td className="hidden lg:table-cell text-muted" title={description}>
+                      {description || '—'}
                     </Td>
                     <Td align="right">
                       <div className="inline-flex gap-1">
@@ -203,7 +200,7 @@ export default function ManageStationsPage() {
               <TrackTable
                 label="Preview queue"
                 rows={previewQueue ?? []}
-                columns={['index', 'title', 'bpm', 'key', 'energy', 'valence', 'duration']}
+                columns={['index', 'title', 'album', 'duration']}
                 empty="No tracks in queue."
               />
             </Panel>
@@ -216,29 +213,23 @@ export default function ManageStationsPage() {
               <StationForm
                 key="create"
                 title="New station"
-                initialForm={emptyStationFilterForm()}
-                seedTypes={isAdmin ? [...STATION_SEED_TYPES] : PERSONAL_SEED_TYPES}
                 playlists={playlists}
                 submitLabel="Create"
                 submitting={create.isLoading}
                 error={formError}
-                onSubmit={(name, form) => create.mutate(filterFormToRequest(name, form))}
+                onSubmit={(v: StationFormValue) => create.mutate(v)}
                 onCancel={closeEditor}
               />
             ) : editingReady ? (
               <StationForm
                 key={editingStation.id}
                 title={`Edit ${editingStation.name}`}
-                initialName={editingStation.name}
-                initialForm={seedToFilterForm(
-                  parseStationSeed(editingStation.seed_features as Parameters<typeof parseStationSeed>[0]),
-                )}
-                seedTypes={editingStation.shared ? ['playlists'] : PERSONAL_SEED_TYPES}
+                initial={{ name: editingStation.name, playlist_ids: editingStation.playlist_ids, genres: editingStation.genres }}
                 playlists={playlists}
                 submitLabel="Save"
                 submitting={update.isLoading}
                 error={formError}
-                onSubmit={(name, form) => update.mutate({ id: editingStation.id, body: filterFormToRequest(name, form) })}
+                onSubmit={(v: StationFormValue) => update.mutate({ id: editingStation.id, body: v })}
                 onCancel={closeEditor}
               />
             ) : (
@@ -248,5 +239,68 @@ export default function ManageStationsPage() {
         )}
       </div>
     </>
+  );
+}
+
+/** Stations OwnWave proposes from the synced playlists (admins only). */
+function Suggestions({ onAccepted }: { onAccepted: (name: string) => void }) {
+  const qc = useQueryClient();
+  const { data } = useStationSuggestions(true);
+  const [error, setError] = useState<string | null>(null);
+  const refresh = () => {
+    void qc.invalidateQueries(keys.stationSuggestions);
+    void qc.invalidateQueries(keys.stations);
+  };
+  const accept = useMutation(
+    (s: StationSuggestion) =>
+      api.createStation({ name: s.name, playlist_ids: s.playlist_ids, genres: s.genre ? [s.genre] : [] }),
+    {
+      onMutate: () => setError(null),
+      onSuccess: (station) => {
+        onAccepted(station.name);
+        refresh();
+      },
+      onError: (err: Error) => setError(err.message),
+    },
+  );
+  const dismiss = useMutation((s: StationSuggestion) => api.dismissStationSuggestion(s), {
+    onMutate: () => setError(null),
+    onSuccess: refresh,
+    onError: (err: Error) => setError(err.message),
+  });
+
+  const list = data?.suggestions ?? [];
+  if (list.length === 0) return null;
+  return (
+    <Panel title="Suggested stations" className="mb-4">
+      <p className="text-muted mb-2 text-[12.5px]">
+        Built from your playlists: each one alone and all together, whole or per genre with at least {data?.min_tracks}{' '}
+        tracks. Accept creates the station (rename it with Edit); Dismiss hides the suggestion for good.
+      </p>
+      {error && (
+        <p role="alert" className="text-danger mb-2">
+          {error}
+        </p>
+      )}
+      <ul className="divide-y divide-line">
+        {list.map((s) => (
+          <li key={`${s.playlist_ids.join(',')}|${s.genre}`} className="flex items-center gap-3 py-2">
+            <StationArt name={s.name} />
+            <div className="flex-1 min-w-0">
+              <div className="font-medium truncate">{s.name}</div>
+              <div className="text-muted text-[12px] truncate">
+                {s.playlist_names.join(', ')} · {s.genre_name ?? 'all genres'} · {s.track_count} tracks
+              </div>
+            </div>
+            <Button size="sm" variant="primary" onClick={() => accept.mutate(s)} loading={accept.isLoading && accept.variables === s}>
+              Accept
+            </Button>
+            <Button size="sm" variant="ghost" onClick={() => dismiss.mutate(s)} aria-label={`Dismiss ${s.name}`}>
+              Dismiss
+            </Button>
+          </li>
+        ))}
+      </ul>
+    </Panel>
   );
 }

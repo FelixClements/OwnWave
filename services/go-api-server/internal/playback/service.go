@@ -43,34 +43,21 @@ func (s *Service) Record(ctx context.Context, userID, trackID, stationID string)
 	return err
 }
 
-// poolFrom selects the tracks matching seed, minus the user's bans. Tracks
-// not analysed yet are included; their features read as 0.
-// args[0] must be the user id; joins are inserted before the WHERE clause.
-func (s *Service) poolFrom(seed stations.Seed, args *stations.Args, joins string) string {
-	return `
-		FROM tracks t
-		LEFT JOIN audio_features af ON af.track_id = t.id
-		` + joins + `
-		WHERE NOT EXISTS (
-			SELECT 1 FROM track_feedback b
-			WHERE b.user_id = $1::uuid AND b.track_id = t.id AND b.feedback = 'ban'
-		)
-		AND ` + seed.Where(args)
-}
-
-// PoolSize counts the tracks currently matching seed for the user.
-func (s *Service) PoolSize(ctx context.Context, userID string, seed stations.Seed) (int, error) {
-	args := stations.Args{userID}
-	var n int
-	err := s.pool.QueryRow(ctx, `SELECT COUNT(*) `+s.poolFrom(seed, &args, ""), args...).Scan(&n)
-	return n, err
-}
-
 // BuildQueue returns up to QueuePageSize tracks from the station's live pool:
 // tracks not played on this station within recentHours come first in random
 // order, followed by recently played ones, least recent first.
-func (s *Service) BuildQueue(ctx context.Context, userID, stationID string, seed stations.Seed, recentHours int) ([]TrackWithFeatures, error) {
+func (s *Service) BuildQueue(ctx context.Context, userID, stationID string, def stations.Definition, recentHours int) ([]TrackWithFeatures, error) {
 	args := stations.Args{userID, stationID}
+	joins := `
+		LEFT JOIN audio_features af ON af.track_id = t.id
+		LEFT JOIN artists a ON t.artist_id = a.id
+		LEFT JOIN albums al ON t.album_id = al.id
+		LEFT JOIN (
+			SELECT track_id, MAX(played_at) AS last_played
+			FROM listening_history
+			WHERE user_id = $1::uuid AND station_id = $2::uuid
+			GROUP BY track_id
+		) lp ON lp.track_id = t.id`
 	rows, err := s.pool.Query(ctx, `
 		SELECT t.id::text, t.title, a.name, al.title, t.path, t.track_number,
 		       t.duration_seconds, t.sample_rate, t.channels,
@@ -79,15 +66,8 @@ func (s *Service) BuildQueue(ctx context.Context, userID, stationID string, seed
 		       COALESCE(af.intro_start_seconds, 0), COALESCE(af.outro_end_seconds, 0),
 		       EXISTS (SELECT 1 FROM track_feedback l WHERE l.user_id = $1::uuid AND l.track_id = t.id AND l.feedback = 'like'),
 		       lp.last_played
-		`+s.poolFrom(seed, &args, `
-		LEFT JOIN artists a ON t.artist_id = a.id
-		LEFT JOIN albums al ON t.album_id = al.id
-		LEFT JOIN (
-			SELECT track_id, MAX(played_at) AS last_played
-			FROM listening_history
-			WHERE user_id = $1::uuid AND station_id = $2::uuid
-			GROUP BY track_id
-		) lp ON lp.track_id = t.id`), args...)
+		FROM tracks t`+joins+`
+		WHERE `+stations.NotBanned("$1")+` AND `+def.Where(&args), args...)
 	if err != nil {
 		return nil, err
 	}
@@ -118,8 +98,78 @@ type queued struct {
 	lastPlayed *time.Time
 }
 
+// artistGap is how many other tracks must play before an artist repeats,
+// when the pool allows it.
+const artistGap = 3
+
+// spreadArtists reorders items so the same artist does not play twice
+// within gap tracks, keeping the given order as far as it can. At each
+// position it takes the first remaining track whose artist is not among
+// the last gap artists, except that an artist with just enough slots
+// left to keep its spacing goes first. When no track qualifies (e.g. a
+// one-artist pool) it takes the first remaining track.
+func spreadArtists(items []queued, gap int) []queued {
+	out := make([]queued, 0, len(items))
+	rest := append([]queued(nil), items...)
+	remaining := map[string]int{}
+	for _, it := range rest {
+		if a := artistKey(it.track); a != "" {
+			remaining[a]++
+		}
+	}
+	recent := make([]string, 0, gap)
+	for len(rest) > 0 {
+		pick, found := 0, false
+		for i, it := range rest {
+			a := artistKey(it.track)
+			if containsArtist(recent, a) {
+				continue
+			}
+			// c tracks spaced gap apart need (c-1)*(gap+1)+1 slots.
+			if a != "" && (remaining[a]-1)*(gap+1)+1 >= len(rest) {
+				pick, found = i, true
+				break
+			}
+			if !found {
+				pick, found = i, true
+			}
+		}
+		it := rest[pick]
+		rest = append(rest[:pick], rest[pick+1:]...)
+		out = append(out, it)
+		if a := artistKey(it.track); a != "" {
+			remaining[a]--
+			recent = append(recent, a)
+			if len(recent) > gap {
+				recent = recent[1:]
+			}
+		}
+	}
+	return out
+}
+
+func artistKey(t TrackWithFeatures) string {
+	if t.Artist == nil {
+		return ""
+	}
+	return strings.ToLower(strings.TrimSpace(*t.Artist))
+}
+
+func containsArtist(recent []string, a string) bool {
+	if a == "" {
+		return false
+	}
+	for _, r := range recent {
+		if r == a {
+			return true
+		}
+	}
+	return false
+}
+
 // orderQueue dedupes by title+artist, then puts fresh tracks (shuffled) ahead
-// of recently played ones (least recent first) and truncates to a page.
+// of recently played ones (least recent first), spaces out artists and
+// truncates to a page.
 func orderQueue(items []queued, recentHours int, now time.Time) []TrackWithFeatures {
 	cutoff := now.Add(-time.Duration(recentHours) * time.Hour)
 	seen := make(map[string]bool, len(items))
@@ -143,7 +193,7 @@ func orderQueue(items []queued, recentHours int, now time.Time) []TrackWithFeatu
 	rand.Shuffle(len(fresh), func(i, j int) { fresh[i], fresh[j] = fresh[j], fresh[i] })
 	sort.SliceStable(recent, func(i, j int) bool { return recent[i].lastPlayed.Before(*recent[j].lastPlayed) })
 
-	ordered := append(fresh, recent...)
+	ordered := spreadArtists(append(fresh, recent...), artistGap)
 	if len(ordered) > QueuePageSize {
 		ordered = ordered[:QueuePageSize]
 	}

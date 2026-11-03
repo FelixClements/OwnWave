@@ -58,3 +58,15 @@ def test_agreement_report_compares_audio_with_tags(db_url):
         assert report["tracks"] == 3
         assert report["audio_agreement"] == round(2 / 3, 3)
         assert report["top_confusions"] == [{"tag": "punk", "audio": "techno", "tracks": 1}]
+
+
+def test_sync_catalog_writes_station_genres(db_url):
+    import genre_taxonomy as tx
+
+    with psycopg.connect(db_url) as conn:
+        conn.execute("INSERT INTO station_genres (id, name, position) VALUES ('stale', 'Gone', 0)")
+        genre_scoring.sync_catalog(conn)
+        rows = conn.execute("SELECT id, name, is_station FROM station_genres ORDER BY position").fetchall()
+        assert [r[0] for r in rows] == list(tx.STATION_GENRES)
+        assert ("techno", "Techno", True) in rows
+        assert ("other", "Other", False) in rows
