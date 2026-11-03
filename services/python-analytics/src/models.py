@@ -43,13 +43,16 @@ class ScanResult:
 
 @dataclass
 class AudioFeatures:
-    bpm: float
-    key: str
-    loudness: float
-    energy: float
-    valence: float
-    outro_start_seconds: float
-    ideal_crossfade_seconds: float
+    """Per-track audio features. Only loudness is measured now; the other
+    columns stay for clients that read them and are empty."""
+
+    loudness: Optional[float] = None
+    bpm: Optional[float] = None
+    key: Optional[str] = None
+    energy: Optional[float] = None
+    valence: Optional[float] = None
+    outro_start_seconds: Optional[float] = None
+    ideal_crossfade_seconds: Optional[float] = None
     intro_start_seconds: Optional[float] = None
     outro_end_seconds: Optional[float] = None
     chroma: Optional[list] = None
@@ -62,29 +65,3 @@ class Analyzer(Protocol):
 
     def analyze(self, path: str) -> AudioFeatures:
         ...
-
-
-def merge_features(base: AudioFeatures, extra: Optional[AudioFeatures]) -> AudioFeatures:
-    """Use extra (e.g. essentia) to fill any gaps, otherwise keep base."""
-    if not extra:
-        return base
-
-    def pick(base_val, extra_val):
-        return extra_val if extra_val is not None else base_val
-
-    return AudioFeatures(
-        bpm=pick(base.bpm, extra.bpm),
-        key=pick(base.key, extra.key),
-        loudness=pick(base.loudness, extra.loudness),
-        energy=pick(base.energy, extra.energy),
-        valence=pick(base.valence, extra.valence),
-        outro_start_seconds=pick(base.outro_start_seconds, extra.outro_start_seconds),
-        ideal_crossfade_seconds=pick(
-            base.ideal_crossfade_seconds, extra.ideal_crossfade_seconds
-        ),
-        intro_start_seconds=pick(base.intro_start_seconds, extra.intro_start_seconds),
-        outro_end_seconds=pick(base.outro_end_seconds, extra.outro_end_seconds),
-        chroma=pick(base.chroma, extra.chroma),
-        spectral_centroid=pick(base.spectral_centroid, extra.spectral_centroid),
-        mfcc=pick(base.mfcc, extra.mfcc),
-    )

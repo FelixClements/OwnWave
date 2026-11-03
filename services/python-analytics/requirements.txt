@@ -1,5 +1,4 @@
-librosa>=0.10
-resampy>=0.4.3
+soundfile>=0.12
 mutagen>=1.47
 pyloudnorm>=0.1
 psycopg[binary]>=3.1
