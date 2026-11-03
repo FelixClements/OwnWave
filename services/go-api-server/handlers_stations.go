@@ -188,3 +188,77 @@ func (h *Handler) DismissStationSuggestion(w http.ResponseWriter, r *http.Reques
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
+
+// Browse returns a node of the media tree apps show (Android Auto):
+// GET /browse?node=root|stations|recent|genres|playlists|genre:<id>|playlist:<id>.
+func (h *Handler) Browse(w http.ResponseWriter, r *http.Request) {
+	user, ok := h.currentUser(w, r)
+	if !ok {
+		return
+	}
+	node, err := h.stations.Browse(r.Context(), user.ID, r.URL.Query().Get("node"))
+	if errors.Is(err, stations.ErrUnknownNode) {
+		http.Error(w, err.Error(), http.StatusNotFound)
+		return
+	}
+	if err != nil {
+		writeInternalError(w, r, "browse", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, node)
+}
+
+// SearchStations finds stations to play for a (voice) query such as
+// "play techno radio": GET /search/stations?q=.
+func (h *Handler) SearchStations(w http.ResponseWriter, r *http.Request) {
+	user, ok := h.currentUser(w, r)
+	if !ok {
+		return
+	}
+	q := r.URL.Query().Get("q")
+	if len(q) > 200 {
+		http.Error(w, "query too long", http.StatusBadRequest)
+		return
+	}
+	hits, err := h.stations.Search(r.Context(), user.ID, q)
+	if err != nil {
+		writeInternalError(w, r, "search stations", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"query": stations.CleanQuery(q), "results": hits})
+}
+
+// coverCandidates bounds how many tracks are tried for a station cover.
+const coverCandidates = 8
+
+// GetStationCover returns the cover art of one of the station's tracks
+// (the same one every time while the station's pool is unchanged).
+func (h *Handler) GetStationCover(w http.ResponseWriter, r *http.Request) {
+	user, ok := h.currentUser(w, r)
+	if !ok {
+		return
+	}
+	id, ok := parseUUIDParam(w, r, "id")
+	if !ok {
+		return
+	}
+	st, err := h.stations.Get(r.Context(), user.ID, id)
+	if err != nil {
+		writeStationError(w, r, "get station", err)
+		return
+	}
+	ids, err := h.stations.CoverCandidates(r.Context(), user.ID, st, coverCandidates)
+	if err != nil {
+		writeInternalError(w, r, "station cover", err)
+		return
+	}
+	for _, trackID := range ids {
+		if cover := h.trackCover(r, trackID); len(cover) > 0 {
+			w.Header().Set("Content-Type", "image/jpeg")
+			w.Header().Set("Cache-Control", "private, max-age=3600")
+			_, _ = w.Write(cover)
+			return
+		}
+	}
+	http.Error(w, "no cover art", http.StatusNotFound)
+}

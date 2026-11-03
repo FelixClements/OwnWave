@@ -169,3 +169,63 @@ func writeAuthUser(w http.ResponseWriter, user auth.User) {
 		},
 	})
 }
+
+// LoginDevice signs an app in: it returns a long-lived device token to
+// send as "Authorization: Bearer <token>" (no cookie is set).
+func (h *Handler) LoginDevice(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Username   string `json:"username"`
+		Password   string `json:"password"`
+		DeviceName string `json:"device_name"`
+	}
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	if req.Username == "" || req.Password == "" {
+		http.Error(w, "username and password required", http.StatusBadRequest)
+		return
+	}
+	token, user, device, err := h.auth.LoginDevice(r.Context(), req.Username, req.Password, req.DeviceName)
+	if err != nil {
+		if errors.Is(err, auth.ErrInvalidCredentials) {
+			http.Error(w, "invalid credentials", http.StatusUnauthorized)
+			return
+		}
+		writeInternalError(w, r, "device login", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"token": token, "user": user, "device": device})
+}
+
+func (h *Handler) ListDevices(w http.ResponseWriter, r *http.Request) {
+	user, ok := h.currentUser(w, r)
+	if !ok {
+		return
+	}
+	devices, err := h.auth.ListDevices(r.Context(), user.ID, auth.TokenFromRequest(r))
+	if err != nil {
+		writeInternalError(w, r, "list devices", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"devices": devices})
+}
+
+func (h *Handler) RevokeDevice(w http.ResponseWriter, r *http.Request) {
+	user, ok := h.currentUser(w, r)
+	if !ok {
+		return
+	}
+	id, ok := parseUUIDParam(w, r, "id")
+	if !ok {
+		return
+	}
+	if err := h.auth.RevokeDevice(r.Context(), user.ID, id); err != nil {
+		if errors.Is(err, auth.ErrDeviceNotFound) {
+			http.Error(w, err.Error(), http.StatusNotFound)
+			return
+		}
+		writeInternalError(w, r, "revoke device", err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}

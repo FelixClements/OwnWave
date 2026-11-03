@@ -180,3 +180,103 @@ func TestStationSuggestionsAndGenreCounts(t *testing.T) {
 	}, counts.Genres)
 	require.Equal(t, http.StatusBadRequest, f.call(f.h.ListStationGenres, admin, http.MethodGet, "/stations/genres", "", "").Code)
 }
+
+func TestBrowseTreeAndVoiceSearch(t *testing.T) {
+	f := newStationsFixture(t)
+	admin := f.user("admin", true)
+	technoList := f.playlist("Techno Bunker", 3, "techno")
+	houseList := f.playlist("House Party", 2, "house")
+	f.exec(`UPDATE playlists SET name = spotify_id`)
+	// Two tracks by one artist in the house list.
+	artist := f.one(`INSERT INTO artists (name) VALUES ('Amelie Lens') RETURNING id::text`)
+	f.exec(`UPDATE tracks SET artist_id = $1::uuid WHERE path LIKE '/m/House Party/%'`, artist)
+
+	create := func(body string) stations.Station {
+		rec := f.call(f.h.CreateStation, admin, http.MethodPost, "/stations", "", body)
+		require.Equal(t, http.StatusCreated, rec.Code, rec.Body.String())
+		return decode[stations.Station](t, rec)
+	}
+	techno := create(`{"name":"Bunker Techno","playlist_ids":["` + technoList + `"],"genres":["techno"]}`)
+	house := create(`{"name":"Party","playlist_ids":["` + houseList + `"],"genres":["house"]}`)
+	mixed := create(`{"name":"Everything","playlist_ids":["` + technoList + `","` + houseList + `"]}`)
+
+	browse := func(node string) (int, stations.BrowseNode) {
+		rec := f.call(f.h.Browse, admin, http.MethodGet, "/browse?node="+node, "", "")
+		if rec.Code != http.StatusOK {
+			return rec.Code, stations.BrowseNode{}
+		}
+		return rec.Code, decode[stations.BrowseNode](t, rec)
+	}
+	ids := func(n stations.BrowseNode) []string {
+		var out []string
+		for _, it := range n.Items {
+			out = append(out, it.ID)
+		}
+		return out
+	}
+
+	_, root := browse("")
+	require.Equal(t, []string{"stations", "recent", "genres", "playlists"}, ids(root))
+
+	_, all := browse("stations")
+	require.Len(t, all.Items, 3)
+	item := all.Items[0] // sorted by name: Bunker Techno
+	require.Equal(t, "station:"+techno.ID, item.ID)
+	require.True(t, item.Playable)
+	require.Equal(t, "3 tracks · Techno", item.Subtitle)
+	require.Equal(t, "/api/stations/"+techno.ID+"/cover", item.ArtworkURL)
+
+	_, genres := browse("genres")
+	require.Equal(t, []string{"genre:techno", "genre:house"}, ids(genres))
+	_, technoNode := browse("genre:techno")
+	require.Equal(t, "Techno", technoNode.Title)
+	require.Equal(t, []string{"station:" + techno.ID}, ids(technoNode))
+
+	_, lists := browse("playlists")
+	require.Equal(t, []string{"playlist:" + houseList, "playlist:" + technoList}, ids(lists))
+	_, inList := browse("playlist:" + houseList)
+	require.ElementsMatch(t, []string{"station:" + house.ID, "station:" + mixed.ID}, ids(inList))
+
+	// Recently played: most recent first.
+	track := f.one(`SELECT id::text FROM tracks LIMIT 1`)
+	f.exec(`INSERT INTO listening_history (user_id, track_id, station_id, played_at) VALUES
+		($1::uuid, $2::uuid, $3::uuid, NOW() - INTERVAL '1 hour'), ($1::uuid, $2::uuid, $4::uuid, NOW())`,
+		admin.ID, track, techno.ID, mixed.ID)
+	_, recent := browse("recent")
+	require.Equal(t, []string{"station:" + mixed.ID, "station:" + techno.ID}, ids(recent))
+
+	for _, bad := range []string{"nope", "genre:polka", "playlist:not-a-uuid", "playlist:6f1b8c6e-6a43-4e4b-9b1e-2b3f8d1a0c55"} {
+		code, _ := browse(bad)
+		require.Equal(t, http.StatusNotFound, code, bad)
+	}
+
+	search := func(q string) []string {
+		rec := f.call(f.h.SearchStations, admin, http.MethodGet, "/search/stations?q="+strings.ReplaceAll(q, " ", "+"), "", "")
+		require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+		var out []string
+		for _, h := range decode[struct {
+			Results []stations.SearchHit `json:"results"`
+		}](t, rec).Results {
+			out = append(out, h.Reason+":"+h.Title)
+		}
+		return out
+	}
+	require.Equal(t, []string{"station:Everything"}, search("play everything on OwnWave"))
+	// Name match beats genre match; "Everything" plays the Techno Bunker playlist.
+	require.Equal(t, []string{"station:Bunker Techno", "playlist:Everything"}, search("techno radio"))
+	require.Equal(t, []string{"genre:Party", "playlist:Everything"}, search("play house music"))
+	require.Equal(t, []string{"genre:Party", "playlist:Everything"}, search("house party"))
+	require.Equal(t, []string{"artist:Party", "artist:Everything"}, search("amelie lens"), "the station with the larger share first")
+	require.Empty(t, search("polka"))
+}
+
+func TestCleanQuery(t *testing.T) {
+	for in, want := range map[string]string{
+		"play techno radio on OwnWave": "techno",
+		"Play Hard Techno":             "Hard Techno",
+		"listen to drum and bass mix":  "drum and bass",
+		"house":                        "house",
+	} {
+		require.Equal(t, want, stations.CleanQuery(in), in)
+	}
+}

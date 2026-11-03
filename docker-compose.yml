@@ -79,8 +79,11 @@ services:
       OWNWAVE_COOKIE_SECURE: ${OWNWAVE_COOKIE_SECURE:-false}
       FFMPEG_PATH: ffmpeg
       PYTHON_API_URL: http://python:8000
+      # Transcoded files (Opus/AAC qualities), least recently played evicted first.
+      TRANSCODE_CACHE_MB: ${TRANSCODE_CACHE_MB:-10240}
     volumes:
       - ${MUSIC_PATH:-./music}:/music:ro
+      - transcode_cache:/cache
     ports:
       - "${GO_HOST_PORT:-8080}:8080"
     healthcheck:
@@ -95,3 +98,4 @@ services:
 
 volumes:
   db_data:
+  transcode_cache:

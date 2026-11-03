@@ -63,6 +63,13 @@ func loadAllowedOrigins() []string {
 	return origins
 }
 
+func envString(key, def string) string {
+	if v := strings.TrimSpace(os.Getenv(key)); v != "" {
+		return v
+	}
+	return def
+}
+
 func envInt(key string, def int) int {
 	if n, err := strconv.Atoi(os.Getenv(key)); err == nil && n > 0 {
 		return n
@@ -106,10 +113,12 @@ func main() {
 	}
 
 	h := NewHandler(db, Config{
-		MusicDir:    musicDir,
-		FFmpegPath:  ffmpegPath,
-		PythonURL:   pythonURL,
-		RecentHours: envInt("STATION_RECENT_HOURS", 24),
+		MusicDir:          musicDir,
+		FFmpegPath:        ffmpegPath,
+		PythonURL:         pythonURL,
+		RecentHours:       envInt("STATION_RECENT_HOURS", 24),
+		TranscodeCacheDir: envString("TRANSCODE_CACHE_DIR", "/cache/transcodes"),
+		TranscodeCacheMB:  envInt("TRANSCODE_CACHE_MB", 10240),
 	})
 
 	go func() {
@@ -196,10 +205,12 @@ func newRouter(h *Handler, webDir string) http.Handler {
 
 	// The API lives under /api so it can share the origin with the web UI.
 	r.Route("/api", func(r chi.Router) {
+		r.Get("/openapi.yaml", serveOpenAPI)
 
 		r.Group(func(r chi.Router) {
 			r.Use(httprate.LimitByIP(10, time.Minute))
 			r.Post("/login", h.Login)
+			r.Post("/auth/device", h.LoginDevice)
 		})
 		r.Group(func(r chi.Router) {
 			r.Use(httprate.LimitByIP(5, time.Minute))
@@ -218,6 +229,8 @@ func newRouter(h *Handler, webDir string) http.Handler {
 			r.Get("/me", h.Me)
 			r.Put("/me/profile", h.UpdateProfile)
 			r.Post("/logout", h.Logout)
+			r.Get("/me/devices", h.ListDevices)
+			r.Delete("/me/devices/{id}", h.RevokeDevice)
 			r.Group(func(r chi.Router) {
 				r.Use(httprate.LimitByIP(5, time.Minute))
 				r.Post("/me/password", h.ChangePassword)
@@ -230,12 +243,15 @@ func newRouter(h *Handler, webDir string) http.Handler {
 			r.Group(func(r chi.Router) {
 				r.Use(httprate.LimitByIP(300, time.Minute))
 				r.Get("/tracks/{id}/cover", h.GetTrackCover)
+				r.Get("/stations/{id}/cover", h.GetStationCover)
 			})
 
 			r.Get("/tracks", h.ListTracks)
 			r.Get("/albums", h.ListAlbums)
 			r.Get("/artists", h.ListArtists)
 			r.Get("/search", h.Search)
+			r.Get("/search/stations", h.SearchStations)
+			r.Get("/browse", h.Browse)
 			r.Get("/tracks/{id}", h.GetTrack)
 			r.Post("/tracks/{id}/played", h.RecordPlay)
 			r.Post("/tracks/{id}/feedback", h.RecordFeedback)

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -146,5 +147,18 @@ func TestListScansValidatesLimit(t *testing.T) {
 				require.Equal(t, []string{tc.wantCall}, stub.Calls)
 			}
 		})
+	}
+}
+
+func TestStreamRejectsUnknownQuality(t *testing.T) {
+	h := newTestHandler(analytics.NewStub())
+	for _, q := range []string{"ultra", "320k", "flac"} {
+		req := httptest.NewRequest(http.MethodGet, "/stream/x?quality="+q, nil)
+		rctx := chi.NewRouteContext()
+		rctx.URLParams.Add("id", "6f1b8c6e-6a43-4e4b-9b1e-2b3f8d1a0c55")
+		req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+		rec := httptest.NewRecorder()
+		h.StreamTrack(rec, req)
+		require.Equal(t, http.StatusBadRequest, rec.Code, q)
 	}
 }
