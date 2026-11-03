@@ -6,20 +6,21 @@ from uuid import UUID
 import psycopg
 
 from analyzers import analyze_file, get_analyzers
-from config import ENABLE_GENRE_ANALYSIS
-from tags import extract_genres_from_tags, read_tags
+import genre_audio
+from tags import read_tags
 from db import (
+    audio_genre_versions_by_paths,
     get_conn,
     get_or_create_album,
     get_or_create_artist,
     get_track_stats_by_paths,
     upsert_audio_features_batch,
     upsert_scan_job_progress,
+    upsert_track_audio_genres,
     upsert_tracks_batch,
-    upsert_track_genres,
 )
 from feature_vector import build_feature_vector
-from models import FailedPath, GenrePrediction, ScanResult
+from models import FailedPath, ScanResult
 from audio_metadata import (
     get_duration,
     get_file_stats,
@@ -27,7 +28,6 @@ from audio_metadata import (
     is_supported_audio_file,
     parse_int_tag,
 )
-from genre_sources import get_genre_sources
 
 log = logging.getLogger(__name__)
 
@@ -72,15 +72,15 @@ def import_folder(
         return result
 
     analyzers = get_analyzers() if analyze else None
-    track_records: List[dict] = []
-    feature_records: List[dict] = []
-    genre_records: List[tuple] = []
+    genre_model = genre_audio.get_model() if analyze else None
     processed_ids: List[UUID] = []
     artist_cache: Dict[str, UUID] = {}
     album_cache: Dict[tuple, UUID] = {}
 
     with get_conn() as conn:
-        existing_stats = get_track_stats_by_paths(conn, [str(f) for f in files])
+        paths = [str(f) for f in files]
+        existing_stats = get_track_stats_by_paths(conn, paths)
+        genre_versions = audio_genre_versions_by_paths(conn, paths) if genre_model else {}
 
         if job_id:
             upsert_scan_job_progress(conn, job_id, master_job_id, result)
@@ -88,86 +88,12 @@ def import_folder(
 
         try:
             for file_path in files:
-                result_changed = False
-                track_rec = None
-                feature_rec = None
-                predictions: List[GenrePrediction] = []
-                tag_genres: List[GenrePrediction] = []
-
-                try:
-                    path_str = str(file_path)
-                    stats = existing_stats.get(path_str, {})
-
-                    if not _file_changed(file_path, stats, force):
-                        if analyzers and not stats.get("has_features"):
-                            result.scanned += 1
-                            result_changed = True
-                            feature_rec, predictions, error = _build_feature_record(
-                                conn, file_path, path_str, analyzers
-                            )
-                            if feature_rec:
-                                feature_records.append(feature_rec)
-                                processed_ids.append(stats["id"])
-                                result.features += 1
-                            if predictions:
-                                genre_records.append((path_str, predictions))
-                                result.model_success += 1
-                            if error:
-                                if feature_rec:
-                                    result.model_failed += 1
-                                result.failed_paths.append(FailedPath(path_str, error))
-                        # Always backfill tag-based genres for existing tracks.
-                        tag_genres = extract_genres_from_tags(read_tags(path_str))
-                        if tag_genres:
-                            genre_records.append((path_str, tag_genres))
-                    else:
-                        track_rec, feature_rec, predictions, tag_genres, feature_error = _build_record(
-                            conn,
-                            file_path,
-                            analyzers,
-                            artist_cache,
-                            album_cache,
-                            force=force,
-                        )
-                        if track_rec:
-                            track_records.append(track_rec)
-                            result.imported += 1
-                            result_changed = True
-                            if tag_genres:
-                                genre_records.append((track_rec["path"], tag_genres))
-                        if analyzers:
-                            result.scanned += 1
-                            result_changed = True
-                        if feature_rec:
-                            feature_records.append(feature_rec)
-                            result.features += 1
-                        if predictions:
-                            genre_records.append((track_rec["path"], predictions))
-                            result.model_success += 1
-                        elif ENABLE_GENRE_ANALYSIS and not feature_error:
-                            result.model_failed += 1
-                            result.failed_paths.append(
-                                FailedPath(path_str, "genre analysis produced no predictions")
-                            )
-
-                        if feature_error:
-                            result.failed_paths.append(FailedPath(path_str, feature_error))
-                except Exception as e:
-                    reason = str(e)
-                    log.warning("error processing %s: %s", file_path, e)
-                    result.failed_paths.append(FailedPath(str(file_path), reason))
-                    result_changed = True
-
-                if track_records or feature_records or genre_records or result_changed:
-                    _flush_file(
-                        conn,
-                        result,
-                        track_records,
-                        feature_records,
-                        genre_records,
-                        existing_stats,
-                        processed_ids,
-                    )
+                path_str = str(file_path)
+                stats = existing_stats.get(path_str, {})
+                if _import_file(
+                    conn, file_path, stats, analyzers, genre_model, genre_versions.get(path_str),
+                    artist_cache, album_cache, force, result, processed_ids,
+                ):
                     if job_id:
                         upsert_scan_job_progress(conn, job_id, master_job_id, result)
                     conn.commit()
@@ -181,53 +107,69 @@ def import_folder(
     return result
 
 
-def _flush_file(
-    conn: psycopg.Connection,
-    result: ScanResult,
-    track_records: List[dict],
-    feature_records: List[dict],
-    genre_records: List[tuple],
-    existing_stats: dict,
-    processed_ids: List[UUID],
-) -> None:
-    """Commit the current song's data and clear the per-file buffers."""
-    if track_records:
-        upsert_tracks_batch(conn, track_records)
-        new_paths = [r["path"] for r in track_records]
-        new_stats = get_track_stats_by_paths(conn, new_paths)
-        for rec in track_records:
-            track_id = new_stats.get(rec["path"], {}).get("id")
-            if track_id:
-                processed_ids.append(track_id)
-    else:
-        new_stats = {}
-
-    path_to_id = {
-        **{p: s["id"] for p, s in existing_stats.items()},
-        **{p: s["id"] for p, s in new_stats.items()},
-    }
-
-    if feature_records:
-        upsert_audio_features_batch(conn, feature_records, path_to_id)
-
-    for path_str, predictions in genre_records:
-        track_id = path_to_id.get(path_str)
-        if track_id:
-            upsert_track_genres(conn, track_id, predictions)
-
-    track_records.clear()
-    feature_records.clear()
-    genre_records.clear()
-
-
-def _build_record(
+def _import_file(
     conn: psycopg.Connection,
     file_path: Path,
+    stats: dict,
     analyzers: Optional[List[Any]],
+    genre_model,
+    genre_version: Optional[str],
     artist_cache: Dict[str, UUID],
     album_cache: Dict[tuple, UUID],
     force: bool,
-) -> tuple:
+    result: ScanResult,
+    processed_ids: List[UUID],
+) -> bool:
+    """Import, analyse and store one file. Returns whether anything changed."""
+    path_str = str(file_path)
+    changed = False
+    try:
+        track_id = stats.get("id")
+        if _file_changed(file_path, stats, force):
+            track_rec = _build_track_record(conn, file_path, artist_cache, album_cache)
+            upsert_tracks_batch(conn, [track_rec])
+            track_id = get_track_stats_by_paths(conn, [path_str])[path_str]["id"]
+            processed_ids.append(track_id)
+            result.imported += 1
+            changed = True
+
+        needs_features = bool(analyzers) and (force or not stats.get("has_features"))
+        needs_genre = genre_model is not None and (force or genre_version != genre_audio.MODEL_VERSION)
+        if needs_features or needs_genre:
+            result.scanned += 1
+            changed = True
+
+        if needs_features:
+            feature_rec, error = _build_feature_record(conn, file_path, path_str, analyzers)
+            if feature_rec:
+                upsert_audio_features_batch(conn, [feature_rec], {path_str: track_id})
+                result.features += 1
+                if track_id not in processed_ids:
+                    processed_ids.append(track_id)
+            if error:
+                result.failed_paths.append(FailedPath(path_str, error))
+
+        if needs_genre:
+            genres = genre_model.analyze(path_str)
+            if genres:
+                upsert_track_audio_genres(conn, track_id, genres)
+                result.model_success += 1
+            else:
+                result.model_failed += 1
+                result.failed_paths.append(FailedPath(path_str, "genre analysis failed"))
+    except Exception as e:
+        log.warning("error processing %s: %s", file_path, e)
+        result.failed_paths.append(FailedPath(path_str, str(e)))
+        changed = True
+    return changed
+
+
+def _build_track_record(
+    conn: psycopg.Connection,
+    file_path: Path,
+    artist_cache: Dict[str, UUID],
+    album_cache: Dict[tuple, UUID],
+) -> dict:
     path_str = str(file_path)
     tags = read_tags(path_str)
 
@@ -243,84 +185,42 @@ def _build_record(
         album_cache[album_key] = get_or_create_album(conn, album_title, artist_id, year)
     album_id = album_cache[album_key]
 
-    track_number = parse_int_tag(tags.get("tracknumber"))
-    duration = get_duration(path_str)
     sample_rate, channels = get_sample_info(path_str)
-    title = tags.get("title") or file_path.stem
     file_size, file_mtime = get_file_stats(file_path)
-
-    track_rec = {
+    return {
         "path": path_str,
         "artist_id": artist_id,
         "album_id": album_id,
-        "title": title,
-        "track_number": track_number,
-        "duration": duration,
+        "title": tags.get("title") or file_path.stem,
+        "track_number": parse_int_tag(tags.get("tracknumber")),
+        "duration": get_duration(path_str),
         "sample_rate": sample_rate,
         "channels": channels,
         "file_size": file_size,
         "file_mtime": file_mtime,
+        "genre_tag": tags.get("genre"),
     }
-    tag_genres = extract_genres_from_tags(tags)
-
-    feature_error = None
-    if analyzers and (force or not _has_features(conn, path_str)):
-        feature_rec, predictions, feature_error = _build_feature_record(conn, file_path, path_str, analyzers)
-    else:
-        feature_rec, predictions = None, []
-
-    return track_rec, feature_rec, predictions, tag_genres, feature_error
 
 
 def _build_feature_record(conn: psycopg.Connection, file_path: Path, path_str: str, analyzers: List[Any]) -> tuple:
-    error = None
     try:
         features = analyze_file(path_str, analyzers=analyzers)
-        record = {
-            "path": path_str,
-            "bpm": features.bpm,
-            "key": features.key,
-            "loudness": features.loudness,
-            "energy": features.energy,
-            "valence": features.valence,
-            "outro_start_seconds": features.outro_start_seconds,
-            "ideal_crossfade_seconds": features.ideal_crossfade_seconds,
-            "intro_start_seconds": features.intro_start_seconds,
-            "outro_end_seconds": features.outro_end_seconds,
-            "chroma": features.chroma,
-            "spectral_centroid": features.spectral_centroid,
-            "mfcc": features.mfcc,
-            "feature_vector": build_feature_vector(features, conn),
-        }
     except Exception as exc:
-        error = f"audio analysis failed: {exc}"
         log.warning("error analyzing %s: %s", file_path, exc)
-        return None, [], error
-
-    predictions = []
-    ml_source = next(
-        (s for s in get_genre_sources() if getattr(s, "source_id", "") == "discogs400"),
-        None,
-    )
-    if ml_source is not None:
-        try:
-            predictions = ml_source.predict(path_str)
-        except Exception as exc:
-            error = f"genre analysis failed: {exc}"
-            log.warning("genre analysis failed for %s: %s", path_str, exc)
-
-    return record, predictions, error
-
-
-def _has_features(conn: psycopg.Connection, path_str: str) -> bool:
-    with conn.cursor() as cur:
-        cur.execute(
-            """
-            SELECT 1 FROM audio_features af
-            JOIN tracks t ON t.id = af.track_id
-            WHERE t.path = %s
-            """,
-            (path_str,),
-        )
-        return cur.fetchone() is not None
-
+        return None, f"audio analysis failed: {exc}"
+    return {
+        "path": path_str,
+        "bpm": features.bpm,
+        "key": features.key,
+        "loudness": features.loudness,
+        "energy": features.energy,
+        "valence": features.valence,
+        "outro_start_seconds": features.outro_start_seconds,
+        "ideal_crossfade_seconds": features.ideal_crossfade_seconds,
+        "intro_start_seconds": features.intro_start_seconds,
+        "outro_end_seconds": features.outro_end_seconds,
+        "chroma": features.chroma,
+        "spectral_centroid": features.spectral_centroid,
+        "mfcc": features.mfcc,
+        "feature_vector": build_feature_vector(features, conn),
+    }, None

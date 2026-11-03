@@ -42,14 +42,6 @@ class ScanResult:
 
 
 @dataclass
-class GenrePrediction:
-    main_genre: str
-    sub_genre: str
-    confidence: float
-    source: str
-
-
-@dataclass
 class AudioFeatures:
     bpm: float
     key: str
@@ -70,17 +62,6 @@ class Analyzer(Protocol):
     """Pluggable audio analyzer."""
 
     def analyze(self, path: str) -> AudioFeatures:
-        ...
-
-
-class GenreSource(Protocol):
-    """Pluggable genre prediction from a single origin."""
-
-    @property
-    def source_id(self) -> str:
-        ...
-
-    def predict(self, path: str) -> List[GenrePrediction]:
         ...
 
 

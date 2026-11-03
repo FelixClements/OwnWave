@@ -51,6 +51,10 @@ func (s *Stub) RebuildGenres(ctx context.Context) (*Response, error) {
 	return s.call("RebuildGenres")
 }
 
+func (s *Stub) GenreReport(ctx context.Context) (*Response, error) {
+	return s.call("GenreReport")
+}
+
 func (s *Stub) SetupSummary(ctx context.Context) (*Response, error) {
 	return s.call("SetupSummary")
 }

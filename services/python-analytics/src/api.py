@@ -11,7 +11,7 @@ from pydantic import BaseModel
 import db
 import task_queue
 import tasks
-from config import ANALYTICS_API_SECRET, MUSIC_DIR
+from config import ANALYTICS_API_SECRET, GENRE_MODEL_DIR, MUSIC_DIR
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -139,31 +139,42 @@ def rebuild_analysis():
 
 @app.post("/rebuild-genres")
 def rebuild_genres():
-    return _enqueue("rebuild_track_genres", path=MUSIC_DIR)
+    """Refresh MusicBrainz artist tags, then re-blend every track's genres.
+
+    Audio is re-analysed by a library scan whenever the model version changes.
+    """
+    with _db_conn() as conn:
+        tasks.queue_genre_refresh(conn)
+        conn.commit()
+    return {"status": "queued"}
 
 
 @app.get("/genres")
 def list_genres():
+    """Station genres with track counts, plus a warning when one genre dominates."""
+    from genre_scoring import distribution
+
     with _db_conn() as conn:
-        return {"genres": db.list_genres(conn)}
+        return distribution(conn)
+
+
+@app.get("/genres/report")
+def genre_report():
+    """How well the audio model alone agrees with file genre tags."""
+    from genre_audio import load_labels
+    from genre_scoring import agreement_report
+
+    with _db_conn() as conn:
+        return agreement_report(conn, load_labels(GENRE_MODEL_DIR))
 
 
 @app.get("/tracks/{track_id}/genres")
 def track_genres(track_id: UUID):
     with _db_conn() as conn:
-        return {"track_id": str(track_id), "genres": db.get_track_genres(conn, track_id)}
+        return {"track_id": str(track_id), "genres": db.get_track_station_genres(conn, track_id)}
 
 
 @app.get("/setup/summary")
 def setup_summary():
     with _db_conn() as conn:
-        total_tracks = db.count_tracks(conn)
-        main_genres = db.get_main_genre_counts(conn)
-        sub_genres = db.get_sub_genre_counts(conn)
-        return {
-            "total_tracks": total_tracks,
-            "main_genres": main_genres,
-            "sub_genres": sub_genres,
-            # Tracks the "Uncategorized" station will hold.
-            "uncovered": db.count_uncategorized_tracks(conn),
-        }
+        return {"total_tracks": db.count_tracks(conn)}

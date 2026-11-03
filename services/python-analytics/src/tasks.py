@@ -3,6 +3,8 @@ from pathlib import Path
 from typing import Optional
 from uuid import UUID, uuid4
 
+from psycopg.types.json import Jsonb
+
 import db
 import task_queue
 from folder_importer import import_folder
@@ -149,7 +151,7 @@ def _job_started_at(conn, job_id: UUID):
 
 
 def rebuild_analysis(scan_job_id: Optional[str] = None) -> dict:
-    """Rebuild feature vectors, then clusters.
+    """Rebuild feature vectors, then clusters, then queue the genre refresh.
 
     With scan_job_id, this is the last step of that scan: the job completes
     or fails with it.
@@ -166,10 +168,11 @@ def rebuild_analysis(scan_job_id: Optional[str] = None) -> dict:
                 db.update_scan_job(conn, UUID(scan_job_id), "failed", error=f"analysis failed: {exc}")
                 conn.commit()
         raise
-    if scan_job_id:
-        with db.get_conn() as conn:
+    with db.get_conn() as conn:
+        if scan_job_id:
             db.update_scan_job(conn, UUID(scan_job_id), "completed")
-            conn.commit()
+        queue_genre_refresh(conn)
+        conn.commit()
     return {"vectors": vectors, "clusters": clusters}
 
 
@@ -187,52 +190,98 @@ def rebuild_clusters(n_clusters: Optional[int] = None) -> dict:
     return backfill_library_clusters(n_clusters=n_clusters)
 
 
-def rebuild_track_genres(path: str, force: bool = False) -> dict:
-    """Batch backfill genre predictions for a path."""
-    from audio_metadata import is_supported_audio_file
-    from config import ENABLE_GENRE_ANALYSIS
-    from genre_sources import get_genre_sources
+# Artist names looked up per fetch_artist_genres run (about 1.1 s each).
+MB_BATCH = 150
+# Stop a run (and score anyway) after this many failed lookups.
+MB_MAX_FAILURES = 5
+# Advisory lock id: only one MusicBrainz fetcher may run (shared rate limit).
+_MB_LOCK = 4_242_001
 
-    if not ENABLE_GENRE_ANALYSIS:
-        return {"updated": 0, "skipped": 0}
 
-    ml_sources = [s for s in get_genre_sources() if s.source_id == "discogs400"]
-    if not ml_sources:
-        return {"updated": 0, "skipped": 0}
+def queue_genre_refresh(conn) -> None:
+    """Queue the genre steps that follow new analysis: artist tags, then scoring."""
+    from config import MUSICBRAINZ_ENABLED
 
-    root = Path(path).expanduser().resolve()
-    if not root.exists():
-        raise FileNotFoundError(f"Music path does not exist: {root}")
+    if MUSICBRAINZ_ENABLED:
+        task_queue.enqueue(conn, "fetch_artist_genres")
+    else:
+        task_queue.enqueue(conn, "score_genres")
 
-    files = sorted(p for p in root.rglob("*") if is_supported_audio_file(p))
-    updated = 0
-    skipped = 0
+
+def fetch_artist_genres() -> dict:
+    """Look up MusicBrainz tags for artists not looked up yet, in batches.
+
+    A run handles MB_BATCH names, then queues the next run, or score_genres
+    when no names are left.
+    """
+    from config import MUSICBRAINZ_URL, MUSICBRAINZ_USER_AGENT
+    from musicbrainz import MusicBrainzClient, name_key, primary_artist
+
+    client = MusicBrainzClient(MUSICBRAINZ_URL, MUSICBRAINZ_USER_AGENT)
+    with db.get_conn() as conn:
+        if not conn.execute("SELECT pg_try_advisory_lock(%s)", (_MB_LOCK,)).fetchone()[0]:
+            return {"skipped": "another fetch is running"}
+        try:
+            done = {r[0] for r in conn.execute("SELECT name_key FROM musicbrainz_artists").fetchall()}
+            credits = [r[0] for r in conn.execute(
+                "SELECT DISTINCT a.name FROM artists a JOIN tracks t ON t.artist_id = a.id ORDER BY 1"
+            ).fetchall()]
+            pending = [c for c in credits if name_key(c) and name_key(c) not in done
+                       and name_key(c) != "unknown artist"]
+            looked_up = failures = 0
+            for credit in pending[:MB_BATCH]:
+                if failures >= MB_MAX_FAILURES:
+                    break
+                names = [credit]
+                primary = primary_artist(credit)
+                if name_key(primary) != name_key(credit):
+                    names.append(primary)
+                for name in names:
+                    key = name_key(name)
+                    if key in done:
+                        continue
+                    try:
+                        found = client.lookup_artist(name)
+                    except Exception as exc:
+                        failures += 1
+                        log.warning("MusicBrainz lookup failed for %r: %s", name, exc)
+                        break
+                    looked_up += 1
+                    conn.execute(
+                        """
+                        INSERT INTO musicbrainz_artists (name_key, mbid, tags, fetched_at)
+                        VALUES (%s, %s, %s, NOW())
+                        ON CONFLICT (name_key) DO UPDATE SET
+                            mbid = EXCLUDED.mbid, tags = EXCLUDED.tags, fetched_at = NOW()
+                        """,
+                        (key, found.mbid, Jsonb(found.tags)),
+                    )
+                    conn.commit()
+                    done.add(key)
+                    if found.mbid:
+                        break  # the whole credit matched; no need for the primary artist
+            remaining = max(0, len(pending) - MB_BATCH)
+            # MusicBrainz unreachable: score with what we have; failed names
+            # are retried on the next refresh.
+            more = remaining and failures < MB_MAX_FAILURES
+            task_queue.enqueue(conn, "fetch_artist_genres" if more else "score_genres")
+            conn.commit()
+        finally:
+            conn.execute("SELECT pg_advisory_unlock(%s)", (_MB_LOCK,))
+            conn.commit()
+    return {"looked_up": looked_up, "failures": failures, "remaining": remaining}
+
+
+def score_genres() -> dict:
+    """Blend all genre sources into track_station_genres for the whole library."""
+    from config import GENRE_MODEL_DIR
+    from genre_audio import load_labels
+    from genre_scoring import score_library
 
     with db.get_conn() as conn:
-        for file_path in files:
-            path_str = str(file_path)
-            track_id = db.get_track_by_path(conn, path_str)
-            if not track_id:
-                skipped += 1
-                continue
-            if not force:
-                existing = db.get_track_genres(conn, track_id)
-                if existing:
-                    skipped += 1
-                    continue
-            try:
-                predictions = []
-                for source in ml_sources:
-                    predictions.extend(source.predict(path_str))
-                if predictions:
-                    db.upsert_track_genres(conn, track_id, predictions)
-                    updated += 1
-            except Exception as exc:
-                log.warning("genre rebuild failed for %s: %s", path_str, exc)
-                skipped += 1
+        summary = score_library(conn, load_labels(GENRE_MODEL_DIR))
         conn.commit()
-
-    return {"updated": updated, "skipped": skipped}
+    return summary
 
 
 TASKS = {
@@ -244,7 +293,8 @@ TASKS = {
         rebuild_analysis,
         rebuild_feature_vectors,
         rebuild_clusters,
-        rebuild_track_genres,
+        fetch_artist_genres,
+        score_genres,
     )
 }
 

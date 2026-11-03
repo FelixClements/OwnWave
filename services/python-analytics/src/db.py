@@ -7,7 +7,7 @@ import psycopg
 from psycopg.types.json import Jsonb
 
 from config import DATABASE_URL
-from models import AudioFeatures, GenrePrediction, ScanResult
+from models import AudioFeatures, ScanResult
 
 log = logging.getLogger(__name__)
 
@@ -279,6 +279,7 @@ def upsert_tracks_batch(conn: psycopg.Connection, records: List[dict]) -> None:
             rec.get("channels"),
             rec.get("file_size"),
             rec.get("file_mtime"),
+            rec.get("genre_tag"),
         )
         for rec in records
     ]
@@ -287,8 +288,8 @@ def upsert_tracks_batch(conn: psycopg.Connection, records: List[dict]) -> None:
             """
             INSERT INTO tracks
                 (path, artist_id, album_id, title, track_number, duration_seconds,
-                 sample_rate, channels, file_size, file_mtime, updated_at)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())
+                 sample_rate, channels, file_size, file_mtime, genre_tag, updated_at)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())
             ON CONFLICT (path) DO UPDATE SET
                 artist_id = EXCLUDED.artist_id,
                 album_id = EXCLUDED.album_id,
@@ -299,6 +300,7 @@ def upsert_tracks_batch(conn: psycopg.Connection, records: List[dict]) -> None:
                 channels = EXCLUDED.channels,
                 file_size = EXCLUDED.file_size,
                 file_mtime = EXCLUDED.file_mtime,
+                genre_tag = EXCLUDED.genre_tag,
                 updated_at = NOW()
             """,
             values,
@@ -373,124 +375,49 @@ def delete_tracks(conn: psycopg.Connection, track_ids: List[UUID]) -> None:
         )
 
 
-def upsert_track_genres(
-    conn: psycopg.Connection,
-    track_id: UUID,
-    predictions: List[GenrePrediction],
-) -> None:
-    if not predictions:
-        return
-    values = [
-        (track_id, p.main_genre, p.sub_genre, p.confidence, p.source)
-        for p in predictions
-    ]
-    with conn.cursor() as cur:
-        cur.executemany(
-            """
-            INSERT INTO track_genres
-                (track_id, main_genre, sub_genre, confidence, source, updated_at)
-            VALUES (%s, %s, %s, %s, %s, NOW())
-            ON CONFLICT (track_id, sub_genre, source) DO UPDATE SET
-                main_genre = EXCLUDED.main_genre,
-                confidence = EXCLUDED.confidence,
-                updated_at = NOW()
-            """,
-            values,
-        )
+def upsert_track_audio_genres(conn: psycopg.Connection, track_id: UUID, result) -> None:
+    """Store a genre_audio.AudioGenreResult for a track."""
+    conn.execute(
+        """
+        INSERT INTO track_audio_genres (track_id, model_version, activations, embedding, analyzed_at)
+        VALUES (%s, %s, %s, %s::vector, NOW())
+        ON CONFLICT (track_id) DO UPDATE SET
+            model_version = EXCLUDED.model_version,
+            activations = EXCLUDED.activations,
+            embedding = EXCLUDED.embedding,
+            analyzed_at = NOW()
+        """,
+        (track_id, result.model_version, result.activations, str(result.embedding)),
+    )
 
 
-def get_track_genres(conn: psycopg.Connection, track_id: UUID) -> List[dict]:
-    with conn.cursor() as cur:
-        cur.execute(
-            """
-            SELECT main_genre, sub_genre, confidence, source
-            FROM track_genres
-            WHERE track_id = %s
-            ORDER BY confidence DESC
-            """,
-            (track_id,),
-        )
-        return [
-            {"main_genre": r[0], "sub_genre": r[1], "confidence": r[2], "source": r[3]}
-            for r in cur.fetchall()
-        ]
+def audio_genre_versions_by_paths(conn: psycopg.Connection, paths: List[str]) -> dict:
+    """path -> model_version of the stored audio genre analysis."""
+    if not paths:
+        return {}
+    rows = conn.execute(
+        """
+        SELECT t.path, g.model_version FROM tracks t
+        JOIN track_audio_genres g ON g.track_id = t.id
+        WHERE t.path = ANY(%s)
+        """,
+        (paths,),
+    ).fetchall()
+    return {r[0]: r[1] for r in rows}
 
 
-def list_genres(conn: psycopg.Connection) -> List[dict]:
-    with conn.cursor() as cur:
-        cur.execute(
-            """
-            SELECT main_genre, sub_genre, COUNT(DISTINCT track_id) as track_count
-            FROM track_genres
-            GROUP BY main_genre, sub_genre
-            ORDER BY main_genre, sub_genre
-            """
-        )
-        return [
-            {"main_genre": r[0], "sub_genre": r[1], "track_count": r[2]}
-            for r in cur.fetchall()
-        ]
-
-
-
-
-
-
-
+def get_track_station_genres(conn: psycopg.Connection, track_id: UUID) -> List[dict]:
+    rows = conn.execute(
+        """
+        SELECT genre, score, is_primary FROM track_station_genres
+        WHERE track_id = %s ORDER BY is_primary DESC, score DESC
+        """,
+        (track_id,),
+    ).fetchall()
+    return [{"genre": r[0], "score": round(r[1], 3), "is_primary": r[2]} for r in rows]
 
 
 def count_tracks(conn: psycopg.Connection) -> int:
     with conn.cursor() as cur:
         cur.execute("SELECT COUNT(*) FROM tracks")
-        return cur.fetchone()[0]
-
-
-
-def get_main_genre_counts(conn: psycopg.Connection) -> List[dict]:
-    """Return main genres with how many tracks and sub-genres each has."""
-    with conn.cursor() as cur:
-        cur.execute(
-            """
-            SELECT main_genre,
-                   COUNT(DISTINCT track_id) as track_count,
-                   COUNT(DISTINCT sub_genre) as sub_count
-            FROM track_genres
-            GROUP BY main_genre
-            ORDER BY track_count DESC
-            """
-        )
-        return [
-            {"main_genre": r[0], "track_count": r[1], "sub_count": r[2]}
-            for r in cur.fetchall()
-        ]
-
-
-def get_sub_genre_counts(conn: psycopg.Connection) -> List[dict]:
-    with conn.cursor() as cur:
-        cur.execute(
-            """
-            SELECT main_genre, sub_genre,
-                   COUNT(DISTINCT track_id) as track_count
-            FROM track_genres
-            GROUP BY main_genre, sub_genre
-            ORDER BY main_genre, sub_genre
-            """
-        )
-        return [
-            {"main_genre": r[0], "sub_genre": r[1], "track_count": r[2]}
-            for r in cur.fetchall()
-        ]
-
-
-def count_uncategorized_tracks(conn: psycopg.Connection) -> int:
-    """Analysed tracks without any stored genre."""
-    with conn.cursor() as cur:
-        cur.execute(
-            """
-            SELECT COUNT(*)
-            FROM tracks t
-            JOIN audio_features af ON af.track_id = t.id
-            WHERE NOT EXISTS (SELECT 1 FROM track_genres g WHERE g.track_id = t.id)
-            """
-        )
         return cur.fetchone()[0]

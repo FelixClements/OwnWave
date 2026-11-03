@@ -12,5 +12,6 @@ type Client interface {
 	ListGenres(ctx context.Context) (*Response, error)
 	GetTrackGenres(ctx context.Context, trackID string) (*Response, error)
 	RebuildGenres(ctx context.Context) (*Response, error)
+	GenreReport(ctx context.Context) (*Response, error)
 	SetupSummary(ctx context.Context) (*Response, error)
 }

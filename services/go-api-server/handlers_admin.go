@@ -120,6 +120,12 @@ func (h *Handler) GetTrackGenres(w http.ResponseWriter, r *http.Request) {
 	resp, err := h.analytics.GetTrackGenres(r.Context(), id)
 	proxyAnalytics(w, r, resp, err)
 }
+
+// AdminGenreReport shows how well the audio genre model agrees with file tags.
+func (h *Handler) AdminGenreReport(w http.ResponseWriter, r *http.Request) {
+	resp, err := h.analytics.GenreReport(r.Context())
+	proxyAnalytics(w, r, resp, err)
+}
 func (h *Handler) AdminRebuildGenres(w http.ResponseWriter, r *http.Request) {
 	resp, err := h.analytics.RebuildGenres(r.Context())
 	proxyAnalytics(w, r, resp, err)
