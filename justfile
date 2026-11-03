@@ -40,6 +40,6 @@ test:
 test-go:
     cd services/go-api-server && go test ./...
 
-# Run all local checks (build frontend and Go tests)
+# Run all local checks (Go tests, web UI tests and build)
 test-all: test-go
-    cd apps/t3-web-frontend && npm run build
+    cd apps/web && npm test && npm run build

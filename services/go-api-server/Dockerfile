@@ -3,10 +3,10 @@ FROM node:20-alpine AS web
 
 WORKDIR /app
 
-COPY apps/t3-web-frontend/package.json apps/t3-web-frontend/package-lock.json ./
+COPY apps/web/package.json apps/web/package-lock.json ./
 RUN npm ci
 
-COPY apps/t3-web-frontend ./
+COPY apps/web ./
 RUN npm run build
 
 FROM golang:1.25-alpine AS builder
@@ -28,7 +28,7 @@ RUN apk add --no-cache ffmpeg ca-certificates wget \
 WORKDIR /app
 
 COPY --from=builder /app/server .
-COPY --from=web /app/out ./web
+COPY --from=web /app/dist ./web
 COPY database/migrations /migrations
 RUN chown ownwave:ownwave /app/server
 
