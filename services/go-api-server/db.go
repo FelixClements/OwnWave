@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"math"
 	"strings"
 	"time"
 
@@ -20,14 +19,6 @@ func NewDB(pool *pgxpool.Pool) *DB {
 }
 
 type Track = playback.Track
-
-type Station struct {
-	ID           string  `json:"id"`
-	Name         string  `json:"name"`
-	SeedFeatures *string `json:"seed_features,omitempty"`
-	// Shared stations have no owner: every user plays them, admins edit them.
-	Shared bool `json:"shared"`
-}
 
 func (db *DB) GetTrackByID(ctx context.Context, id string) (Track, error) {
 	var t Track
@@ -117,62 +108,6 @@ func (db *DB) ListArtists(ctx context.Context) ([]Artist, error) {
 	return artists, rows.Err()
 }
 
-// ListStations returns the user's own stations and the shared ones.
-func (db *DB) ListStations(ctx context.Context, userID string) ([]Station, error) {
-	rows, err := db.pool.Query(ctx, `
-		SELECT id::text, name, seed_features::text, user_id IS NULL
-		FROM stations
-		WHERE user_id = $1::uuid OR user_id IS NULL
-		ORDER BY user_id IS NOT NULL, lower(name)
-	`, userID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	stations := make([]Station, 0)
-	for rows.Next() {
-		var s Station
-		if err := rows.Scan(&s.ID, &s.Name, &s.SeedFeatures, &s.Shared); err != nil {
-			return nil, err
-		}
-		stations = append(stations, s)
-	}
-	return stations, rows.Err()
-}
-
-// GetStationByID returns the station if it is the user's own or shared.
-func (db *DB) GetStationByID(ctx context.Context, userID, stationID string) (Station, error) {
-	var s Station
-	err := db.pool.QueryRow(ctx, `
-		SELECT id::text, name, seed_features::text, user_id IS NULL
-		FROM stations
-		WHERE id = $1::uuid AND (user_id = $2::uuid OR user_id IS NULL)
-	`, stationID, userID).Scan(&s.ID, &s.Name, &s.SeedFeatures, &s.Shared)
-	return s, err
-}
-
-// CreateStation stores a station owned by ownerID, or a shared one when
-// ownerID is empty; seed is the stations.Seed JSON (nil = whole library).
-func (db *DB) CreateStation(ctx context.Context, ownerID, name string, seed []byte) (string, error) {
-	var id string
-	err := db.pool.QueryRow(ctx, `
-		INSERT INTO stations (user_id, name, seed_features)
-		VALUES (NULLIF($1, '')::uuid, $2, $3::jsonb)
-		RETURNING id::text
-	`, ownerID, name, seed).Scan(&id)
-	return id, err
-}
-
-// UpdateStation renames a station and replaces its seed. Callers check
-// that the user may change it.
-func (db *DB) UpdateStation(ctx context.Context, stationID, name string, seed []byte) error {
-	_, err := db.pool.Exec(ctx, `
-		UPDATE stations SET name = $2, seed_features = $3::jsonb WHERE id = $1::uuid
-	`, stationID, name, seed)
-	return err
-}
-
 // PlayedCount is the number of distinct tracks the user has played on a station.
 func (db *DB) PlayedCount(ctx context.Context, userID, stationID string) (int, error) {
 	var n int
@@ -181,54 +116,6 @@ func (db *DB) PlayedCount(ctx context.Context, userID, stationID string) (int, e
 		WHERE user_id = $1::uuid AND station_id = $2::uuid
 	`, userID, stationID).Scan(&n)
 	return n, err
-}
-
-type SimilarTrack struct {
-	TrackID  string  `json:"track_id"`
-	Title    string  `json:"title"`
-	Artist   *string `json:"artist,omitempty"`
-	Album    *string `json:"album,omitempty"`
-	Distance float64 `json:"distance"`
-}
-
-// SimilarTracks returns the nearest tracks by cosine distance of feature vectors.
-func (db *DB) SimilarTracks(ctx context.Context, trackID string, limit int) ([]SimilarTrack, error) {
-	rows, err := db.pool.Query(ctx, `
-		WITH target AS (
-			SELECT feature_vector FROM audio_features
-			WHERE track_id = $1::uuid AND feature_vector IS NOT NULL
-		)
-		SELECT af.track_id::text, t.title, a.name, al.title,
-		       (af.feature_vector <=> target.feature_vector)::float8 AS distance
-		FROM audio_features af
-		CROSS JOIN target
-		JOIN tracks t ON t.id = af.track_id
-		LEFT JOIN artists a ON t.artist_id = a.id
-		LEFT JOIN albums al ON t.album_id = al.id
-		WHERE af.track_id <> $1::uuid AND af.feature_vector IS NOT NULL
-		ORDER BY distance
-		LIMIT $2
-	`, trackID, limit)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	out := make([]SimilarTrack, 0)
-	for rows.Next() {
-		var st SimilarTrack
-		if err := rows.Scan(&st.TrackID, &st.Title, &st.Artist, &st.Album, &st.Distance); err != nil {
-			return nil, err
-		}
-		st.Distance = math.Round(st.Distance*1e4) / 1e4
-		out = append(out, st)
-	}
-	return out, rows.Err()
-}
-
-// DeleteStation deletes a station. Callers check that the user may.
-func (db *DB) DeleteStation(ctx context.Context, stationID string) error {
-	_, err := db.pool.Exec(ctx, `DELETE FROM stations WHERE id = $1::uuid`, stationID)
-	return err
 }
 
 func (db *DB) UpdateUserProfile(ctx context.Context, userID, email, fullName string) error {

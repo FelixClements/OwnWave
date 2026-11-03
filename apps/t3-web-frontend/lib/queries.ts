@@ -16,10 +16,11 @@ export const keys = {
   // Paged (infinite) and plain track lists cache different shapes, so they
   // need distinct keys; both stay under ['tracks'] for invalidation.
   tracks: (q: string) => ['tracks', 'pages', q] as const,
-  trackOptions: ['tracks', 'options'] as const,
   albums: ['albums'] as const,
   artists: ['artists'] as const,
-  similar: (id: string) => ['similar', id] as const,
+  genres: ['genres'] as const,
+  stationGenres: (playlistIds: string[]) => ['stationGenres', [...playlistIds].sort().join(',')] as const,
+  stationSuggestions: ['stationSuggestions'] as const,
   history: ['history'] as const,
   feedback: (kind: Feedback) => ['feedback', kind] as const,
   scanStatus: (jobId: string) => ['scanStatus', jobId] as const,
@@ -32,6 +33,23 @@ export const keys = {
 export const useSetupStatus = () => useQuery(keys.setupStatus, () => api.setupStatus());
 export const useStations = () => useQuery(keys.stations, () => api.listStations());
 export const usePlaylists = () => useQuery(keys.playlists, () => api.listPlaylists());
+
+/** Station genre id -> display name. */
+export function useGenreNames(): Record<string, string> {
+  const { data } = useQuery(keys.genres, () => api.listGenres(), { staleTime: 5 * 60_000 });
+  return Object.fromEntries((data?.genres ?? []).map((g) => [g.genre, g.name]));
+}
+
+export function useStationGenres(playlistIds: string[]) {
+  return useQuery(keys.stationGenres(playlistIds), () => api.stationGenres(playlistIds), {
+    enabled: playlistIds.length > 0,
+    keepPreviousData: true,
+  });
+}
+
+export function useStationSuggestions(enabled: boolean) {
+  return useQuery(keys.stationSuggestions, () => api.listStationSuggestions(), { enabled });
+}
 
 export function usePlaylist(id: string | null) {
   return useQuery(keys.playlist(id ?? ''), () => api.getPlaylist(id!), { enabled: !!id });

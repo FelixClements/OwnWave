@@ -43,12 +43,6 @@ export const HistoryIcon = (p: IconProps) => (
     <path d="M12 8v4l3 2" />
   </Stroke>
 );
-export const SimilarIcon = (p: IconProps) => (
-  <Stroke {...p}>
-    <circle cx="8" cy="12" r="4" />
-    <circle cx="16" cy="12" r="4" />
-  </Stroke>
-);
 export const StationsIcon = (p: IconProps) => (
   <Stroke {...p}>
     <rect x="3" y="7" width="18" height="13" rx="2" />

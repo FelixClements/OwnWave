@@ -20,10 +20,18 @@ func (h *Handler) ListPlaylists(w http.ResponseWriter, r *http.Request) {
 }
 
 // GetPlaylist returns a playlist with every track it has ever listed and
-// the local file each one matched.
+// the local file each one matched. ?items=missing lists only the tracks
+// with no local file (the missing list), ?items=matched only the others.
 func (h *Handler) GetPlaylist(w http.ResponseWriter, r *http.Request) {
 	id, ok := parseUUIDParam(w, r, "id")
 	if !ok {
+		return
+	}
+	filter := playlists.ItemFilter(r.URL.Query().Get("items"))
+	switch filter {
+	case playlists.AllItems, playlists.MatchedItems, playlists.MissingItems:
+	default:
+		http.Error(w, "items must be matched or missing", http.StatusBadRequest)
 		return
 	}
 	p, err := h.playlists.Get(r.Context(), id)
@@ -31,7 +39,7 @@ func (h *Handler) GetPlaylist(w http.ResponseWriter, r *http.Request) {
 		writePlaylistError(w, r, "get playlist", err)
 		return
 	}
-	items, err := h.playlists.Items(r.Context(), id)
+	items, err := h.playlists.Items(r.Context(), id, filter)
 	if err != nil {
 		writeInternalError(w, r, "playlist items", err)
 		return

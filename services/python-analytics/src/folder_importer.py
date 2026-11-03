@@ -19,7 +19,6 @@ from db import (
     upsert_track_audio_genres,
     upsert_tracks_batch,
 )
-from feature_vector import build_feature_vector
 from models import FailedPath, ScanResult
 from audio_metadata import (
     get_duration,
@@ -222,5 +221,4 @@ def _build_feature_record(conn: psycopg.Connection, file_path: Path, path_str: s
         "chroma": features.chroma,
         "spectral_centroid": features.spectral_centroid,
         "mfcc": features.mfcc,
-        "feature_vector": build_feature_vector(features, conn),
     }, None

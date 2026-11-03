@@ -21,11 +21,6 @@ def main():
     serve_parser.add_argument("--host", default="0.0.0.0")
     serve_parser.add_argument("--port", type=int, default=8000)
 
-    subparsers.add_parser("rebuild-vectors", help="Rebuild normalized feature vectors for all tracks")
-
-    clusters_parser = subparsers.add_parser("rebuild-clusters", help="Rebuild track clusters")
-    clusters_parser.add_argument("--n-clusters", type=int, help="Number of K-Means clusters")
-
     subparsers.add_parser("score-genres", help="Re-blend every track's station genres")
     subparsers.add_parser("genre-report", help="Print the genre distribution and audio/tag agreement")
 
@@ -46,20 +41,6 @@ def main():
         from api import app
 
         uvicorn.run(app, host=args.host, port=args.port)
-
-    elif args.command == "rebuild-vectors":
-        from feature_vector import backfill_library_feature_vectors
-
-        wait_for_db()
-        count = backfill_library_feature_vectors()
-        print(f"Rebuilt feature vectors for {count} tracks")
-
-    elif args.command == "rebuild-clusters":
-        from clustering import backfill_library_clusters
-
-        wait_for_db()
-        result = backfill_library_clusters(n_clusters=args.n_clusters)
-        print(f"Rebuilt clusters: {result}")
 
     elif args.command == "score-genres":
         from tasks import score_genres

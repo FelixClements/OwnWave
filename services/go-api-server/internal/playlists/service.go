@@ -94,8 +94,26 @@ func (s *Service) Get(ctx context.Context, id string) (Playlist, error) {
 	return p, err
 }
 
-// Items lists every track the playlist has ever had, newest first.
-func (s *Service) Items(ctx context.Context, id string) ([]Item, error) {
+// ItemFilter selects playlist items by match status.
+type ItemFilter string
+
+const (
+	AllItems     ItemFilter = ""
+	MatchedItems ItemFilter = "matched"
+	// MissingItems are the tracks with no local file: the playlist's missing list.
+	MissingItems ItemFilter = "missing"
+)
+
+// Items lists every track the playlist has ever had, newest first,
+// optionally only the matched or only the missing ones.
+func (s *Service) Items(ctx context.Context, id string, filter ItemFilter) ([]Item, error) {
+	status := ""
+	switch filter {
+	case MatchedItems:
+		status = "AND m.track_id IS NOT NULL"
+	case MissingItems:
+		status = "AND m.track_id IS NULL"
+	}
 	rows, err := s.pool.Query(ctx, `
 		SELECT pi.spotify_track_id, pi.title, pi.artists, pi.duration_ms, pi.first_seen_at, pi.last_seen_at,
 		       m.track_id::text, t.title, a.name, m.method
@@ -103,7 +121,7 @@ func (s *Service) Items(ctx context.Context, id string) ([]Item, error) {
 		LEFT JOIN spotify_track_matches m ON m.spotify_track_id = pi.spotify_track_id
 		LEFT JOIN tracks t ON t.id = m.track_id
 		LEFT JOIN artists a ON a.id = t.artist_id
-		WHERE pi.playlist_id = $1::uuid
+		WHERE pi.playlist_id = $1::uuid `+status+`
 		ORDER BY pi.first_seen_at DESC, pi.title
 	`, id)
 	if err != nil {
@@ -237,7 +255,8 @@ func (s *Service) MatchPending(ctx context.Context) (int, error) {
 	}
 
 	rows, err = s.pool.Query(ctx, `
-		SELECT t.id::text, t.title, COALESCE(a.name, ''), COALESCE(t.duration_seconds, 0)
+		SELECT t.id::text, t.title, COALESCE(a.name, ''), COALESCE(t.duration_seconds, 0),
+		       COALESCE(t.sample_rate, 0), COALESCE(t.file_size, 0)
 		FROM tracks t LEFT JOIN artists a ON a.id = t.artist_id
 	`)
 	if err != nil {
@@ -245,7 +264,7 @@ func (s *Service) MatchPending(ctx context.Context) (int, error) {
 	}
 	local, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (LocalTrack, error) {
 		var t LocalTrack
-		err := row.Scan(&t.ID, &t.Title, &t.Artist, &t.DurationSec)
+		err := row.Scan(&t.ID, &t.Title, &t.Artist, &t.DurationSec, &t.SampleRate, &t.FileSize)
 		return t, err
 	})
 	if err != nil {
@@ -304,7 +323,8 @@ func (s *Service) SyncStale(ctx context.Context, maxAge time.Duration) error {
 // returns the names of those stations.
 func (s *Service) Delete(ctx context.Context, id string) (usedBy []string, err error) {
 	rows, err := s.pool.Query(ctx, `
-		SELECT name FROM stations WHERE seed_features->'playlist_ids' ? $1::uuid::text ORDER BY name
+		SELECT s.name FROM stations s JOIN station_playlists sp ON sp.station_id = s.id
+		WHERE sp.playlist_id = $1::uuid ORDER BY lower(s.name)
 	`, id)
 	if err != nil {
 		return nil, err
@@ -320,11 +340,4 @@ func (s *Service) Delete(ctx context.Context, id string) (usedBy []string, err e
 		return nil, ErrNotFound
 	}
 	return nil, nil
-}
-
-// CountExisting returns how many of ids are known playlists.
-func (s *Service) CountExisting(ctx context.Context, ids []string) (int, error) {
-	var n int
-	err := s.pool.QueryRow(ctx, `SELECT COUNT(*) FROM playlists WHERE id = ANY($1::uuid[])`, ids).Scan(&n)
-	return n, err
 }

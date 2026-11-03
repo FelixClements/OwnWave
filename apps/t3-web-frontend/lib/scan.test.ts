@@ -28,7 +28,7 @@ describe('scanPhase', () => {
 
   it('reports the analysis step once every folder is done', () => {
     const phase = scanPhase(scan({ folders: { total: 4, done: 4, failed: 0 } }));
-    expect(phase.label).toMatch(/Analyzing/);
+    expect(phase.label).toMatch(/Finishing scan/);
     expect(phase.progress).toBe(1);
   });
 

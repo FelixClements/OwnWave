@@ -48,23 +48,6 @@ func (h *Handler) ListArtists(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, map[string]interface{}{"artists": artists})
 }
-func (h *Handler) GetSimilarTracks(w http.ResponseWriter, r *http.Request) {
-	id, ok := parseUUIDParam(w, r, "id")
-	if !ok {
-		return
-	}
-	limit, err := strconv.Atoi(r.URL.Query().Get("limit"))
-	if err != nil || limit <= 0 {
-		limit = 20
-	}
-	limit = min(limit, 100)
-	similar, err := h.db.SimilarTracks(r.Context(), id, limit)
-	if err != nil {
-		writeInternalError(w, r, "similar tracks", err)
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]interface{}{"track_id": id, "similar": similar})
-}
 func (h *Handler) RecordPlay(w http.ResponseWriter, r *http.Request) {
 	user, ok := h.currentUser(w, r)
 	if !ok {

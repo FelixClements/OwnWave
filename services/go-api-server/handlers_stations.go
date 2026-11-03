@@ -6,47 +6,34 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/jackc/pgx/v5"
-
-	"ownwave/api/internal/auth"
 	"ownwave/api/internal/stations"
 )
+
+// writeStationError maps stations errors to HTTP statuses.
+func writeStationError(w http.ResponseWriter, r *http.Request, op string, err error) {
+	switch {
+	case errors.Is(err, stations.ErrNotFound):
+		http.Error(w, "station not found", http.StatusNotFound)
+	case errors.Is(err, stations.ErrForbidden):
+		http.Error(w, err.Error(), http.StatusForbidden)
+	case errors.Is(err, stations.ErrInvalid):
+		http.Error(w, strings.TrimPrefix(err.Error(), stations.ErrInvalid.Error()+": "), http.StatusBadRequest)
+	default:
+		writeInternalError(w, r, op, err)
+	}
+}
 
 func (h *Handler) ListStations(w http.ResponseWriter, r *http.Request) {
 	user, ok := h.currentUser(w, r)
 	if !ok {
 		return
 	}
-	list, err := h.db.ListStations(r.Context(), user.ID)
+	list, err := h.stations.List(r.Context(), user.ID)
 	if err != nil {
 		writeInternalError(w, r, "list stations", err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]interface{}{"stations": list})
-}
-
-// loadStation fetches the user's station named by the {id} URL param and
-// parses its seed, writing 404/500 itself when that fails.
-func (h *Handler) loadStation(w http.ResponseWriter, r *http.Request, user auth.User) (Station, stations.Seed, bool) {
-	id, ok := parseUUIDParam(w, r, "id")
-	if !ok {
-		return Station{}, stations.Seed{}, false
-	}
-	station, err := h.db.GetStationByID(r.Context(), user.ID, id)
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			http.Error(w, "station not found", http.StatusNotFound)
-		} else {
-			writeInternalError(w, r, "get station", err)
-		}
-		return Station{}, stations.Seed{}, false
-	}
-	seed, err := stations.ParseStored(station.SeedFeatures)
-	if err != nil {
-		writeInternalError(w, r, "parse station seed", err)
-		return Station{}, stations.Seed{}, false
-	}
-	return station, seed, true
+	writeJSON(w, http.StatusOK, map[string]any{"stations": list})
 }
 
 func (h *Handler) GetStation(w http.ResponseWriter, r *http.Request) {
@@ -54,100 +41,50 @@ func (h *Handler) GetStation(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	station, _, ok := h.loadStation(w, r, user)
+	id, ok := parseUUIDParam(w, r, "id")
 	if !ok {
 		return
 	}
-	writeJSON(w, http.StatusOK, station)
+	st, err := h.stations.Get(r.Context(), user.ID, id)
+	if err != nil {
+		writeStationError(w, r, "get station", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, st)
 }
 
-// decodeStationRequest reads a create/update body, writing 400/413 on failure.
-func decodeStationRequest(w http.ResponseWriter, r *http.Request) (stations.Request, bool) {
-	var req stations.Request
+// decodeJSON reads a small JSON body into v, writing 400/413 on failure.
+func decodeJSON(w http.ResponseWriter, r *http.Request, v any) bool {
 	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := json.NewDecoder(r.Body).Decode(v); err != nil {
 		var maxBytesErr *http.MaxBytesError
 		if errors.As(err, &maxBytesErr) {
 			http.Error(w, "request entity too large", http.StatusRequestEntityTooLarge)
 		} else {
 			http.Error(w, "invalid request", http.StatusBadRequest)
 		}
-		return req, false
-	}
-	req.Name = strings.TrimSpace(req.Name)
-	return req, true
-}
-
-// checkSeedPlaylists writes 400 unless every playlist of a playlists seed
-// exists.
-func (h *Handler) checkSeedPlaylists(w http.ResponseWriter, r *http.Request, seed stations.Seed) bool {
-	if !seed.Shared() {
-		return true
-	}
-	n, err := h.playlists.CountExisting(r.Context(), seed.PlaylistIDs)
-	if err != nil {
-		writeInternalError(w, r, "check station playlists", err)
-		return false
-	}
-	if n != len(seed.PlaylistIDs) {
-		http.Error(w, "unknown playlist", http.StatusBadRequest)
 		return false
 	}
 	return true
 }
 
-// CreateStation creates a personal station, or a shared playlist station
-// (admins only).
+// CreateStation creates a station from playlists and optional genres.
+// Admins create shared stations, other users personal ones.
 func (h *Handler) CreateStation(w http.ResponseWriter, r *http.Request) {
 	user, ok := h.currentUser(w, r)
 	if !ok {
 		return
 	}
-	req, ok := decodeStationRequest(w, r)
-	if !ok {
+	var req stations.Request
+	if !decodeJSON(w, r, &req) {
 		return
 	}
-	if req.Name == "" {
-		http.Error(w, "name is required", http.StatusBadRequest)
-		return
-	}
-	seed, err := req.Seed()
+	st, err := h.stations.Create(r.Context(), user, req)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		writeStationError(w, r, "create station", err)
 		return
 	}
-	owner := user.ID
-	if seed.Shared() {
-		if !user.IsAdmin {
-			http.Error(w, "only admins create playlist stations", http.StatusForbidden)
-			return
-		}
-		owner = ""
-	}
-	if !h.checkSeedPlaylists(w, r, seed) {
-		return
-	}
-	raw, err := seed.JSON()
-	if err != nil {
-		writeInternalError(w, r, "encode station seed", err)
-		return
-	}
-	id, err := h.db.CreateStation(r.Context(), owner, req.Name, raw)
-	if err != nil {
-		writeInternalError(w, r, "create station", err)
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]string{"station_id": id})
-}
-
-// canChange writes 403 when the user may not change the station: shared
-// stations belong to the admins.
-func canChange(w http.ResponseWriter, user auth.User, station Station) bool {
-	if station.Shared && !user.IsAdmin {
-		http.Error(w, "only admins change shared stations", http.StatusForbidden)
-		return false
-	}
-	return true
+	writeJSON(w, http.StatusCreated, st)
 }
 
 func (h *Handler) UpdateStation(w http.ResponseWriter, r *http.Request) {
@@ -155,55 +92,20 @@ func (h *Handler) UpdateStation(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	station, seed, ok := h.loadStation(w, r, user)
-	if !ok || !canChange(w, user, station) {
-		return
-	}
-	req, ok := decodeStationRequest(w, r)
+	id, ok := parseUUIDParam(w, r, "id")
 	if !ok {
 		return
 	}
-
-	name := req.Name
-	if name == "" {
-		name = station.Name
-	}
-	if req.HasSeed() {
-		var err error
-		if seed, err = req.Seed(); err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
-		}
-	}
-	// Ownership follows the seed type, so a station cannot switch between
-	// personal and shared.
-	if seed.Shared() != station.Shared {
-		http.Error(w, "playlist stations are shared: create a new station instead", http.StatusBadRequest)
+	var req stations.Request
+	if !decodeJSON(w, r, &req) {
 		return
 	}
-	if !h.checkSeedPlaylists(w, r, seed) {
-		return
-	}
-	raw, err := seed.JSON()
+	st, err := h.stations.Update(r.Context(), user, id, req)
 	if err != nil {
-		writeInternalError(w, r, "encode station seed", err)
+		writeStationError(w, r, "update station", err)
 		return
 	}
-
-	if err := h.db.UpdateStation(r.Context(), station.ID, name, raw); err != nil {
-		writeInternalError(w, r, "update station", err)
-		return
-	}
-	count, err := h.playback.PoolSize(r.Context(), user.ID, seed)
-	if err != nil {
-		writeInternalError(w, r, "count station tracks", err)
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"station_id":  station.ID,
-		"name":        name,
-		"track_count": count,
-	})
+	writeJSON(w, http.StatusOK, st)
 }
 
 func (h *Handler) DeleteStation(w http.ResponseWriter, r *http.Request) {
@@ -211,12 +113,12 @@ func (h *Handler) DeleteStation(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	station, _, ok := h.loadStation(w, r, user)
-	if !ok || !canChange(w, user, station) {
+	id, ok := parseUUIDParam(w, r, "id")
+	if !ok {
 		return
 	}
-	if err := h.db.DeleteStation(r.Context(), station.ID); err != nil {
-		writeInternalError(w, r, "delete station", err)
+	if err := h.stations.Delete(r.Context(), user, id); err != nil {
+		writeStationError(w, r, "delete station", err)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -227,14 +129,62 @@ func (h *Handler) GetQueue(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	station, seed, ok := h.loadStation(w, r, user)
+	id, ok := parseUUIDParam(w, r, "id")
 	if !ok {
 		return
 	}
-	queue, err := h.playback.BuildQueue(r.Context(), user.ID, station.ID, seed, h.recentHours)
+	st, err := h.stations.Get(r.Context(), user.ID, id)
+	if err != nil {
+		writeStationError(w, r, "get station", err)
+		return
+	}
+	queue, err := h.playback.BuildQueue(r.Context(), user.ID, st.ID, st.Definition(), h.recentHours)
 	if err != nil {
 		writeInternalError(w, r, "build queue", err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]interface{}{"queue": queue})
+	writeJSON(w, http.StatusOK, map[string]any{"queue": queue})
+}
+
+// ListStationGenres breaks a playlist pool down by station genre:
+// GET /stations/genres?playlist_ids=a,b.
+func (h *Handler) ListStationGenres(w http.ResponseWriter, r *http.Request) {
+	var ids []string
+	for _, id := range strings.Split(r.URL.Query().Get("playlist_ids"), ",") {
+		if id = strings.TrimSpace(id); id != "" {
+			ids = append(ids, id)
+		}
+	}
+	counts, err := h.stations.GenreCounts(r.Context(), ids)
+	if err != nil {
+		writeStationError(w, r, "station genres", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, counts)
+}
+
+// ListStationSuggestions proposes stations from the synced playlists.
+func (h *Handler) ListStationSuggestions(w http.ResponseWriter, r *http.Request) {
+	list, err := h.stations.Suggestions(r.Context())
+	if err != nil {
+		writeInternalError(w, r, "station suggestions", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"suggestions": list, "min_tracks": stations.MinSuggestionTracks})
+}
+
+// DismissStationSuggestion hides a suggestion for good.
+func (h *Handler) DismissStationSuggestion(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		PlaylistIDs []string `json:"playlist_ids"`
+		Genre       string   `json:"genre"`
+	}
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	if err := h.stations.Dismiss(r.Context(), req.PlaylistIDs, req.Genre); err != nil {
+		writeStationError(w, r, "dismiss suggestion", err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }

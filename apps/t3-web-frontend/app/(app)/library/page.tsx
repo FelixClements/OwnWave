@@ -1,7 +1,6 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import { useInfiniteQuery, useMutation, useQuery } from '@tanstack/react-query';
 import { api } from '@/lib/api';
@@ -9,7 +8,7 @@ import { keys, useScanStatus } from '@/lib/queries';
 import { useAuth } from '@/lib/auth';
 import { ScanProgress } from '@/components/scan/ScanProgress';
 import { TrackTable } from '@/components/tracks/TrackTable';
-import { Button, buttonClass } from '@/components/ui/Button';
+import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Field';
 import { Notice, PageHeader, type NoticeValue } from '@/components/ui/Layout';
 import { TabPanel, Tabs } from '@/components/ui/Tabs';
@@ -121,16 +120,7 @@ export default function LibraryPage() {
           <TrackTable
             label="Tracks"
             rows={allTracks}
-            columns={['title', 'album', 'track_number', 'duration', 'sample_rate', 'channels', 'actions']}
-            actions={(t) => (
-              <Link
-                href={`/similar?track=${encodeURIComponent(t.id)}`}
-                className={buttonClass('secondary', 'sm')}
-                aria-label={`Find tracks similar to ${t.title}`}
-              >
-                Similar
-              </Link>
-            )}
+            columns={['title', 'album', 'track_number', 'duration', 'sample_rate', 'channels']}
             empty={tracksQuery.isLoading ? 'Loading…' : q ? `No tracks match “${q}”.` : 'No tracks yet.'}
           />
           <div className="flex items-center justify-between mt-3 text-muted">

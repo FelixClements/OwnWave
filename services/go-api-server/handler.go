@@ -11,6 +11,7 @@ import (
 	"ownwave/api/internal/playback"
 	"ownwave/api/internal/playlists"
 	"ownwave/api/internal/spotify"
+	"ownwave/api/internal/stations"
 	"ownwave/api/internal/streaming"
 )
 
@@ -19,6 +20,7 @@ type Handler struct {
 	auth         *auth.Service
 	playback     *playback.Service
 	playlists    *playlists.Service
+	stations     *stations.Service
 	stream       *streaming.Server
 	coverCache   *streaming.CoverCache
 	analytics    analytics.Client
@@ -45,6 +47,7 @@ func NewHandler(pool *pgxpool.Pool, cfg Config) *Handler {
 		auth:         auth.NewService(pool),
 		playback:     playback.NewService(pool),
 		playlists:    playlists.NewService(pool, spotify.Client{HTTP: &http.Client{Timeout: 20 * time.Second}}),
+		stations:     stations.NewService(pool),
 		stream:       streaming.New(streaming.Config{MusicDir: cfg.MusicDir, FFmpegPath: cfg.FFmpegPath}),
 		coverCache:   streaming.NewCoverCache(500, 4),
 		analytics:    analytics.NewHTTPClient(cfg.PythonURL),
