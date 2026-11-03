@@ -1,6 +1,7 @@
 package main
 
 import (
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -22,6 +23,7 @@ type Handler struct {
 	playlists    *playlists.Service
 	stations     *stations.Service
 	stream       *streaming.Server
+	transcodes   *streaming.Cache // nil: transcode live, uncached
 	coverCache   *streaming.CoverCache
 	analytics    analytics.Client
 	musicDir     string
@@ -36,13 +38,27 @@ type Config struct {
 	FFmpegPath  string
 	PythonURL   string
 	RecentHours int
+	// TranscodeCacheDir holds transcoded files ("" = no cache).
+	TranscodeCacheDir string
+	// TranscodeCacheMB caps the cache size; least recently played go first.
+	TranscodeCacheMB int
 }
 
 func NewHandler(pool *pgxpool.Pool, cfg Config) *Handler {
 	if cfg.RecentHours <= 0 {
 		cfg.RecentHours = 24
 	}
+	var transcodes *streaming.Cache
+	if cfg.TranscodeCacheDir != "" {
+		var err error
+		transcodes, err = streaming.NewCache(cfg.TranscodeCacheDir, int64(cfg.TranscodeCacheMB)<<20, cfg.FFmpegPath, 4)
+		if err != nil {
+			slog.Warn("transcode cache disabled", "dir", cfg.TranscodeCacheDir, "error", err)
+			transcodes = nil
+		}
+	}
 	return &Handler{
+		transcodes:   transcodes,
 		db:           NewDB(pool),
 		auth:         auth.NewService(pool),
 		playback:     playback.NewService(pool),

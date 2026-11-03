@@ -1,0 +1,989 @@
+openapi: 3.1.0
+info:
+  title: OwnWave API
+  version: "1.0"
+  description: |
+    Self-hosted radio: stations built from synced Spotify playlists and
+    station genres, streamed from a local library.
+
+    Authentication: the web app uses the `ownwave_session` cookie set by
+    `POST /api/login`. Apps sign in with `POST /api/auth/device` and send
+    the returned token as `Authorization: Bearer <token>`; a device token
+    stays valid while it is used at least once a year.
+
+    Errors are plain-text bodies with the HTTP status (400 bad input,
+    401 not signed in, 403 not allowed, 404 not found, 409 conflict,
+    429 rate limited, 503 busy).
+
+    Server-generated id fields are UUIDs. This file is checked against the
+    router by a test (`openapi_test.go`): every route must be listed here.
+servers:
+  - url: /
+security:
+  - cookie: []
+  - bearer: []
+
+tags:
+  - name: auth
+  - name: library
+  - name: playback
+  - name: stations
+  - name: playlists
+  - name: genres
+  - name: admin
+
+paths:
+  /health:
+    get:
+      operationId: health
+      tags: [admin]
+      summary: Liveness probe
+      security: []
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { type: object } } } }
+
+  /api/openapi.yaml:
+    get:
+      operationId: getOpenApi
+      tags: [admin]
+      summary: This document
+      security: []
+      responses:
+        "200": { description: OpenAPI 3.1 document, content: { application/yaml: { schema: { type: string } } } }
+
+  # --- auth -------------------------------------------------------------
+  /api/login:
+    post:
+      operationId: login
+      tags: [auth]
+      summary: Sign in the web app (sets the session cookie)
+      security: []
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/Credentials" } } } }
+      responses:
+        "200": { description: Signed in, content: { application/json: { schema: { $ref: "#/components/schemas/AuthResponse" } } } }
+        "401": { $ref: "#/components/responses/Error" }
+  /api/auth/device:
+    post:
+      operationId: loginDevice
+      tags: [auth]
+      summary: Sign in an app and get a device token
+      description: Rate limited together with /api/login (10 per minute per IP).
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: "#/components/schemas/Credentials"
+                - type: object
+                  properties:
+                    device_name: { type: string, maxLength: 80, example: Pixel 8 }
+      responses:
+        "200":
+          description: Signed in
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [token, user, device]
+                properties:
+                  token: { type: string, description: "Send as Authorization: Bearer <token>" }
+                  user: { $ref: "#/components/schemas/User" }
+                  device: { $ref: "#/components/schemas/Device" }
+        "401": { $ref: "#/components/responses/Error" }
+  /api/register:
+    post:
+      operationId: register
+      tags: [auth]
+      summary: Create an account (first user, or with an invite token)
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: "#/components/schemas/Credentials"
+                - type: object
+                  properties: { invite_token: { type: string } }
+      responses:
+        "200": { description: Registered and signed in, content: { application/json: { schema: { $ref: "#/components/schemas/AuthResponse" } } } }
+        "400": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+  /api/logout:
+    post:
+      operationId: logout
+      tags: [auth]
+      summary: Sign out the current session or device
+      responses:
+        "200": { $ref: "#/components/responses/Status" }
+  /api/me:
+    get:
+      operationId: getMe
+      tags: [auth]
+      summary: The signed-in user
+      responses:
+        "200": { description: User, content: { application/json: { schema: { $ref: "#/components/schemas/User" } } } }
+        "401": { $ref: "#/components/responses/Error" }
+  /api/me/profile:
+    put:
+      operationId: updateProfile
+      tags: [auth]
+      summary: Update email and full name
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties: { email: { type: string }, full_name: { type: string } }
+      responses:
+        "200": { $ref: "#/components/responses/Status" }
+  /api/me/password:
+    post:
+      operationId: changePassword
+      tags: [auth]
+      summary: Change the password (signs out every other session and device)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [current_password, new_password]
+              properties: { current_password: { type: string }, new_password: { type: string, minLength: 8 } }
+      responses:
+        "200": { $ref: "#/components/responses/Status" }
+        "401": { $ref: "#/components/responses/Error" }
+  /api/me/devices:
+    get:
+      operationId: listDevices
+      tags: [auth]
+      summary: Signed-in devices, most recently used first
+      responses:
+        "200":
+          description: Devices
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [devices]
+                properties: { devices: { type: array, items: { $ref: "#/components/schemas/Device" } } }
+  /api/me/devices/{id}:
+    delete:
+      operationId: revokeDevice
+      tags: [auth]
+      summary: Sign a device out
+      parameters: [{ $ref: "#/components/parameters/id" }]
+      responses:
+        "204": { description: Signed out }
+        "404": { $ref: "#/components/responses/Error" }
+
+  /api/setup/status:
+    get:
+      operationId: getSetupStatus
+      tags: [auth]
+      summary: Whether first-run setup is done
+      security: []
+      responses:
+        "200": { $ref: "#/components/responses/Object" }
+  /api/setup/complete:
+    post:
+      operationId: completeSetup
+      tags: [auth]
+      summary: Mark setup as done (admin, or anyone before the first user)
+      responses:
+        "200": { $ref: "#/components/responses/Object" }
+  /api/setup/summary:
+    get:
+      operationId: getSetupSummary
+      tags: [auth]
+      summary: Library summary shown at the end of setup
+      responses:
+        "200":
+          description: Summary
+          content: { application/json: { schema: { type: object, properties: { total_tracks: { type: integer } } } } }
+
+  # --- playback -----------------------------------------------------------
+  /api/stream/{id}:
+    get:
+      operationId: streamTrack
+      tags: [playback]
+      summary: Stream a track
+      description: |
+        `quality` picks the stream. `original` is the stored file (FLAC/MP3)
+        with Range support. The others are transcoded once, cached on disk
+        and then served with Range support; the first play of a track in a
+        quality streams while transcoding (no Content-Length), and a Range
+        request during that first transcode waits for it to finish.
+        Without `quality`, the older `format`/`bitrate` live transcoding is
+        used (kept for the current web player). Rate limited to 60 per
+        minute per IP.
+      parameters:
+        - { $ref: "#/components/parameters/id" }
+        - name: quality
+          in: query
+          schema: { $ref: "#/components/schemas/Quality" }
+        - name: normalize
+          in: query
+          description: Loudness normalisation (default true)
+          schema: { type: boolean, default: true }
+        - name: format
+          in: query
+          deprecated: true
+          schema: { type: string, enum: [flac, mp3, opus, aac] }
+        - name: bitrate
+          in: query
+          deprecated: true
+          schema: { type: string, example: 128k }
+      responses:
+        "200":
+          description: Audio
+          content:
+            audio/flac: { schema: { type: string, format: binary } }
+            audio/mpeg: { schema: { type: string, format: binary } }
+            audio/ogg: { schema: { type: string, format: binary } }
+            audio/aac: { schema: { type: string, format: binary } }
+        "206": { description: Partial audio (Range) }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
+  /api/tracks/{id}/played:
+    post:
+      operationId: recordPlay
+      tags: [playback]
+      summary: Record a play (for history and "recently played first")
+      parameters: [{ $ref: "#/components/parameters/id" }]
+      requestBody:
+        content:
+          application/json:
+            schema: { type: object, properties: { station_id: { type: string, description: "Station it played on ('' = none)" } } }
+      responses:
+        "204": { description: Recorded }
+  /api/tracks/{id}/feedback:
+    post:
+      operationId: recordFeedback
+      tags: [playback]
+      summary: Like or ban a track (banned tracks never play again)
+      parameters: [{ $ref: "#/components/parameters/id" }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/FeedbackRequest" } } } }
+      responses:
+        "204": { description: Recorded }
+        "400": { $ref: "#/components/responses/Error" }
+    delete:
+      operationId: deleteFeedback
+      tags: [playback]
+      summary: Remove a like or ban
+      parameters: [{ $ref: "#/components/parameters/id" }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/FeedbackRequest" } } } }
+      responses:
+        "204": { description: Removed }
+  /api/history:
+    get:
+      operationId: listHistory
+      tags: [playback]
+      summary: The user's recent plays, newest first
+      responses:
+        "200":
+          description: History
+          content:
+            application/json:
+              schema:
+                type: object
+                properties: { history: { type: array, items: { $ref: "#/components/schemas/HistoryEntry" } } }
+  /api/feedback:
+    get:
+      operationId: listFeedback
+      tags: [playback]
+      summary: Liked or banned tracks
+      parameters:
+        - { name: feedback, in: query, required: true, schema: { type: string, enum: [like, ban] } }
+      responses:
+        "200": { $ref: "#/components/responses/Tracks" }
+
+  # --- library ------------------------------------------------------------
+  /api/tracks:
+    get:
+      operationId: listTracks
+      tags: [library]
+      summary: Library tracks by title
+      parameters:
+        - { name: limit, in: query, schema: { type: integer, default: 100, maximum: 200 } }
+        - { name: offset, in: query, schema: { type: integer, default: 0 } }
+        - { name: q, in: query, description: "Title, artist or album contains", schema: { type: string } }
+      responses:
+        "200": { $ref: "#/components/responses/Tracks" }
+  /api/tracks/{id}:
+    get:
+      operationId: getTrack
+      tags: [library]
+      summary: One track
+      parameters: [{ $ref: "#/components/parameters/id" }]
+      responses:
+        "200": { description: Track, content: { application/json: { schema: { $ref: "#/components/schemas/Track" } } } }
+        "404": { $ref: "#/components/responses/Error" }
+  /api/tracks/{id}/cover:
+    get:
+      operationId: getTrackCover
+      tags: [library]
+      summary: Embedded cover art of a track
+      description: Rate limited to 300 per minute per IP.
+      parameters: [{ $ref: "#/components/parameters/id" }]
+      responses:
+        "200": { $ref: "#/components/responses/Image" }
+        "404": { $ref: "#/components/responses/Error" }
+  /api/tracks/{id}/genres:
+    get:
+      operationId: getTrackGenres
+      tags: [genres]
+      summary: A track's station genres
+      parameters: [{ $ref: "#/components/parameters/id" }]
+      responses:
+        "200":
+          description: Genres
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  track_id: { type: string }
+                  genres:
+                    type: array
+                    items:
+                      type: object
+                      required: [genre, score, is_primary]
+                      properties: { genre: { type: string }, score: { type: number, format: double }, is_primary: { type: boolean } }
+  /api/albums:
+    get:
+      operationId: listAlbums
+      tags: [library]
+      summary: Every album
+      responses:
+        "200":
+          description: Albums
+          content: { application/json: { schema: { type: object, properties: { albums: { type: array, items: { $ref: "#/components/schemas/Album" } } } } } }
+  /api/artists:
+    get:
+      operationId: listArtists
+      tags: [library]
+      summary: Every artist
+      responses:
+        "200":
+          description: Artists
+          content: { application/json: { schema: { type: object, properties: { artists: { type: array, items: { $ref: "#/components/schemas/Artist" } } } } } }
+  /api/search:
+    get:
+      operationId: search
+      tags: [library]
+      summary: Search tracks, albums and artists
+      parameters: [{ name: q, in: query, required: true, schema: { type: string } }]
+      responses:
+        "200":
+          description: Results
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  tracks: { type: array, items: { $ref: "#/components/schemas/Track" } }
+                  albums: { type: array, items: { $ref: "#/components/schemas/Album" } }
+                  artists: { type: array, items: { $ref: "#/components/schemas/Artist" } }
+
+  # --- stations -----------------------------------------------------------
+  /api/stations:
+    get:
+      operationId: listStations
+      tags: [stations]
+      summary: The user's stations and the shared ones (shared first)
+      responses:
+        "200":
+          description: Stations
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [stations]
+                properties: { stations: { type: array, items: { $ref: "#/components/schemas/Station" } } }
+    post:
+      operationId: createStation
+      tags: [stations]
+      summary: Create a station (admins create shared stations)
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/StationRequest" } } } }
+      responses:
+        "201": { $ref: "#/components/responses/Station" }
+        "400": { $ref: "#/components/responses/Error" }
+  /api/stations/genres:
+    get:
+      operationId: getPoolGenres
+      tags: [stations]
+      summary: Genre breakdown of a playlist pool, for picking a station's genres
+      parameters:
+        - name: playlist_ids
+          in: query
+          required: true
+          description: Comma-separated playlist ids
+          schema: { type: string }
+      responses:
+        "200": { description: Breakdown, content: { application/json: { schema: { $ref: "#/components/schemas/PoolGenres" } } } }
+        "400": { $ref: "#/components/responses/Error" }
+  /api/stations/{id}:
+    get:
+      operationId: getStation
+      tags: [stations]
+      summary: One station
+      parameters: [{ $ref: "#/components/parameters/id" }]
+      responses:
+        "200": { $ref: "#/components/responses/Station" }
+        "404": { $ref: "#/components/responses/Error" }
+    put:
+      operationId: updateStation
+      tags: [stations]
+      summary: Change a station (omitted fields keep their value)
+      parameters: [{ $ref: "#/components/parameters/id" }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/StationRequest" } } } }
+      responses:
+        "200": { $ref: "#/components/responses/Station" }
+        "400": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+    delete:
+      operationId: deleteStation
+      tags: [stations]
+      summary: Delete a station
+      parameters: [{ $ref: "#/components/parameters/id" }]
+      responses:
+        "204": { description: Deleted }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /api/stations/{id}/queue:
+    get:
+      operationId: getQueue
+      tags: [stations]
+      summary: The next tracks to play (up to 200)
+      description: |
+        Shuffled on every request: tracks not played on this station in the
+        last day first, then recently played ones (least recent first); the
+        same artist at most once every 4 tracks when possible; banned tracks
+        never. Fetch again when the queue runs out.
+      parameters: [{ $ref: "#/components/parameters/id" }]
+      responses:
+        "200":
+          description: Queue
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [queue]
+                properties: { queue: { type: array, items: { $ref: "#/components/schemas/QueueTrack" } } }
+        "404": { $ref: "#/components/responses/Error" }
+  /api/stations/{id}/cover:
+    get:
+      operationId: getStationCover
+      tags: [stations]
+      summary: Cover art for a station (from one of its tracks)
+      parameters: [{ $ref: "#/components/parameters/id" }]
+      responses:
+        "200": { $ref: "#/components/responses/Image" }
+        "404": { $ref: "#/components/responses/Error" }
+  /api/browse:
+    get:
+      operationId: browse
+      tags: [stations]
+      summary: Media tree for apps (Android Auto)
+      parameters:
+        - name: node
+          in: query
+          description: "root (default), stations, recent, genres, playlists, genre:<id>, playlist:<id>"
+          schema: { type: string, default: root }
+      responses:
+        "200": { description: Node, content: { application/json: { schema: { $ref: "#/components/schemas/BrowseNode" } } } }
+        "404": { $ref: "#/components/responses/Error" }
+  /api/search/stations:
+    get:
+      operationId: searchStations
+      tags: [stations]
+      summary: Stations to play for a (voice) query
+      description: |
+        Strips request words ("play … radio on OwnWave"), then ranks
+        stations by name, genre, playlist, then artist share. Up to 10.
+      parameters: [{ name: q, in: query, required: true, schema: { type: string, maxLength: 200 } }]
+      responses:
+        "200":
+          description: Results
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [query, results]
+                properties:
+                  query: { type: string, description: The query as searched }
+                  results: { type: array, items: { $ref: "#/components/schemas/SearchHit" } }
+
+  # --- playlists ----------------------------------------------------------
+  /api/playlists:
+    get:
+      operationId: listPlaylists
+      tags: [playlists]
+      summary: Synced Spotify playlists
+      responses:
+        "200":
+          description: Playlists
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [playlists]
+                properties: { playlists: { type: array, items: { $ref: "#/components/schemas/Playlist" } } }
+  /api/playlists/{id}:
+    get:
+      operationId: getPlaylist
+      tags: [playlists]
+      summary: A playlist with every track it ever listed
+      parameters:
+        - { $ref: "#/components/parameters/id" }
+        - name: items
+          in: query
+          description: "missing: only tracks with no local file; matched: only the others"
+          schema: { type: string, enum: [matched, missing] }
+      responses:
+        "200":
+          description: Playlist
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [playlist, items]
+                properties:
+                  playlist: { $ref: "#/components/schemas/Playlist" }
+                  items: { type: array, items: { $ref: "#/components/schemas/PlaylistItem" } }
+        "404": { $ref: "#/components/responses/Error" }
+
+  # --- genres -------------------------------------------------------------
+  /api/genres:
+    get:
+      operationId: listGenres
+      tags: [genres]
+      summary: Station genres with library-wide counts
+      responses:
+        "200": { description: Distribution, content: { application/json: { schema: { $ref: "#/components/schemas/GenreDistribution" } } } }
+
+  # --- admin --------------------------------------------------------------
+  /api/admin/scan:
+    post:
+      operationId: startScan
+      tags: [admin]
+      summary: Start a library scan
+      requestBody:
+        content: { application/json: { schema: { type: object, properties: { path: { type: string }, force: { type: boolean } } } } }
+      responses:
+        "200": { $ref: "#/components/responses/Object" }
+  /api/admin/scan/{id}:
+    get:
+      operationId: getScan
+      tags: [admin]
+      summary: A scan's status
+      parameters: [{ $ref: "#/components/parameters/id" }]
+      responses:
+        "200": { $ref: "#/components/responses/Object" }
+  /api/admin/scans:
+    get:
+      operationId: listScans
+      tags: [admin]
+      summary: Recent scans
+      parameters: [{ name: limit, in: query, schema: { type: integer, default: 10, maximum: 50 } }]
+      responses:
+        "200": { $ref: "#/components/responses/Object" }
+  /api/admin/health:
+    get:
+      operationId: getAdminHealth
+      tags: [admin]
+      summary: Component health (database, analytics service)
+      responses:
+        "200": { $ref: "#/components/responses/Object" }
+  /api/admin/stations:
+    get:
+      operationId: listAdminStations
+      tags: [admin]
+      summary: Stations with how many of their tracks the admin played
+      responses:
+        "200":
+          description: Stations
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  stations:
+                    type: array
+                    items:
+                      allOf:
+                        - $ref: "#/components/schemas/Station"
+                        - { type: object, properties: { played_count: { type: integer } } }
+  /api/admin/station-suggestions:
+    get:
+      operationId: listStationSuggestions
+      tags: [admin]
+      summary: Stations OwnWave proposes from the synced playlists
+      responses:
+        "200":
+          description: Suggestions, largest first
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [suggestions, min_tracks]
+                properties:
+                  suggestions: { type: array, items: { $ref: "#/components/schemas/StationSuggestion" } }
+                  min_tracks: { type: integer }
+  /api/admin/station-suggestions/dismiss:
+    post:
+      operationId: dismissStationSuggestion
+      tags: [admin]
+      summary: Hide a suggestion for good
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [playlist_ids]
+              properties:
+                playlist_ids: { type: array, items: { type: string } }
+                genre: { type: string, description: "'' = the all-genres suggestion" }
+      responses:
+        "204": { description: Dismissed }
+        "400": { $ref: "#/components/responses/Error" }
+  /api/admin/rebuild-analysis:
+    post:
+      operationId: rebuildAnalysis
+      tags: [admin]
+      summary: Queue the post-scan step (genre refresh)
+      responses:
+        "200": { $ref: "#/components/responses/Object" }
+  /api/admin/rebuild-genres:
+    post:
+      operationId: refreshGenres
+      tags: [admin]
+      summary: Refresh MusicBrainz artist tags and re-score every track
+      responses:
+        "200": { $ref: "#/components/responses/Object" }
+  /api/admin/genres/report:
+    get:
+      operationId: getGenreReport
+      tags: [admin]
+      summary: How well the audio model agrees with file genre tags
+      responses:
+        "200": { $ref: "#/components/responses/Object" }
+  /api/admin/playlists:
+    post:
+      operationId: addPlaylist
+      tags: [admin]
+      summary: Add a public Spotify playlist and sync it
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [url]
+              properties:
+                url: { type: string, example: "https://open.spotify.com/playlist/37i9dQZF1DX1spT6G94GFC" }
+      responses:
+        "200": { description: Added, content: { application/json: { schema: { $ref: "#/components/schemas/Playlist" } } } }
+        "400": { $ref: "#/components/responses/Error" }
+        "502": { $ref: "#/components/responses/Error" }
+  /api/admin/playlists/{id}/sync:
+    post:
+      operationId: syncPlaylist
+      tags: [admin]
+      summary: Sync a playlist now
+      parameters: [{ $ref: "#/components/parameters/id" }]
+      responses:
+        "200": { description: Synced, content: { application/json: { schema: { $ref: "#/components/schemas/Playlist" } } } }
+        "502": { $ref: "#/components/responses/Error" }
+  /api/admin/playlists/{id}:
+    delete:
+      operationId: deletePlaylist
+      tags: [admin]
+      summary: Delete a playlist no station uses
+      parameters: [{ $ref: "#/components/parameters/id" }]
+      responses:
+        "204": { description: Deleted }
+        "409": { $ref: "#/components/responses/Error" }
+  /api/admin/metrics:
+    get:
+      operationId: getMetrics
+      tags: [admin]
+      summary: Prometheus metrics
+      responses:
+        "200": { description: Metrics, content: { text/plain: { schema: { type: string } } } }
+  /api/admin/users:
+    get:
+      operationId: listUsers
+      tags: [admin]
+      summary: Every user
+      responses:
+        "200":
+          description: Users
+          content: { application/json: { schema: { type: object, properties: { users: { type: array, items: { $ref: "#/components/schemas/User" } } } } } }
+    post:
+      operationId: createUser
+      tags: [admin]
+      summary: Create a user
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/Credentials" } } } }
+      responses:
+        "201":
+          description: Created
+          content: { application/json: { schema: { type: object, properties: { user: { $ref: "#/components/schemas/User" } } } } }
+        "400": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+  /api/admin/users/{id}:
+    delete:
+      operationId: deleteUser
+      tags: [admin]
+      summary: Delete a user
+      parameters: [{ $ref: "#/components/parameters/id" }]
+      responses:
+        "204": { description: Deleted }
+  /api/admin/invites:
+    post:
+      operationId: createInvite
+      tags: [admin]
+      summary: Create an invite link
+      requestBody:
+        content: { application/json: { schema: { type: object, properties: { username: { type: string } } } } }
+      responses:
+        "200": { $ref: "#/components/responses/Object" }
+
+components:
+  securitySchemes:
+    cookie: { type: apiKey, in: cookie, name: ownwave_session }
+    bearer: { type: http, scheme: bearer, description: Device token from POST /api/auth/device }
+
+  parameters:
+    id:
+      name: id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+
+  responses:
+    Error:
+      description: Error message
+      content: { text/plain: { schema: { type: string } } }
+    Status:
+      description: Done
+      content: { application/json: { schema: { type: object, properties: { status: { type: string, example: ok } } } } }
+    Object:
+      description: JSON object (shape owned by the analytics service or admin UI)
+      content: { application/json: { schema: { type: object } } }
+    Image:
+      description: JPEG image
+      content: { image/jpeg: { schema: { type: string, format: binary } } }
+    Tracks:
+      description: Tracks
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [tracks]
+            properties: { tracks: { type: array, items: { $ref: "#/components/schemas/Track" } } }
+    Station:
+      description: Station
+      content: { application/json: { schema: { $ref: "#/components/schemas/Station" } } }
+
+  schemas:
+    Quality:
+      type: string
+      description: "original = stored file; high/normal/low = Opus 160/96/64 kbps; aac = AAC 128 kbps"
+      enum: [original, high, normal, low, aac]
+    Credentials:
+      type: object
+      required: [username, password]
+      properties:
+        username: { type: string }
+        password: { type: string, format: password }
+    User:
+      type: object
+      required: [id, username, is_admin]
+      properties:
+        id: { type: string }
+        username: { type: string }
+        email: { type: [string, "null"] }
+        full_name: { type: [string, "null"] }
+        is_admin: { type: boolean }
+    AuthResponse:
+      type: object
+      required: [user]
+      properties:
+        user:
+          type: object
+          required: [id, username, is_admin]
+          properties: { id: { type: string }, username: { type: string }, is_admin: { type: boolean } }
+    Device:
+      type: object
+      required: [id, name, created_at, expires_at, current]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        created_at: { type: string, format: date-time }
+        last_used_at: { type: string, format: date-time }
+        expires_at: { type: string, format: date-time }
+        current: { type: boolean, description: The device making the request }
+    FeedbackRequest:
+      type: object
+      required: [feedback]
+      properties: { feedback: { type: string, enum: [like, ban] } }
+    Track:
+      type: object
+      required: [id, title]
+      properties:
+        id: { type: string }
+        title: { type: string }
+        artist: { type: string }
+        album: { type: string }
+        track_number: { type: integer }
+        duration_seconds: { type: number, format: double }
+        sample_rate: { type: integer }
+        channels: { type: integer }
+        loudness: { type: number, format: double, description: Integrated loudness in LUFS }
+    QueueTrack:
+      allOf:
+        - $ref: "#/components/schemas/Track"
+        - type: object
+          required: [position, liked]
+          properties:
+            position: { type: integer }
+            liked: { type: boolean }
+            bpm: { type: number, format: double }
+            key: { type: string }
+            energy: { type: number, format: double }
+            valence: { type: number, format: double }
+            outro_start_seconds: { type: number, format: double }
+            ideal_crossfade_seconds: { type: number, format: double }
+            intro_start_seconds: { type: number, format: double }
+            outro_end_seconds: { type: number, format: double }
+    HistoryEntry:
+      type: object
+      required: [track_id, title, played_at]
+      properties:
+        track_id: { type: string }
+        title: { type: string }
+        artist: { type: [string, "null"] }
+        album: { type: [string, "null"] }
+        station_id: { type: [string, "null"] }
+        played_at: { type: string, format: date-time }
+    Album:
+      type: object
+      required: [id, title]
+      properties: { id: { type: string }, title: { type: string } }
+    Artist:
+      type: object
+      required: [id, name]
+      properties: { id: { type: string }, name: { type: string } }
+    Station:
+      type: object
+      required: [id, name, shared, playlist_ids, genres, track_count, updated_at]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        shared: { type: boolean, description: "Played by everyone, changed by admins only" }
+        playlist_ids: { type: array, items: { type: string } }
+        genres: { type: array, items: { type: string }, description: "Station genre ids; empty = every genre" }
+        track_count: { type: integer, description: Tracks it plays for this user (bans excluded) }
+        updated_at: { type: string, format: date-time }
+    StationRequest:
+      type: object
+      properties:
+        name: { type: string, maxLength: 100 }
+        playlist_ids: { type: array, items: { type: string }, minItems: 1 }
+        genres: { type: array, items: { type: string } }
+    PoolGenres:
+      type: object
+      required: [tracks, genres]
+      properties:
+        tracks: { type: integer, description: Matched tracks in the pool }
+        genres:
+          type: array
+          items:
+            type: object
+            required: [id, name, tracks]
+            properties: { id: { type: string }, name: { type: string }, tracks: { type: integer } }
+    StationSuggestion:
+      type: object
+      required: [playlist_ids, playlist_names, genre, track_count, name]
+      properties:
+        playlist_ids: { type: array, items: { type: string } }
+        playlist_names: { type: array, items: { type: string } }
+        genre: { type: string, description: "'' = every genre of the pool" }
+        genre_name: { type: string }
+        track_count: { type: integer }
+        name: { type: string, description: Suggested station name }
+    BrowseItem:
+      type: object
+      required: [id, title, browsable, playable]
+      properties:
+        id: { type: string, description: "Node to open next, or station:<id>" }
+        title: { type: string }
+        subtitle: { type: string }
+        browsable: { type: boolean }
+        playable: { type: boolean }
+        station_id: { type: string }
+        track_count: { type: integer }
+        artwork_url: { type: string, description: "Server-relative; needs the user's credentials" }
+    BrowseNode:
+      type: object
+      required: [id, title, items]
+      properties:
+        id: { type: string }
+        title: { type: string }
+        items: { type: array, items: { $ref: "#/components/schemas/BrowseItem" } }
+    SearchHit:
+      allOf:
+        - $ref: "#/components/schemas/BrowseItem"
+        - type: object
+          required: [reason]
+          properties: { reason: { type: string, enum: [station, genre, playlist, artist] } }
+    Playlist:
+      type: object
+      required: [id, spotify_id, name, track_count, matched_count]
+      properties:
+        id: { type: string }
+        spotify_id: { type: string }
+        name: { type: string }
+        track_count: { type: integer, description: Every track it ever listed }
+        matched_count: { type: integer, description: "Of those, found in the library" }
+        last_synced_at: { type: string, format: date-time }
+        last_sync_error: { type: string }
+    PlaylistItem:
+      type: object
+      required: [spotify_track_id, title, artists, first_seen_at, last_seen_at]
+      properties:
+        spotify_track_id: { type: string }
+        title: { type: string }
+        artists: { type: array, items: { type: string } }
+        duration_ms: { type: integer }
+        first_seen_at: { type: string, format: date-time }
+        last_seen_at: { type: string, format: date-time }
+        track_id: { type: string, description: Local track; absent when missing }
+        local_title: { type: string }
+        local_artist: { type: string }
+        match_method: { type: string, enum: [exact, fuzzy] }
+    GenreDistribution:
+      type: object
+      required: [scored_tracks, genres, warnings]
+      properties:
+        scored_tracks: { type: integer }
+        genres:
+          type: array
+          items:
+            type: object
+            required: [genre, name, primary_tracks, tracks, station]
+            properties:
+              genre: { type: string }
+              name: { type: string }
+              primary_tracks: { type: integer }
+              tracks: { type: integer }
+              station: { type: boolean, description: Usable as a station genre }
+        warnings: { type: array, items: { type: string } }

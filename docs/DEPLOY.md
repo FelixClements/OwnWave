@@ -45,6 +45,10 @@ docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
 
 Caddy will automatically obtain and renew a TLS certificate for `OWNWAVE_DOMAIN` using Let's Encrypt.
 
+## Transcode cache
+
+Lower qualities (Opus 160/96/64 kbps, AAC 128 kbps) are transcoded once per track and kept in the `transcode_cache` volume, mounted at `/cache` in the `go` container. `TRANSCODE_CACHE_MB` (default 10240) caps its size; the least recently played files are deleted first. Deleting the volume only costs re-transcoding.
+
 ## 3. Reverse proxy and routing
 
 Caddy (`Caddyfile`) proxies everything on `https://<OWNWAVE_DOMAIN>` to Go, which serves:

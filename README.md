@@ -8,7 +8,8 @@ An open-source, self-hosted smart radio. Turn a local library of lossless audio 
 - Builds stations from Spotify playlists: admins add public playlist URLs (the normal `open.spotify.com/playlist/…` link), OwnWave syncs them daily and finds each track in the local library. A station plays the local matches of one or more playlists, optionally only some genres. Playlists only grow: tracks Spotify rotates out are kept, and each playlist lists the tracks missing from the library.
 - Tags every track with station genres by blending an audio model (Discogs400), file genre tags and MusicBrainz artist tags, and suggests stations per playlist and genre.
 - A station is live: it holds every library track matching its playlists and genres, plays them shuffled with tracks you have not heard recently first and the same artist at most once every four tracks, and reshuffles when the queue runs out.
-- Streams raw FLAC or on-the-fly transcodes to MP3, Opus, or AAC per client.
+- Streams the original file or a cached transcode per client: Opus at 160, 96 or 64 kbps (phones on mobile data) or AAC 128 kbps, with seeking.
+- Apps sign in with long-lived device tokens; a browse tree and voice search serve Android Auto. The API is described in [`services/go-api-server/openapi.yaml`](services/go-api-server/openapi.yaml).
 - Tracks listening history and likes; banned tracks are never queued again.
 - Provides a responsive web player and an admin dashboard for monitoring and maintenance.
 

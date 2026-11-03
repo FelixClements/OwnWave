@@ -77,12 +77,16 @@ Status: implemented on branch `phase2/stations` (migration 019), stacked on Phas
 
 ## Phase 3: API for clients
 
-1. Device tokens: the Android app logs in once and gets a long-lived revocable token (`Authorization: Bearer`). The web keeps cookie sessions.
-2. Quality profiles: `original` (FLAC), `high` (Opus 160k), `normal` (Opus 96k), `low` (Opus 64k), `aac128` for clients without Opus. The client picks one per request; Android stores one value for Wi-Fi and one for mobile data.
-3. Transcode cache: cache transcoded files on disk keyed by track + profile, so seeking and replays do not re-encode.
-4. Browse API matching the Android Auto tree: `/api/browse/root`, `/api/browse/{node}` returning stations, playlists, genres, recent.
-5. Search endpoint for voice queries: station, genre, artist, track.
-6. Publish an OpenAPI spec; generate the TypeScript and Kotlin clients from it.
+Status: implemented on branch `phase3/client-api` (migration 020), stacked on Phase 2.
+
+1. Device tokens: `POST /api/auth/device` returns a Bearer token valid for a year after its last use; `GET/DELETE /api/me/devices` lists and revokes them. The web keeps cookie sessions. Changing the password signs every device out.
+2. Quality profiles: `?quality=original|high|normal|low|aac` (stored file, Opus 160/96/64 kbps, AAC 128 kbps). The client picks one per request; Android stores one value for Wi-Fi and one for mobile data.
+3. Transcode cache: one ffmpeg run per file version, profile and gain; the first play streams while ffmpeg writes, later plays (and seeks) get the file with Range support. Least recently played files are evicted past `TRANSCODE_CACHE_MB` (default 10 GB, volume `transcode_cache`).
+4. Browse API for the Android Auto tree: `GET /api/browse?node=root|stations|recent|genres|playlists|genre:<id>|playlist:<id>`; station cover art at `/api/stations/{id}/cover`.
+5. Voice search: `GET /api/search/stations?q=` strips request words ("play … radio on OwnWave") and ranks stations by name, genre, playlist, then artist share.
+6. OpenAPI 3.1 spec at `services/go-api-server/openapi.yaml`, served at `/api/openapi.yaml`. A test fails when a route is missing from it; it lints clean with Redocly and generates with openapi-typescript and openapi-generator (Kotlin).
+
+Android Auto loads artwork itself and cannot send the Bearer header, so the Android app proxies artwork through its own content provider (Phase 5).
 
 ## Phase 4: web UI
 

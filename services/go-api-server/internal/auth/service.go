@@ -263,25 +263,33 @@ func (s *Service) DeleteUser(ctx context.Context, actorID, targetID string) erro
 }
 
 func (s *Service) Login(ctx context.Context, username, password string) (string, User, error) {
+	user, err := s.checkCredentials(ctx, username, password)
+	if err != nil {
+		return "", User{}, err
+	}
+	token, err := s.createSession(ctx, s.pool, user.ID)
+	if err != nil {
+		return "", User{}, err
+	}
+	return token, user, nil
+}
+
+// checkCredentials returns the user (without password hash) when the
+// password matches, taking the same time for unknown users.
+func (s *Service) checkCredentials(ctx context.Context, username, password string) (User, error) {
 	user, err := s.getUserByUsername(ctx, username)
 	hash := dummyLoginHash
 	found := err == nil
 	if found {
 		hash = []byte(user.PasswordHash)
 	} else if !errors.Is(err, pgx.ErrNoRows) {
-		return "", User{}, err
+		return User{}, err
 	}
 	if err := bcrypt.CompareHashAndPassword(hash, []byte(password)); err != nil || !found {
-		return "", User{}, ErrInvalidCredentials
+		return User{}, ErrInvalidCredentials
 	}
-
-	token, err := s.createSession(ctx, s.pool, user.ID)
-	if err != nil {
-		return "", User{}, err
-	}
-
 	user.PasswordHash = ""
-	return token, user, nil
+	return user, nil
 }
 
 func (s *Service) Logout(ctx context.Context, rawToken string) error {
@@ -344,14 +352,23 @@ func (s *Service) insertSession(ctx context.Context, q querier, userID, tokenHas
 	return err
 }
 
+// getUserByTokenHash returns the session's user. At most once per
+// touchInterval it records last_used_at and, for device sessions, slides
+// the expiry, so a device in use never has to log in again.
 func (s *Service) getUserByTokenHash(ctx context.Context, tokenHash string) (User, error) {
 	var u User
 	err := s.pool.QueryRow(ctx, `
+		WITH touched AS (
+			UPDATE sessions SET last_used_at = NOW(),
+				expires_at = CASE WHEN kind = 'device' THEN NOW() + make_interval(secs => $2) ELSE expires_at END
+			WHERE token_hash = $1 AND expires_at > NOW()
+			  AND (last_used_at IS NULL OR last_used_at < NOW() - make_interval(secs => $3))
+		)
 		SELECT u.id::text, u.username, u.email, u.full_name, u.is_admin, u.password_hash
 		FROM users u
 		JOIN sessions s ON u.id = s.user_id
 		WHERE s.token_hash = $1 AND s.expires_at > NOW()
-	`, tokenHash).Scan(&u.ID, &u.Username, &u.Email, &u.FullName, &u.IsAdmin, &u.PasswordHash)
+	`, tokenHash, deviceTTL.Seconds(), touchInterval.Seconds()).Scan(&u.ID, &u.Username, &u.Email, &u.FullName, &u.IsAdmin, &u.PasswordHash)
 	return u, err
 }
 

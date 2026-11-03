@@ -76,6 +76,26 @@ func assertUnderMusicDir(musicDir, path string) error {
 	return nil
 }
 
+// originalTypes maps a file extension to the Content-Type it is served with.
+var originalTypes = map[string]string{
+	".flac": "audio/flac",
+	".mp3":  "audio/mpeg",
+	".m4a":  "audio/mp4",
+	".ogg":  "audio/ogg",
+	".opus": "audio/ogg",
+	".wav":  "audio/wav",
+}
+
+// OriginalContentType is the Content-Type of a stored audio file.
+func OriginalContentType(path string) string {
+	if t, ok := originalTypes[strings.ToLower(filepath.Ext(path))]; ok {
+		return t
+	}
+	return "application/octet-stream"
+}
+
+// ServeFLAC serves the stored file as is (any format, despite the name),
+// with Range support.
 func (s *Server) ServeFLAC(w http.ResponseWriter, r *http.Request, path string) {
 	f, err := os.Open(path)
 	if err != nil {
@@ -91,9 +111,9 @@ func (s *Server) ServeFLAC(w http.ResponseWriter, r *http.Request, path string) 
 		return
 	}
 
-	w.Header().Set("Content-Type", "audio/flac")
+	w.Header().Set("Content-Type", OriginalContentType(path))
 	w.Header().Set("Cache-Control", "private, no-store")
-	http.ServeContent(w, r, filepath.Base(path), stat.ModTime(), f)
+	http.ServeContent(w, r, "", stat.ModTime(), f)
 }
 
 func (s *Server) ServeTranscoded(w http.ResponseWriter, r *http.Request, path string, format string, loudness *float64, normalize bool) {

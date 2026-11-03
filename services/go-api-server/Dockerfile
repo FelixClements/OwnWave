@@ -22,7 +22,8 @@ RUN CGO_ENABLED=0 go build -o server .
 FROM alpine:3.22
 
 RUN apk add --no-cache ffmpeg ca-certificates wget \
-    && adduser -D -u 1000 ownwave
+    && adduser -D -u 1000 ownwave \
+    && mkdir -p /cache/transcodes && chown -R ownwave:ownwave /cache
 
 WORKDIR /app
 
