@@ -75,7 +75,7 @@ func TestSyncGrowsPlaylistAndMatchesNewFiles(t *testing.T) {
 	require.Equal(t, 3, p.TrackCount)
 	require.NotNil(t, p.LastSyncedAt)
 
-	items, err := svc.Items(ctx, p.ID)
+	items, err := svc.Items(ctx, p.ID, playlists.AllItems)
 	require.NoError(t, err)
 	byID := map[string]playlists.Item{}
 	for _, it := range items {
@@ -104,7 +104,7 @@ func TestSyncGrowsPlaylistAndMatchesNewFiles(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, 2, p.MatchedCount)
 	require.Nil(t, p.LastSyncError)
-	items, err = svc.Items(ctx, p.ID)
+	items, err = svc.Items(ctx, p.ID, playlists.AllItems)
 	require.NoError(t, err)
 	for _, it := range items {
 		if it.SpotifyTrackID == "t-obsidian" {
@@ -120,7 +120,7 @@ func TestSyncGrowsPlaylistAndMatchesNewFiles(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, 3, p.MatchedCount)
 	require.Nil(t, p.LastSyncError)
-	items, err = svc.Items(ctx, p.ID)
+	items, err = svc.Items(ctx, p.ID, playlists.AllItems)
 	require.NoError(t, err)
 	for _, it := range items {
 		if it.SpotifyTrackID == "t-new" {
@@ -136,8 +136,9 @@ func TestDeleteRefusesPlaylistsInUse(t *testing.T) {
 
 	p, err := svc.Add(ctx, spotifyID)
 	require.NoError(t, err)
-	_, err = pool.Exec(ctx, `INSERT INTO stations (name, seed_features) VALUES ('Rock Station', $1::jsonb)`,
-		`{"type":"playlists","playlist_ids":["`+p.ID+`"]}`)
+	_, err = pool.Exec(ctx, `
+		WITH s AS (INSERT INTO stations (name) VALUES ('Rock Station') RETURNING id)
+		INSERT INTO station_playlists (station_id, playlist_id) SELECT id, $1::uuid FROM s`, p.ID)
 	require.NoError(t, err)
 
 	usedBy, err := svc.Delete(ctx, p.ID)

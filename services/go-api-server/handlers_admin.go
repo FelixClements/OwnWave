@@ -67,43 +67,36 @@ func (h *Handler) AdminHealth(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, status)
 }
+
+// AdminStations lists stations with how many of their tracks the admin
+// has played.
 func (h *Handler) AdminStations(w http.ResponseWriter, r *http.Request) {
 	user, ok := h.currentUser(w, r)
 	if !ok {
 		return
 	}
-	list, err := h.db.ListStations(r.Context(), user.ID)
+	list, err := h.stations.List(r.Context(), user.ID)
 	if err != nil {
 		writeInternalError(w, r, "admin stations", err)
 		return
 	}
 	type stationStatus struct {
-		Station
-		TrackCount  int `json:"track_count"`
+		stations.Station
 		PlayedCount int `json:"played_count"`
 	}
 	out := make([]stationStatus, 0, len(list))
 	for _, st := range list {
-		seed, err := stations.ParseStored(st.SeedFeatures)
-		if err != nil {
-			writeInternalError(w, r, "admin stations seed", err)
-			return
-		}
 		status := stationStatus{Station: st}
-		if status.TrackCount, err = h.playback.PoolSize(r.Context(), user.ID, seed); err != nil {
-			writeInternalError(w, r, "admin stations count", err)
-			return
-		}
 		if status.PlayedCount, err = h.db.PlayedCount(r.Context(), user.ID, st.ID); err != nil {
 			writeInternalError(w, r, "admin stations played", err)
 			return
 		}
 		out = append(out, status)
 	}
-	writeJSON(w, http.StatusOK, map[string]interface{}{"stations": out})
+	writeJSON(w, http.StatusOK, map[string]any{"stations": out})
 }
 
-// AdminRebuildAnalysis queues a feature vector and cluster rebuild.
+// AdminRebuildAnalysis finishes analysis bookkeeping and queues a genre refresh.
 func (h *Handler) AdminRebuildAnalysis(w http.ResponseWriter, r *http.Request) {
 	resp, err := h.analytics.RebuildAnalysis(r.Context())
 	proxyAnalytics(w, r, resp, err)

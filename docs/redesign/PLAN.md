@@ -30,7 +30,7 @@ Status: proposal, 2026-11-03. Decisions taken with the owner:
 |------|------|--------|
 | `services/go-api-server` | Go, Chi, pgx, FFmpeg | Keep. Add device tokens, quality profiles, station pools, genre suggestions, browse API for Android Auto. |
 | `services/python-analytics` | Python, Essentia | Rewrite the genre pipeline. Drop the librosa/k-means features stations do not use. |
-| `apps/web` | Vite + React + TanStack Query/Router + Tailwind | New Spotify-style SPA, served by Go as today. Replaces `apps/t3-web-frontend`. |
+| `apps/web` | Vite + React + TanStack Query + react-router + Tailwind | New Spotify-style SPA, served by Go as today. Replaced `apps/t3-web-frontend` (Phase 4). |
 | `apps/android` | Kotlin, Compose, Media3 ExoPlayer, `MediaLibraryService` | New. Phone app plus Android Auto. |
 | `database` | Postgres + pgvector | New migrations for genres, pools, suggestions, devices. |
 
@@ -65,8 +65,11 @@ Status: implemented on branch `phase1/genre-engine` (migration 018).
 
 ## Phase 2: playlists and stations
 
+Status: implemented on branch `phase2/stations` (migration 019), stacked on Phase 1.
+
+
 1. Matcher: add `mixed` to version noise; dedupe library duplicates (prefer the highest quality file); keep exact/fuzzy logic.
-2. Missing list per playlist: unmatched items with title, artist, first seen. Export as CSV/text. Re-match automatically after each library scan.
+2. Missing list per playlist: unmatched items with title, artist, first seen (`GET /api/playlists/{id}?items=missing`), view only. Unmatched items are re-matched by the hourly sync, so files added by a scan are found within the hour.
 3. Sync: keep the embed scraper (`open.spotify.com/embed/playlist/<id>`). The user pastes the normal public URL (`open.spotify.com/playlist/<id>`); OwnWave extracts the id and builds the embed URL itself. This already works today (`spotify.ParsePlaylistID`, covered by `TestParsePlaylistID`) and must stay that way. The embed shows up to about 100 tracks. Daily sync plus "sync now". Growth-only semantics stay as today.
 4. Pools: a station's pool is 1..n playlists. "Combine playlists into a station" = create a station whose pool has several playlists.
 5. Genre split: after a sync or analysis, compute matched tracks per station genre per pool. Suggest a station when a genre has at least 25 tracks (configurable). The suggestion list shows track counts and sample covers; accepting creates a normal station.
@@ -74,14 +77,22 @@ Status: implemented on branch `phase1/genre-engine` (migration 018).
 
 ## Phase 3: API for clients
 
-1. Device tokens: the Android app logs in once and gets a long-lived revocable token (`Authorization: Bearer`). The web keeps cookie sessions.
-2. Quality profiles: `original` (FLAC), `high` (Opus 160k), `normal` (Opus 96k), `low` (Opus 64k), `aac128` for clients without Opus. The client picks one per request; Android stores one value for Wi-Fi and one for mobile data.
-3. Transcode cache: cache transcoded files on disk keyed by track + profile, so seeking and replays do not re-encode.
-4. Browse API matching the Android Auto tree: `/api/browse/root`, `/api/browse/{node}` returning stations, playlists, genres, recent.
-5. Search endpoint for voice queries: station, genre, artist, track.
-6. Publish an OpenAPI spec; generate the TypeScript and Kotlin clients from it.
+Status: implemented on branch `phase3/client-api` (migration 020), stacked on Phase 2.
+
+1. Device tokens: `POST /api/auth/device` returns a Bearer token valid for a year after its last use; `GET/DELETE /api/me/devices` lists and revokes them. The web keeps cookie sessions. Changing the password signs every device out.
+2. Quality profiles: `?quality=original|high|normal|low|aac` (stored file, Opus 160/96/64 kbps, AAC 128 kbps). The client picks one per request; Android stores one value for Wi-Fi and one for mobile data.
+3. Transcode cache: one ffmpeg run per file version, profile and gain; the first play streams while ffmpeg writes, later plays (and seeks) get the file with Range support. Least recently played files are evicted past `TRANSCODE_CACHE_MB` (default 10 GB, volume `transcode_cache`).
+4. Browse API for the Android Auto tree: `GET /api/browse?node=root|stations|recent|genres|playlists|genre:<id>|playlist:<id>`; station cover art at `/api/stations/{id}/cover`.
+5. Voice search: `GET /api/search/stations?q=` strips request words ("play … radio on OwnWave") and ranks stations by name, genre, playlist, then artist share.
+6. OpenAPI 3.1 spec at `services/go-api-server/openapi.yaml`, served at `/api/openapi.yaml`. A test fails when a route is missing from it; it lints clean with Redocly and generates with openapi-typescript and openapi-generator (Kotlin).
+
+Android Auto loads artwork itself and cannot send the Bearer header, so the Android app proxies artwork through its own content provider (Phase 5).
 
 ## Phase 4: web UI
+
+Status: implemented on branch `phase4/web-ui`, stacked on Phase 3. `apps/t3-web-frontend` is deleted. react-router is used instead of TanStack Router (simpler code-based routing). The API client is typed from `openapi.yaml` (openapi-typescript + openapi-fetch); CI fails when it is out of date. The CSP no longer allows inline scripts.
+
+Player: two audio elements (the next track preloads, which also warms the server's transcode cache), optional crossfade, Media Session controls, plays counted after 30 s or half the track, quality picked per connection (Wi-Fi vs mobile data where the browser reports it).
 
 Spotify-inspired, dark-first, responsive:
 

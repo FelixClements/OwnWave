@@ -24,6 +24,7 @@ func TestTitleKey(t *testing.T) {
 		"God Gave Us Techno":                "god gave us techno|",
 		"Track (with Artist) - Club Mix":    "track|",
 		"Body Language - Booka Shade Remix": "body language|booka remix shade",
+		"Affection (Mixed)":                 "affection|",
 	}
 	for in, want := range cases {
 		require.Equal(t, want, titleKey(in), in)
@@ -77,4 +78,21 @@ func TestMatcher(t *testing.T) {
 
 	_, method = match("Not In Library", []string{"Oxia"}, 200000)
 	require.Equal(t, MethodNone, method)
+}
+
+func TestMatcherPrefersHigherQualityDuplicate(t *testing.T) {
+	m := NewMatcher([]LocalTrack{
+		{ID: "mp3", Title: "Hymn", Artist: "Charlotte de Witte", DurationSec: 494, SampleRate: 44100, FileSize: 11_000_000},
+		{ID: "flac", Title: "Hymn", Artist: "Charlotte de Witte", DurationSec: 495, SampleRate: 44100, FileSize: 52_000_000},
+		{ID: "radio-edit", Title: "Hymn", Artist: "Charlotte de Witte", DurationSec: 210, SampleRate: 96000, FileSize: 60_000_000},
+	})
+	id, _, ok := m.Match(spotify.Track{Title: "Hymn", Artists: []string{"Charlotte de Witte"}, DurationMS: 494_000})
+	require.True(t, ok)
+	require.Equal(t, "flac", id, "same length: larger file wins; a different length never does")
+
+	id, _, _ = m.Match(spotify.Track{Title: "Affection", Artists: []string{"Amelie Lens"}, DurationMS: 358_000})
+	require.Empty(t, id)
+	m = NewMatcher([]LocalTrack{{ID: "mixed", Title: "Affection (Mixed)", Artist: "Amelie Lens", DurationSec: 358}})
+	id, _, _ = m.Match(spotify.Track{Title: "Affection", Artists: []string{"Amelie Lens"}, DurationMS: 358_000})
+	require.Equal(t, "mixed", id)
 }

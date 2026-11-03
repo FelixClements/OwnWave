@@ -51,15 +51,14 @@ func (f *fixture) newUser() string {
 
 type track struct {
 	title, artist, album string
-	bpm, energy, valence float64
-	cluster              *int
-	vector               string // pgvector literal, e.g. "[1,0,...]"
+	genres               []string // station genres; the first is primary
+	noFeatures           bool
 }
 
 func (f *fixture) addTrack(tr track) string {
 	f.t.Helper()
 	if tr.artist == "" {
-		tr.artist = "Artist"
+		tr.artist = "Artist " + uuid.NewString()[:8]
 	}
 	if tr.album == "" {
 		tr.album = "Album"
@@ -71,16 +70,13 @@ func (f *fixture) addTrack(tr track) string {
 	id := f.scalar(`INSERT INTO tracks (path, artist_id, album_id, title, duration_seconds)
 		VALUES ($1, $2::uuid, $3::uuid, $4, 180) RETURNING id::text`,
 		fmt.Sprintf("/music/%s.flac", uuid.NewString()), artistID, albumID, tr.title)
-
-	var vector any
-	if tr.vector != "" {
-		vector = tr.vector
+	if !tr.noFeatures {
+		f.exec(`INSERT INTO audio_features (track_id, bpm, key, energy, valence, loudness)
+			VALUES ($1::uuid, 120, 'C', 0.5, 0.5, -10)`, id)
 	}
-	f.exec(`INSERT INTO audio_features (track_id, bpm, key, energy, valence, loudness, feature_vector)
-		VALUES ($1::uuid, $2, 'C', $3, $4, -10, $5::vector)`, id, tr.bpm, tr.energy, tr.valence, vector)
-
-	if tr.cluster != nil {
-		f.exec(`INSERT INTO track_clusters (track_id, cluster_id) VALUES ($1::uuid, $2)`, id, *tr.cluster)
+	for i, g := range tr.genres {
+		f.exec(`INSERT INTO track_station_genres (track_id, genre, score, is_primary) VALUES ($1::uuid, $2, 0.5, $3)`,
+			id, g, i == 0)
 	}
 	return id
 }
@@ -97,17 +93,27 @@ func (f *fixture) playlist(name string, items map[string]string) string {
 	return id
 }
 
-func (f *fixture) station(seed stations.Seed) string {
-	raw, err := seed.JSON()
-	require.NoError(f.t, err)
-	return f.scalar(`INSERT INTO stations (user_id, name, seed_features) VALUES ($1::uuid, $2, $3::jsonb) RETURNING id::text`,
-		f.user, uuid.NewString(), raw)
+// playlistOf puts every given track in one new playlist.
+func (f *fixture) playlistOf(trackIDs ...string) string {
+	items := map[string]string{}
+	for _, id := range trackIDs {
+		items["sp-"+id] = id
+	}
+	return f.playlist(uuid.NewString(), items)
 }
 
-func (f *fixture) queueIDs(stationID string, seed stations.Seed) []string {
+func (f *fixture) station(def stations.Definition) string {
+	id := f.scalar(`INSERT INTO stations (user_id, name, genres) VALUES ($1::uuid, $2, $3) RETURNING id::text`,
+		f.user, uuid.NewString(), append([]string{}, def.Genres...))
+	for _, p := range def.PlaylistIDs {
+		f.exec(`INSERT INTO station_playlists (station_id, playlist_id) VALUES ($1::uuid, $2::uuid)`, id, p)
+	}
+	return id
+}
+
+func (f *fixture) queueIDs(stationID string, def stations.Definition) []string {
 	f.t.Helper()
-	svc := playback.NewService(f.pool)
-	queue, err := svc.BuildQueue(f.ctx, f.user, stationID, seed, 24)
+	queue, err := playback.NewService(f.pool).BuildQueue(f.ctx, f.user, stationID, def, 24)
 	require.NoError(f.t, err)
 	ids := make([]string, len(queue))
 	for i, q := range queue {
@@ -123,51 +129,6 @@ func sorted(ids ...string) []string {
 	return out
 }
 
-func vec(first float64) string {
-	v := "[" + fmt.Sprint(first)
-	for i := 1; i < 33; i++ {
-		v += ",0.1"
-	}
-	return v + "]"
-}
-
-func ptr[T any](v T) *T { return &v }
-
-func TestBuildQueue_SeedTypes(t *testing.T) {
-	f := newFixture(t)
-	cluster := 7
-	rock := f.addTrack(track{title: "Rock", artist: "Rocker", album: "Loud", bpm: 140, energy: 0.9, valence: 0.6, cluster: &cluster})
-	rockWeak := f.addTrack(track{title: "Maybe Rock", bpm: 100, energy: 0.5, valence: 0.5})
-	jazz := f.addTrack(track{title: "Jazz", artist: "Cat", bpm: 90, energy: 0.2, valence: 0.3})
-	plain := f.addTrack(track{title: "Plain", artist: "Rocker", album: "Other", bpm: 120, energy: 0.6, valence: 0.9})
-	// Two playlists sharing a track; one track has no local file.
-	rockList := f.playlist("rock", map[string]string{"sp-rock": rock, "sp-weak": rockWeak, "sp-missing": ""})
-	moreRock := f.playlist("more", map[string]string{"sp-rock": rock, "sp-jazz": jazz})
-
-	artistID := f.scalar(`SELECT artist_id::text FROM tracks WHERE id = $1::uuid`, rock)
-	albumID := f.scalar(`SELECT album_id::text FROM tracks WHERE id = $1::uuid`, rock)
-
-	cases := map[string]struct {
-		seed stations.Seed
-		want []string
-	}{
-		"whole library":        {stations.Seed{}, sorted(rock, rockWeak, jazz, plain)},
-		"playlist":             {stations.Seed{Type: "playlists", PlaylistIDs: []string{rockList}}, sorted(rock, rockWeak)},
-		"playlists union":      {stations.Seed{Type: "playlists", PlaylistIDs: []string{rockList, moreRock}}, sorted(rock, rockWeak, jazz)},
-		"artist":               {stations.Seed{Type: "artist", ArtistID: artistID}, sorted(rock, plain)},
-		"album":                {stations.Seed{Type: "album", AlbumID: albumID}, sorted(rock)},
-		"cluster":              {stations.Seed{Type: "cluster", ClusterID: &cluster}, sorted(rock)},
-		"mood range":           {stations.Seed{Type: "mood", MinEnergy: ptr(0.4), MaxValence: ptr(0.7)}, sorted(rock, rockWeak)},
-		"bpm range with lists": {stations.Seed{Type: "playlists", PlaylistIDs: []string{rockList}, MaxBPM: ptr(120.0)}, sorted(rockWeak)},
-	}
-	for name, tc := range cases {
-		t.Run(name, func(t *testing.T) {
-			got := f.queueIDs(f.station(tc.seed), tc.seed)
-			assert.Equal(t, tc.want, sortedOrNil(got))
-		})
-	}
-}
-
 func sortedOrNil(ids []string) []string {
 	if len(ids) == 0 {
 		return nil
@@ -175,16 +136,32 @@ func sortedOrNil(ids []string) []string {
 	return sorted(ids...)
 }
 
-func TestBuildQueue_TrackSeedUsesNearestNeighbours(t *testing.T) {
+func TestBuildQueue_PlaylistPoolsAndGenres(t *testing.T) {
 	f := newFixture(t)
-	seedTrack := f.addTrack(track{title: "Seed", vector: vec(1)})
-	near := f.addTrack(track{title: "Near", vector: vec(0.9)})
-	noVector := f.addTrack(track{title: "No vector"})
+	techno := f.addTrack(track{title: "Techno", genres: []string{"techno"}})
+	technoHouse := f.addTrack(track{title: "Techno House", genres: []string{"house", "techno"}})
+	house := f.addTrack(track{title: "House", genres: []string{"house"}})
+	unscored := f.addTrack(track{title: "Unscored"})
+	f.addTrack(track{title: "Not in a playlist", genres: []string{"techno"}})
+	// Two playlists sharing a track; one item has no local file.
+	a := f.playlist("a", map[string]string{"sp-1": techno, "sp-2": technoHouse, "sp-missing": ""})
+	b := f.playlist("b", map[string]string{"sp-1": techno, "sp-3": house, "sp-4": unscored})
 
-	seed := stations.Seed{Type: "track", TrackID: seedTrack}
-	got := f.queueIDs(f.station(seed), seed)
-	assert.Equal(t, sorted(seedTrack, near), sorted(got...))
-	assert.NotContains(t, got, noVector)
+	cases := map[string]struct {
+		def  stations.Definition
+		want []string
+	}{
+		"one playlist":         {stations.Definition{PlaylistIDs: []string{a}}, sorted(techno, technoHouse)},
+		"playlists union":      {stations.Definition{PlaylistIDs: []string{a, b}}, sorted(techno, technoHouse, house, unscored)},
+		"genre incl secondary": {stations.Definition{PlaylistIDs: []string{a, b}, Genres: []string{"techno"}}, sorted(techno, technoHouse)},
+		"several genres":       {stations.Definition{PlaylistIDs: []string{b}, Genres: []string{"house", "techno"}}, sorted(techno, house)},
+		"genre not in pool":    {stations.Definition{PlaylistIDs: []string{a}, Genres: []string{"jazz"}}, nil},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			assert.Equal(t, tc.want, sortedOrNil(f.queueIDs(f.station(tc.def), tc.def)))
+		})
+	}
 }
 
 func TestBuildQueue_ExcludesBansAndFlagsLikes(t *testing.T) {
@@ -193,21 +170,13 @@ func TestBuildQueue_ExcludesBansAndFlagsLikes(t *testing.T) {
 	banned := f.addTrack(track{title: "Banned"})
 	f.exec(`INSERT INTO track_feedback (user_id, track_id, feedback) VALUES ($1::uuid, $2::uuid, 'like'), ($1::uuid, $3::uuid, 'ban')`,
 		f.user, liked, banned)
+	def := stations.Definition{PlaylistIDs: []string{f.playlistOf(liked, banned)}}
 
-	svc := playback.NewService(f.pool)
-	station := f.station(stations.Seed{})
-	queue, err := svc.BuildQueue(f.ctx, f.user, station, stations.Seed{}, 24)
+	queue, err := playback.NewService(f.pool).BuildQueue(f.ctx, f.user, f.station(def), def, 24)
 	require.NoError(t, err)
 	require.Len(t, queue, 1)
 	assert.Equal(t, liked, queue[0].ID)
 	assert.True(t, queue[0].Liked)
-
-	// Another user's ban does not affect this user.
-	other := f.newUser()
-	f.exec(`INSERT INTO track_feedback (user_id, track_id, feedback) VALUES ($1::uuid, $2::uuid, 'ban')`, other, liked)
-	n, err := svc.PoolSize(f.ctx, f.user, stations.Seed{})
-	require.NoError(t, err)
-	assert.Equal(t, 1, n)
 }
 
 func TestBuildQueue_RecentlyPlayedGoLastOldestFirst(t *testing.T) {
@@ -216,7 +185,8 @@ func TestBuildQueue_RecentlyPlayedGoLastOldestFirst(t *testing.T) {
 	playedLongAgo := f.addTrack(track{title: "Long ago"})
 	playedHourAgo := f.addTrack(track{title: "Hour ago"})
 	playedJustNow := f.addTrack(track{title: "Just now"})
-	station := f.station(stations.Seed{})
+	def := stations.Definition{PlaylistIDs: []string{f.playlistOf(fresh, playedLongAgo, playedHourAgo, playedJustNow)}}
+	station := f.station(def)
 
 	now := time.Now()
 	for id, at := range map[string]time.Time{
@@ -228,7 +198,7 @@ func TestBuildQueue_RecentlyPlayedGoLastOldestFirst(t *testing.T) {
 			f.user, id, station, at)
 	}
 
-	got := f.queueIDs(station, stations.Seed{})
+	got := f.queueIDs(station, def)
 	require.Len(t, got, 4)
 	assert.ElementsMatch(t, []string{fresh, playedLongAgo}, got[:2], "outside the recent window counts as fresh")
 	assert.Equal(t, []string{playedHourAgo, playedJustNow}, got[2:])
@@ -236,23 +206,45 @@ func TestBuildQueue_RecentlyPlayedGoLastOldestFirst(t *testing.T) {
 
 func TestBuildQueue_PagesAndDedupes(t *testing.T) {
 	f := newFixture(t)
+	var ids []string
 	for i := 0; i < playback.QueuePageSize+10; i++ {
-		f.addTrack(track{title: fmt.Sprintf("Track %d", i)})
+		ids = append(ids, f.addTrack(track{title: fmt.Sprintf("Track %d", i), artist: "Same"}))
 	}
-	f.addTrack(track{title: "Track 0", album: "Deluxe"}) // same title+artist as an existing track
+	// Same title+artist as an existing track: played once.
+	ids = append(ids, f.addTrack(track{title: "Track 0", artist: "Same", album: "Deluxe"}))
+	def := stations.Definition{PlaylistIDs: []string{f.playlistOf(ids...)}}
+	assert.Len(t, f.queueIDs(f.station(def), def), playback.QueuePageSize)
+}
 
-	station := f.station(stations.Seed{})
-	assert.Len(t, f.queueIDs(station, stations.Seed{}), playback.QueuePageSize)
-
-	n, err := playback.NewService(f.pool).PoolSize(f.ctx, f.user, stations.Seed{})
-	require.NoError(t, err)
-	assert.Equal(t, playback.QueuePageSize+11, n)
+func TestBuildQueue_SpacesOutArtists(t *testing.T) {
+	f := newFixture(t)
+	var ids []string
+	artists := []string{"A", "A", "A", "B", "C", "D", "E", "F", "G", "H"}
+	for _, artist := range artists {
+		ids = append(ids, f.addTrack(track{title: uuid.NewString(), artist: artist}))
+	}
+	def := stations.Definition{PlaylistIDs: []string{f.playlistOf(ids...)}}
+	station := f.station(def)
+	artistOf := map[string]string{}
+	for i, id := range ids {
+		artistOf[id] = artists[i]
+	}
+	for run := 0; run < 20; run++ {
+		got := f.queueIDs(station, def)
+		last := -10
+		for i, id := range got {
+			if artistOf[id] == "A" {
+				assert.Greater(t, i-last, 3, "artist A repeats within 3 tracks: %v", got)
+				last = i
+			}
+		}
+	}
 }
 
 func TestRecord_WritesHistoryAndChecksStationOwner(t *testing.T) {
 	f := newFixture(t)
 	trackID := f.addTrack(track{title: "History"})
-	station := f.station(stations.Seed{})
+	station := f.station(stations.Definition{PlaylistIDs: []string{f.playlistOf(trackID)}})
 	svc := playback.NewService(f.pool)
 
 	require.NoError(t, svc.Record(f.ctx, f.user, trackID, ""))
@@ -264,16 +256,14 @@ func TestRecord_WritesHistoryAndChecksStationOwner(t *testing.T) {
 	require.Error(t, svc.Record(f.ctx, other, trackID, station))
 	assert.Equal(t, "2", f.scalar(`SELECT COUNT(*)::text FROM listening_history WHERE track_id = $1::uuid`, trackID))
 
-	shared := f.scalar(`INSERT INTO stations (name, seed_features) VALUES ('Shared', NULL) RETURNING id::text`)
+	shared := f.scalar(`INSERT INTO stations (name) VALUES ('Shared') RETURNING id::text`)
 	require.NoError(t, svc.Record(f.ctx, other, trackID, shared))
 }
 
 func TestBuildQueue_IncludesUnanalysedTracks(t *testing.T) {
 	f := newFixture(t)
 	analysed := f.addTrack(track{title: "Analysed"})
-	unanalysed := f.addTrack(track{title: "Not yet"})
-	f.exec(`DELETE FROM audio_features WHERE track_id = $1::uuid`, unanalysed)
-
-	got := f.queueIDs(f.station(stations.Seed{}), stations.Seed{})
-	assert.Equal(t, sorted(analysed, unanalysed), sorted(got...))
+	unanalysed := f.addTrack(track{title: "Not yet", noFeatures: true})
+	def := stations.Definition{PlaylistIDs: []string{f.playlistOf(analysed, unanalysed)}}
+	assert.Equal(t, sorted(analysed, unanalysed), sorted(f.queueIDs(f.station(def), def)...))
 }

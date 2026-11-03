@@ -48,23 +48,6 @@ func (h *Handler) ListArtists(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, map[string]interface{}{"artists": artists})
 }
-func (h *Handler) GetSimilarTracks(w http.ResponseWriter, r *http.Request) {
-	id, ok := parseUUIDParam(w, r, "id")
-	if !ok {
-		return
-	}
-	limit, err := strconv.Atoi(r.URL.Query().Get("limit"))
-	if err != nil || limit <= 0 {
-		limit = 20
-	}
-	limit = min(limit, 100)
-	similar, err := h.db.SimilarTracks(r.Context(), id, limit)
-	if err != nil {
-		writeInternalError(w, r, "similar tracks", err)
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]interface{}{"track_id": id, "similar": similar})
-}
 func (h *Handler) RecordPlay(w http.ResponseWriter, r *http.Request) {
 	user, ok := h.currentUser(w, r)
 	if !ok {
@@ -181,25 +164,29 @@ func (h *Handler) GetTrackCover(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	track, err := h.db.GetTrackByID(r.Context(), id)
-	if err != nil {
-		http.Error(w, "track not found", 404)
-		return
-	}
-
-	fullPath, err := h.stream.ResolvePath(track.Path)
-	if err != nil {
+	cover := h.trackCover(r, id)
+	if len(cover) == 0 {
 		http.Error(w, "no cover art", http.StatusNotFound)
 		return
 	}
-
-	coverBytes, err := h.coverCache.GetOrExtract(r.Context(), h.ffmpegPath, fullPath)
-	if err != nil || len(coverBytes) == 0 {
-		http.Error(w, "no cover art", 404)
-		return
-	}
-
 	w.Header().Set("Content-Type", "image/jpeg")
 	w.Header().Set("Cache-Control", "private, max-age=86400")
-	w.Write(coverBytes)
+	_, _ = w.Write(cover)
+}
+
+// trackCover returns a track's embedded cover art, or nil.
+func (h *Handler) trackCover(r *http.Request, trackID string) []byte {
+	track, err := h.db.GetTrackByID(r.Context(), trackID)
+	if err != nil {
+		return nil
+	}
+	fullPath, err := h.stream.ResolvePath(track.Path)
+	if err != nil {
+		return nil
+	}
+	cover, err := h.coverCache.GetOrExtract(r.Context(), h.ffmpegPath, fullPath)
+	if err != nil {
+		return nil
+	}
+	return cover
 }

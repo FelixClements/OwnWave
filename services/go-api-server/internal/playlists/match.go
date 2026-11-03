@@ -20,6 +20,10 @@ type LocalTrack struct {
 	Title       string
 	Artist      string
 	DurationSec float64
+	// SampleRate and FileSize rank duplicate files of the same recording:
+	// the higher-quality copy wins.
+	SampleRate int
+	FileSize   int64
 }
 
 const (
@@ -33,6 +37,9 @@ const (
 	// maxNoArtistDurationDiff bounds the duration gap for local tracks
 	// without an artist tag, which can only match on title + duration.
 	maxNoArtistDurationDiff = 3.0
+	// sameLengthWithin: candidates this close to the best duration are
+	// copies of one recording; quality decides between them.
+	sameLengthWithin = 2.0
 )
 
 // Matcher resolves Spotify tracks to local tracks by artist, title, version
@@ -107,15 +114,32 @@ func (m *Matcher) Match(t spotify.Track) (trackID, method string, ok bool) {
 	return "", MethodNone, false
 }
 
-// closest picks the candidate whose duration is nearest to durSec.
+// closest picks the candidate whose duration is nearest to durSec. Among
+// candidates within sameLengthWithin of that (duplicate files of one
+// recording), it prefers the higher sample rate, then the larger file.
 func (m *Matcher) closest(cands []int, durSec float64) (int, bool) {
 	if len(cands) == 0 {
 		return 0, false
 	}
-	sort.SliceStable(cands, func(a, b int) bool {
-		return math.Abs(m.tracks[cands[a]].DurationSec-durSec) < math.Abs(m.tracks[cands[b]].DurationSec-durSec)
-	})
-	return cands[0], true
+	diff := func(i int) float64 { return math.Abs(m.tracks[i].DurationSec - durSec) }
+	sort.SliceStable(cands, func(a, b int) bool { return diff(cands[a]) < diff(cands[b]) })
+	best := cands[0]
+	for _, c := range cands[1:] {
+		if diff(c)-diff(cands[0]) > sameLengthWithin {
+			break
+		}
+		if better(m.tracks[c].LocalTrack, m.tracks[best].LocalTrack) {
+			best = c
+		}
+	}
+	return best, true
+}
+
+func better(a, b LocalTrack) bool {
+	if a.SampleRate != b.SampleRate {
+		return a.SampleRate > b.SampleRate
+	}
+	return a.FileSize > b.FileSize
 }
 
 func overlaps(a, b []string) bool {
@@ -140,7 +164,7 @@ var (
 // versionNoise are words that name an edit or release of the same
 // recording, so "Extended Mix" matches "Radio Edit" or no version at all.
 var versionNoise = map[string]bool{
-	"original": true, "mix": true, "extended": true, "radio": true, "edit": true,
+	"original": true, "mix": true, "mixed": true, "extended": true, "radio": true, "edit": true,
 	"version": true, "remaster": true, "remastered": true, "club": true, "album": true,
 	"single": true, "explicit": true, "clean": true, "mono": true, "stereo": true, "digital": true,
 }
