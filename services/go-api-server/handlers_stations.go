@@ -6,7 +6,10 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/jackc/pgx/v5"
+
 	"ownwave/api/internal/stations"
+	"ownwave/api/internal/streaming"
 )
 
 // writeStationError maps stations errors to HTTP statuses.
@@ -252,13 +255,23 @@ func (h *Handler) GetStationCover(w http.ResponseWriter, r *http.Request) {
 		writeInternalError(w, r, "station cover", err)
 		return
 	}
+	var firstErr error
 	for _, trackID := range ids {
-		if cover := h.trackCover(r, trackID); len(cover) > 0 {
-			w.Header().Set("Content-Type", "image/jpeg")
-			w.Header().Set("Cache-Control", "private, max-age=3600")
-			_, _ = w.Write(cover)
+		cover, err := h.trackCover(r.Context(), trackID)
+		switch {
+		case err == nil:
+			writeCover(w, cover, "private, max-age=3600")
 			return
+		case errors.Is(err, streaming.ErrNoCover), errors.Is(err, pgx.ErrNoRows):
+			// try the next candidate
+		case firstErr == nil:
+			firstErr = err
 		}
 	}
-	http.Error(w, "no cover art", http.StatusNotFound)
+	if firstErr != nil {
+		writeCoverError(w, r, "station cover", firstErr)
+		return
+	}
+	// A station without any cover art is normal; see GetTrackCover.
+	writeNoCover(w)
 }

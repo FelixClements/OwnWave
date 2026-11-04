@@ -1,9 +1,16 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"net/http"
 	"strconv"
+
+	"github.com/jackc/pgx/v5"
+
+	"ownwave/api/internal/streaming"
 )
 
 func (h *Handler) ListTracks(w http.ResponseWriter, r *http.Request) {
@@ -159,34 +166,64 @@ func (h *Handler) GetTrack(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, track)
 }
+
+// coverCacheControl is sent with a cover and with "no cover" (204), so a list
+// of coverless tracks costs one request per track per day, not one per render.
+const coverCacheControl = "private, max-age=86400"
+
+// GetTrackCover returns a track's embedded cover art. A track without one gets
+// 204, not 404: the UI requests a cover for every row, and bursts of 404s get
+// users banned by the edge proxy's probing detection (CrowdSec http-probing).
 func (h *Handler) GetTrackCover(w http.ResponseWriter, r *http.Request) {
 	id, ok := parseUUIDParam(w, r, "id")
 	if !ok {
 		return
 	}
-	cover := h.trackCover(r, id)
-	if len(cover) == 0 {
-		http.Error(w, "no cover art", http.StatusNotFound)
-		return
+	cover, err := h.trackCover(r.Context(), id)
+	switch {
+	case errors.Is(err, pgx.ErrNoRows):
+		http.Error(w, "track not found", http.StatusNotFound)
+	case errors.Is(err, streaming.ErrNoCover):
+		writeNoCover(w)
+	case err != nil:
+		writeCoverError(w, r, "track cover", err)
+	default:
+		writeCover(w, cover, coverCacheControl)
 	}
-	w.Header().Set("Content-Type", "image/jpeg")
-	w.Header().Set("Cache-Control", "private, max-age=86400")
-	_, _ = w.Write(cover)
 }
 
-// trackCover returns a track's embedded cover art, or nil.
-func (h *Handler) trackCover(r *http.Request, trackID string) []byte {
-	track, err := h.db.GetTrackByID(r.Context(), trackID)
+// trackCover returns a track's embedded cover art. Errors: pgx.ErrNoRows for
+// an unknown track, streaming.ErrNoCover when it has no art, else a failure.
+func (h *Handler) trackCover(ctx context.Context, trackID string) ([]byte, error) {
+	track, err := h.db.GetTrackByID(ctx, trackID)
 	if err != nil {
-		return nil
+		return nil, err
 	}
 	fullPath, err := h.stream.ResolvePath(track.Path)
 	if err != nil {
-		return nil
+		return nil, fmt.Errorf("resolve %q: %w", track.Path, err)
 	}
-	cover, err := h.coverCache.GetOrExtract(r.Context(), h.ffmpegPath, fullPath)
-	if err != nil {
-		return nil
+	return h.coverCache.GetOrExtract(ctx, h.ffmpegPath, fullPath)
+}
+
+// writeCoverError answers a failed cover lookup with 500, unless the client
+// has gone (e.g. a lazy <img> scrolled away), which is not worth logging.
+func writeCoverError(w http.ResponseWriter, r *http.Request, op string, err error) {
+	if r.Context().Err() != nil {
+		return
 	}
-	return cover
+	writeInternalError(w, r, op, err)
+}
+
+func writeCover(w http.ResponseWriter, cover []byte, cacheControl string) {
+	w.Header().Set("Content-Type", "image/jpeg")
+	w.Header().Set("Cache-Control", cacheControl)
+	_, _ = w.Write(cover)
+}
+
+// writeNoCover answers "no cover art" with a cacheable, empty 204. <img>
+// fires onError on it, so the UI falls back to initials.
+func writeNoCover(w http.ResponseWriter) {
+	w.Header().Set("Cache-Control", coverCacheControl)
+	w.WriteHeader(http.StatusNoContent)
 }
