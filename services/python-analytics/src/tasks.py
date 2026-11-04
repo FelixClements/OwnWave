@@ -175,12 +175,27 @@ def _job_started_at(conn, job_id: UUID):
         return row[0] if row else None
 
 
+# Postgres channel the Go API listens on. It matches playlist tracks and
+# refreshes the genre stations whenever a step posts here.
+PIPELINE_CHANNEL = "ownwave_pipeline"
+
+
+def notify_pipeline(conn, step: str) -> None:
+    """Tell the API a pipeline step finished. Sent on commit, with the work."""
+    conn.execute("SELECT pg_notify(%s, %s)", (PIPELINE_CHANNEL, step))
+
+
 def rebuild_analysis(scan_job_id: Optional[str] = None) -> dict:
-    """Last step of a scan: complete its job, then queue the genre refresh."""
+    """Last step of a scan: complete its job, then queue the genre refresh.
+
+    The API matches playlist tracks to the new files right away; genre
+    stations follow once the genres are scored.
+    """
     with db.get_conn() as conn:
         if scan_job_id:
             db.update_scan_job(conn, UUID(scan_job_id), "completed")
         queue_genre_refresh(conn)
+        notify_pipeline(conn, "scan_finished")
         conn.commit()
     return {"scan_job_id": scan_job_id}
 
@@ -268,13 +283,25 @@ def fetch_artist_genres() -> dict:
 
 
 def score_genres() -> dict:
-    """Blend all genre sources into track_station_genres for the whole library."""
+    """Blend all genre sources into track_station_genres for the whole library.
+
+    Records when scoring ran (admin pipeline view) and tells the API, which
+    then refreshes the genre stations.
+    """
     from config import GENRE_MODEL_DIR
     from genre_audio import load_labels
     from genre_scoring import score_library
 
     with db.get_conn() as conn:
         summary = score_library(conn, load_labels(GENRE_MODEL_DIR))
+        conn.execute(
+            """
+            INSERT INTO app_state (key, value, updated_at) VALUES ('genres_scored', %s, NOW())
+            ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()
+            """,
+            (Jsonb({"tracks": summary["tracks"], "scored": summary["scored"]}),),
+        )
+        notify_pipeline(conn, "genres_scored")
         conn.commit()
     return summary
 

@@ -29,23 +29,40 @@ func NotBanned(userArg string) string {
 		WHERE b.user_id = ` + userArg + `::uuid AND b.track_id = t.id AND b.feedback = 'ban')`
 }
 
+// stationColumns reads a station; an all-playlists station lists every
+// playlist there is now.
 const stationColumns = `
-	s.id::text, s.name, s.user_id IS NULL, s.genres, s.updated_at,
-	COALESCE((SELECT array_agg(sp.playlist_id::text ORDER BY sp.playlist_id)
-	          FROM station_playlists sp WHERE sp.station_id = s.id), '{}')`
+	s.id::text, s.name, s.user_id IS NULL, s.auto_genre IS NOT NULL, s.all_playlists, s.genres, s.updated_at,
+	CASE WHEN s.all_playlists
+	     THEN COALESCE((SELECT array_agg(p.id::text ORDER BY p.id) FROM playlists p), '{}')
+	     ELSE COALESCE((SELECT array_agg(sp.playlist_id::text ORDER BY sp.playlist_id)
+	                    FROM station_playlists sp WHERE sp.station_id = s.id), '{}')
+	END`
+
+// visibleTo is an SQL predicate on `stations s`: the station is the
+// user's (at placeholder userArg) or shared, and not a hidden genre station.
+func visibleTo(userArg string) string {
+	return `(s.user_id = ` + userArg + `::uuid OR s.user_id IS NULL) AND (s.auto_genre IS NULL OR s.auto_active)`
+}
 
 func scanStation(row pgx.Row) (Station, error) {
 	var st Station
-	err := row.Scan(&st.ID, &st.Name, &st.Shared, &st.Genres, &st.UpdatedAt, &st.PlaylistIDs)
+	var genre bool
+	err := row.Scan(&st.ID, &st.Name, &st.Shared, &genre, &st.AllPlaylists, &st.Genres, &st.UpdatedAt, &st.PlaylistIDs)
+	st.Kind = KindCustom
+	if genre {
+		st.Kind = KindGenre
+	}
 	return st, err
 }
 
-// List returns the user's own stations and the shared ones, shared first,
-// each with its current track count for the user.
+// List returns the user's own stations and the shared ones (genre
+// stations only while active), shared first, each with its current track
+// count for the user.
 func (s *Service) List(ctx context.Context, userID string) ([]Station, error) {
 	rows, err := s.pool.Query(ctx, `
 		SELECT `+stationColumns+` FROM stations s
-		WHERE s.user_id = $1::uuid OR s.user_id IS NULL
+		WHERE `+visibleTo("$1")+`
 		ORDER BY s.user_id IS NOT NULL, lower(s.name)
 	`, userID)
 	if err != nil {
@@ -63,12 +80,12 @@ func (s *Service) List(ctx context.Context, userID string) ([]Station, error) {
 	return list, nil
 }
 
-// Get returns the station if the user may play it.
+// Get returns the station if the user may play it. A hidden genre station
+// is not found.
 func (s *Service) Get(ctx context.Context, userID, id string) (Station, error) {
 	st, err := scanStation(s.pool.QueryRow(ctx, `
 		SELECT `+stationColumns+` FROM stations s
-		WHERE s.id = $1::uuid AND (s.user_id = $2::uuid OR s.user_id IS NULL)
-	`, id, userID))
+		WHERE s.id = $1::uuid AND `+visibleTo("$2"), id, userID))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return st, ErrNotFound
 	}
@@ -88,7 +105,8 @@ func (s *Service) PoolSize(ctx context.Context, userID string, d Definition) (in
 	return n, err
 }
 
-// checkExists returns ErrInvalid unless every playlist and genre exists.
+// checkExists returns ErrInvalid unless every playlist and genre exists,
+// and ErrConflict when the definition duplicates a genre station.
 func (s *Service) checkExists(ctx context.Context, q pgx.Tx, d Definition) error {
 	var playlists, genres int
 	if err := q.QueryRow(ctx, `
@@ -103,7 +121,25 @@ func (s *Service) checkExists(ctx context.Context, q pgx.Tx, d Definition) error
 	if genres != len(d.Genres) {
 		return fmt.Errorf("%w: unknown genre", ErrInvalid)
 	}
-	return nil
+	return checkNotGenreStation(ctx, q, d)
+}
+
+// checkNotGenreStation refuses a custom definition that plays exactly what
+// a genre station plays (every playlist, that one genre), unless the genre
+// is excluded from genre stations.
+func checkNotGenreStation(ctx context.Context, q pgx.Tx, d Definition) error {
+	if !d.AllPlaylists || len(d.Genres) != 1 {
+		return nil
+	}
+	var name string
+	err := q.QueryRow(ctx, `SELECT name FROM stations WHERE auto_genre = $1 AND NOT auto_excluded`, d.Genres[0]).Scan(&name)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	return fmt.Errorf("%w: the genre station %q already plays this genre from every playlist", ErrConflict, name)
 }
 
 func setPlaylists(ctx context.Context, tx pgx.Tx, stationID string, ids []string) error {
@@ -117,8 +153,8 @@ func setPlaylists(ctx context.Context, tx pgx.Tx, stationID string, ids []string
 	return err
 }
 
-// Create stores a new station. Admins create shared stations, other users
-// personal ones.
+// Create stores a new custom station. Admins create shared stations, other
+// users personal ones.
 func (s *Service) Create(ctx context.Context, user auth.User, req Request) (Station, error) {
 	if req.Name == nil {
 		return Station{}, fmt.Errorf("%w: name is required", ErrInvalid)
@@ -127,7 +163,11 @@ func (s *Service) Create(ctx context.Context, user auth.User, req Request) (Stat
 	if err != nil {
 		return Station{}, err
 	}
-	def, err := Definition{PlaylistIDs: req.PlaylistIDs, Genres: req.Genres}.Normalize()
+	def, err := Definition{
+		AllPlaylists: req.AllPlaylists != nil && *req.AllPlaylists,
+		PlaylistIDs:  req.PlaylistIDs,
+		Genres:       req.Genres,
+	}.Normalize()
 	if err != nil {
 		return Station{}, err
 	}
@@ -146,9 +186,9 @@ func (s *Service) Create(ctx context.Context, user auth.User, req Request) (Stat
 	}
 	var id string
 	if err := tx.QueryRow(ctx, `
-		INSERT INTO stations (user_id, name, genres) VALUES (NULLIF($1, '')::uuid, $2, $3)
+		INSERT INTO stations (user_id, name, genres, all_playlists) VALUES (NULLIF($1, '')::uuid, $2, $3, $4)
 		RETURNING id::text
-	`, owner, name, def.Genres).Scan(&id); err != nil {
+	`, owner, name, def.Genres, def.AllPlaylists).Scan(&id); err != nil {
 		return Station{}, err
 	}
 	if err := setPlaylists(ctx, tx, id, def.PlaylistIDs); err != nil {
@@ -160,7 +200,8 @@ func (s *Service) Create(ctx context.Context, user auth.User, req Request) (Stat
 	return s.Get(ctx, user.ID, id)
 }
 
-// Update changes a station's name and/or definition.
+// Update changes a custom station's name and/or definition. A genre
+// station only changes its name, which the refresh then keeps.
 func (s *Service) Update(ctx context.Context, user auth.User, id string, req Request) (Station, error) {
 	st, err := s.changeable(ctx, user, id)
 	if err != nil {
@@ -172,7 +213,22 @@ func (s *Service) Update(ctx context.Context, user auth.User, id string, req Req
 			return Station{}, err
 		}
 	}
+	if st.Kind == KindGenre {
+		if req.AllPlaylists != nil || req.PlaylistIDs != nil || req.Genres != nil {
+			return Station{}, fmt.Errorf("%w: a genre station only changes its name", ErrInvalid)
+		}
+		if req.Name != nil {
+			if err := s.renameGenreStation(ctx, id, name); err != nil {
+				return Station{}, err
+			}
+		}
+		return s.Get(ctx, user.ID, id)
+	}
+
 	def := st.Definition()
+	if req.AllPlaylists != nil {
+		def.AllPlaylists = *req.AllPlaylists
+	}
 	if req.PlaylistIDs != nil {
 		def.PlaylistIDs = req.PlaylistIDs
 	}
@@ -192,8 +248,8 @@ func (s *Service) Update(ctx context.Context, user auth.User, id string, req Req
 		return Station{}, err
 	}
 	if _, err := tx.Exec(ctx, `
-		UPDATE stations SET name = $2, genres = $3, updated_at = NOW() WHERE id = $1::uuid
-	`, id, name, def.Genres); err != nil {
+		UPDATE stations SET name = $2, genres = $3, all_playlists = $4, updated_at = NOW() WHERE id = $1::uuid
+	`, id, name, def.Genres, def.AllPlaylists); err != nil {
 		return Station{}, err
 	}
 	if err := setPlaylists(ctx, tx, id, def.PlaylistIDs); err != nil {
@@ -205,12 +261,17 @@ func (s *Service) Update(ctx context.Context, user auth.User, id string, req Req
 	return s.Get(ctx, user.ID, id)
 }
 
-// Delete removes a station the user may change.
+// Delete removes a custom station the user may change. Genre stations are
+// not deleted (the next refresh would bring them back): exclude the genre.
 func (s *Service) Delete(ctx context.Context, user auth.User, id string) error {
-	if _, err := s.changeable(ctx, user, id); err != nil {
+	st, err := s.changeable(ctx, user, id)
+	if err != nil {
 		return err
 	}
-	_, err := s.pool.Exec(ctx, `DELETE FROM stations WHERE id = $1::uuid`, id)
+	if st.Kind == KindGenre {
+		return fmt.Errorf("%w: genre stations are not deleted; exclude the genre in Admin instead", ErrConflict)
+	}
+	_, err = s.pool.Exec(ctx, `DELETE FROM stations WHERE id = $1::uuid`, id)
 	return err
 }
 
@@ -225,7 +286,8 @@ func (s *Service) changeable(ctx context.Context, user auth.User, id string) (St
 	return st, nil
 }
 
-// UsedBy returns the names of the stations that play a playlist.
+// UsedBy returns the names of the stations that list a playlist by id.
+// All-playlists stations hold on to no single playlist.
 func (s *Service) UsedBy(ctx context.Context, playlistID string) ([]string, error) {
 	rows, err := s.pool.Query(ctx, `
 		SELECT s.name FROM stations s JOIN station_playlists sp ON sp.station_id = s.id
@@ -256,9 +318,10 @@ type PoolGenres struct {
 }
 
 // GenreCounts breaks a playlist pool down by station genre, so a client
-// can show what each genre filter would play.
-func (s *Service) GenreCounts(ctx context.Context, playlistIDs []string) (PoolGenres, error) {
-	def, err := Definition{PlaylistIDs: playlistIDs}.Normalize()
+// can show what each genre filter would play. allPlaylists counts every
+// playlist and ignores playlistIDs.
+func (s *Service) GenreCounts(ctx context.Context, playlistIDs []string, allPlaylists bool) (PoolGenres, error) {
+	def, err := Definition{PlaylistIDs: playlistIDs, AllPlaylists: allPlaylists}.Normalize()
 	if err != nil {
 		return PoolGenres{}, err
 	}
@@ -266,7 +329,11 @@ func (s *Service) GenreCounts(ctx context.Context, playlistIDs []string) (PoolGe
 	if err != nil {
 		return PoolGenres{}, err
 	}
-	tracks := data.poolTracks(def.PlaylistIDs)
+	ids := def.PlaylistIDs
+	if def.AllPlaylists {
+		ids = data.allPlaylistIDs()
+	}
+	tracks := data.poolTracks(ids)
 	out := PoolGenres{Tracks: len(tracks), Genres: []GenreCount{}}
 	for _, g := range data.genres {
 		if n := data.countGenre(tracks, g.ID); n > 0 {
@@ -277,11 +344,15 @@ func (s *Service) GenreCounts(ctx context.Context, playlistIDs []string) (PoolGe
 	return out, nil
 }
 
-// Dismiss hides a suggestion (genre "" is the all-genres one) for good.
+// Dismiss hides a single-playlist suggestion (genre "" is the all-genres
+// one) for good.
 func (s *Service) Dismiss(ctx context.Context, playlistIDs []string, genre string) error {
 	def, err := Definition{PlaylistIDs: playlistIDs}.Normalize()
 	if err != nil {
 		return err
+	}
+	if len(def.PlaylistIDs) != 1 {
+		return fmt.Errorf("%w: suggestions are for one playlist", ErrInvalid)
 	}
 	if genre != "" && !genreIDPattern.MatchString(genre) {
 		return fmt.Errorf("%w: unknown genre %q", ErrInvalid, genre)

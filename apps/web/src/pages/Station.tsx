@@ -26,11 +26,13 @@ export function StationPage() {
   const [editing, setEditing] = useState(false);
 
   if (station.isLoading) return <Spinner />;
-  if (!station.data) return <Empty title="Station not found">It may have been deleted.</Empty>;
+  if (!station.data) return <Empty title="Station not found">It may have been deleted or hidden.</Empty>;
   const s = station.data;
   const active = player.station?.id === s.id;
+  const genreStation = s.kind === 'genre';
   const canChange = !s.shared || !!user?.is_admin;
-  const names = s.playlist_ids.map((pid) => playlists.find((p) => p.id === pid)).filter(Boolean);
+  // An all-playlists station lists every playlist: say so instead.
+  const names = s.all_playlists ? [] : s.playlist_ids.map((pid) => playlists.find((p) => p.id === pid)).filter(Boolean);
   const tracks = active ? [...(player.track ? [player.track] : []), ...player.upcoming] : (preview.data ?? []);
   const shown = Math.min(tracks.length, PREVIEW_TRACKS);
 
@@ -39,13 +41,19 @@ export function StationPage() {
       <HeroHeader
         color={color}
         art={<Art src={stationCover(s.id)} name={s.name} className="aspect-square w-full" />}
-        kind={s.shared ? 'Station' : 'Your station'}
+        kind={genreStation ? 'Genre station' : s.shared ? 'Station' : 'Your station'}
         title={s.name}
         meta={
           <>
             <span className="font-semibold">{genreLabel(s)}</span>
             <span className="mx-1.5">•</span>
             {plural(s.track_count, 'track')}
+            {s.all_playlists && (
+              <>
+                <span className="mx-1.5">•</span>
+                <span>from every playlist</span>
+              </>
+            )}
             {names.length > 0 && (
               <>
                 <span className="mx-1.5">•</span>
@@ -77,17 +85,20 @@ export function StationPage() {
           )}
           {canChange && (
             <>
-              <IconButton label="Edit station" onClick={() => setEditing(true)}>
+              <IconButton label={genreStation ? 'Rename station' : 'Edit station'} onClick={() => setEditing(true)}>
                 <Pencil className="h-5 w-5" />
               </IconButton>
-              <IconButton
-                label="Delete station"
-                onClick={() => {
-                  if (confirm(`Delete “${s.name}”${s.shared ? ' for everyone' : ''}?`)) del.mutate(s.id, { onSuccess: () => navigate('/stations') });
-                }}
-              >
-                <Trash2 className="h-5 w-5" />
-              </IconButton>
+              {/* Genre stations are hidden in Admin, not deleted. */}
+              {!genreStation && (
+                <IconButton
+                  label="Delete station"
+                  onClick={() => {
+                    if (confirm(`Delete “${s.name}”${s.shared ? ' for everyone' : ''}?`)) del.mutate(s.id, { onSuccess: () => navigate('/stations') });
+                  }}
+                >
+                  <Trash2 className="h-5 w-5" />
+                </IconButton>
+              )}
             </>
           )}
         </div>

@@ -49,7 +49,18 @@ function renderAt(path: string) {
 
 const admin = { id: 'u1', username: 'felix', is_admin: true };
 const playlist: Playlist = { id: 'p1', spotify_id: 'sp1', name: 'Techno Bunker', track_count: 100, matched_count: 40, has_cover: false };
-const station: Station = { id: 's1', name: 'Bunker Techno', shared: true, playlist_ids: ['p1'], genres: ['techno'], track_count: 40, updated_at: '2026-11-03T12:00:00Z' };
+const station: Station = {
+  id: 's1',
+  name: 'Bunker Techno',
+  shared: true,
+  kind: 'custom',
+  all_playlists: false,
+  playlist_ids: ['p1'],
+  genres: ['techno'],
+  track_count: 40,
+  updated_at: '2026-11-03T12:00:00Z',
+};
+const genreStation: Station = { ...station, id: 'g1', name: 'Techno', kind: 'genre', all_playlists: true, track_count: 30 };
 const genres = {
   scored_tracks: 40,
   warnings: [],
@@ -143,11 +154,122 @@ describe('App', () => {
     await user.click(await within(main).findByRole('button', { name: /New station/ }));
     const dialog = await screen.findByRole('dialog', { name: 'New station' });
     await user.type(within(dialog).getByLabelText('Name'), 'Late Techno');
-    await user.click(within(dialog).getByRole('checkbox'));
+    await user.click(within(dialog).getByRole('checkbox', { name: /Techno Bunker/ }));
     await user.click(await within(dialog).findByRole('button', { name: /Techno 30/ }));
     expect(within(dialog).getByText(/Plays up to 30 tracks of 40 matched tracks/)).toBeInTheDocument();
     await user.click(within(dialog).getByRole('button', { name: 'Create station' }));
-    await waitFor(() => expect(created).toEqual({ name: 'Late Techno', playlist_ids: ['p1'], genres: ['techno'] }));
+    await waitFor(() => expect(created).toEqual({ name: 'Late Techno', all_playlists: false, playlist_ids: ['p1'], genres: ['techno'] }));
+  });
+
+  it('creates a station from every playlist, including later ones', async () => {
+    let created: unknown;
+    const counted: string[] = [];
+    signedIn({
+      'GET /api/stations/genres': (_b, url) => {
+        counted.push(url.search);
+        return { tracks: 90, genres: [{ id: 'house', name: 'House', tracks: 50 }] };
+      },
+      'POST /api/stations': (body) => {
+        created = body;
+        return { ...station, id: 's2', name: 'All House', all_playlists: true };
+      },
+    });
+    renderAt('/stations');
+    const user = userEvent.setup();
+    await user.click(await within(await screen.findByRole('main')).findByRole('button', { name: /New station/ }));
+    const dialog = await screen.findByRole('dialog', { name: 'New station' });
+    await user.type(within(dialog).getByLabelText('Name'), 'All House');
+    await user.click(within(dialog).getByRole('checkbox', { name: /All playlists/ }));
+    expect(within(dialog).queryByRole('checkbox', { name: /Techno Bunker/ })).not.toBeInTheDocument();
+    await user.click(await within(dialog).findByRole('button', { name: /House 50/ }));
+    expect(counted).toContain('?all_playlists=true');
+    await user.click(within(dialog).getByRole('button', { name: 'Create station' }));
+    await waitFor(() => expect(created).toEqual({ name: 'All House', all_playlists: true, playlist_ids: [], genres: ['house'] }));
+  });
+
+  it('shows a genre station that can be renamed but not deleted', async () => {
+    let renamed: unknown;
+    signedIn({
+      'GET /api/stations': () => ({ stations: [station, genreStation] }),
+      'GET /api/stations/{id}': () => genreStation,
+      'GET /api/stations/{id}/queue': () => ({ queue: [] }),
+      'PUT /api/stations/{id}': (body) => {
+        renamed = body;
+        return { ...genreStation, name: 'Peak Techno' };
+      },
+    });
+    renderAt('/station/g1');
+    const user = userEvent.setup();
+    expect(await screen.findByText('Genre station')).toBeInTheDocument();
+    expect(screen.getByText('from every playlist')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Delete station' })).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Rename station' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Edit station' });
+    expect(within(dialog).queryByRole('checkbox')).not.toBeInTheDocument();
+    const name = within(dialog).getByLabelText('Name');
+    await user.clear(name);
+    await user.type(name, 'Peak Techno');
+    await user.click(within(dialog).getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(renamed).toEqual({ name: 'Peak Techno' }));
+  });
+
+  it('lists genre stations by kind', async () => {
+    signedIn({ 'GET /api/stations': () => ({ stations: [station, genreStation] }) });
+    renderAt('/stations');
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('tab', { name: /Genres/ }));
+    const main = screen.getByRole('main');
+    expect(within(main).getByText('Techno')).toBeInTheDocument();
+    expect(within(main).queryByText('Bunker Techno')).not.toBeInTheDocument();
+  });
+
+  it('runs the genre stations and the pipeline from admin', async () => {
+    let settings = {
+      enabled: true,
+      show_at: 25,
+      hide_below: 20,
+      genres: [
+        { genre: 'techno', genre_name: 'Techno', station_id: 'g1', name: 'Techno', name_is_custom: false, tracks: 30, state: 'active' },
+        { genre: 'house', genre_name: 'House', name: 'House', name_is_custom: false, tracks: 12, state: 'below_threshold' },
+      ],
+    };
+    const calls = signedIn({
+      'GET /api/admin/health': () => ({ database: 'ok' }),
+      'GET /api/admin/scans': () => ({ jobs: [] }),
+      'GET /api/admin/users': () => ({ users: [admin] }),
+      'GET /api/admin/genre-stations': () => settings,
+      'PUT /api/admin/genre-stations': (body) => {
+        settings = { ...settings, ...(body as object), genres: settings.genres.map((g) => ({ ...g, state: 'off' })) };
+        return settings;
+      },
+      'PUT /api/admin/genre-stations/{genre}': (body) => {
+        settings = { ...settings, genres: settings.genres.map((g) => (g.genre === 'techno' && (body as { excluded?: boolean }).excluded ? { ...g, state: 'excluded' } : g)) };
+        return settings;
+      },
+      'GET /api/admin/pipeline': () => ({
+        last_scan: { id: 'scan1', status: 'completed', created_at: '2026-11-03T10:00:00Z', finished_at: '2026-11-03T11:00:00Z' },
+        genres_scored: { at: '2026-11-03T11:05:00Z', tracks: 600, scored: 580 },
+        runs: [{ id: 2, trigger: 'genres_scored', started_at: '2026-11-03T11:05:00Z', finished_at: '2026-11-03T11:05:01Z', matched: 3, changes: [{ genre: 'techno', name: 'Techno', change: 'created' }] }],
+      }),
+      'POST /api/admin/pipeline/refresh': () => ({ id: 3, trigger: 'admin', started_at: '2026-11-03T12:00:00Z', changes: [] }),
+    });
+    renderAt('/admin');
+    const user = userEvent.setup();
+    expect(await screen.findByText('Needs 13 more tracks')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Techno' })).toHaveAttribute('href', '/station/g1');
+    expect(await screen.findByText('3 tracks matched · Techno created')).toBeInTheDocument();
+    expect(screen.getByText('Genres scored', { selector: 'span' })).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Hide Techno' }));
+    expect(await screen.findByText('Hidden by you')).toBeInTheDocument();
+    expect(calls.find((c) => c.method === 'PUT' && c.path === '/api/admin/genre-stations/techno')?.body).toEqual({ excluded: true });
+
+    await user.click(screen.getByRole('checkbox', { name: 'A station for every main genre' }));
+    await waitFor(() => expect(calls.find((c) => c.method === 'PUT' && c.path === '/api/admin/genre-stations')?.body).toEqual({ enabled: false }));
+    expect(await screen.findAllByText('Off')).toHaveLength(2);
+
+    await user.click(screen.getByRole('button', { name: /Refresh now/ }));
+    await waitFor(() => expect(calls.some((c) => c.method === 'POST' && c.path === '/api/admin/pipeline/refresh')).toBe(true));
   });
 
   it('lists the missing songs of a playlist', async () => {

@@ -1,12 +1,27 @@
 import { useState, type ReactNode } from 'react';
+import { Link } from 'react-router-dom';
 import clsx from 'clsx';
-import { AlertTriangle, CheckCircle2, Copy, RefreshCw, Trash2, XCircle } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, Copy, Pencil, RefreshCw, Trash2, XCircle } from 'lucide-react';
 import { useQueryClient } from '@tanstack/react-query';
 import { api, call, callAs } from '@/api/client';
-import type { ScanSummary } from '@/api/types';
+import type { GenreStation, GenreStationSettings, PipelineRun, ScanSummary, StationChange } from '@/api/types';
 import { useAuth } from '@/lib/auth';
 import { plural, timeAgo } from '@/lib/format';
-import { isScanFinished, keys, useGenreReport, useGenres, useHealth, useScans, useStartScan, useUsers } from '@/lib/queries';
+import {
+  isScanFinished,
+  keys,
+  useGenreReport,
+  useGenres,
+  useGenreStations,
+  useHealth,
+  usePipeline,
+  useRefreshPipeline,
+  useScans,
+  useSetGenreStations,
+  useStartScan,
+  useUpdateGenreStation,
+  useUsers,
+} from '@/lib/queries';
 import { scanPhase } from '@/lib/scan';
 import { GenreChart } from '@/components/GenreChart';
 import { Button, ErrorText, IconButton, Input, Spinner } from '@/components/ui';
@@ -204,6 +219,248 @@ function Genres() {
   );
 }
 
+function genreState(g: GenreStation, settings: GenreStationSettings): string {
+  switch (g.state) {
+    case 'active':
+      return 'Live';
+    case 'excluded':
+      return 'Hidden by you';
+    case 'off':
+      return 'Off';
+    default:
+      return `Needs ${plural(settings.show_at - g.tracks, 'more track')}`;
+  }
+}
+
+function GenreStationRow({ g, settings }: { g: GenreStation; settings: GenreStationSettings }) {
+  const update = useUpdateGenreStation();
+  const [editing, setEditing] = useState(false);
+  const [name, setName] = useState(g.name);
+  const rename = (value: string) => update.mutate({ genre: g.genre, name: value }, { onSuccess: () => setEditing(false) });
+  return (
+    <tr className="border-t border-line align-top">
+      <td className="py-2 pr-3">
+        {editing ? (
+          <form
+            className="flex flex-wrap items-center gap-2"
+            onSubmit={(e) => {
+              e.preventDefault();
+              rename(name.trim());
+            }}
+          >
+            <input
+              aria-label={`Name of the ${g.genre_name} station`}
+              className="min-w-0 flex-1 rounded-md bg-raised px-2 py-1"
+              value={name}
+              maxLength={100}
+              autoFocus
+              onChange={(e) => setName(e.target.value)}
+            />
+            <Button size="sm" type="submit" variant="primary" loading={update.isPending} disabled={!name.trim()}>
+              Save
+            </Button>
+            <Button size="sm" variant="ghost" onClick={() => setEditing(false)}>
+              Cancel
+            </Button>
+          </form>
+        ) : (
+          <div className="flex items-center gap-1">
+            {g.station_id && g.state === 'active' ? (
+              <Link to={`/station/${g.station_id}`} className="font-semibold hover:underline">
+                {g.name}
+              </Link>
+            ) : (
+              <span className="font-semibold">{g.name}</span>
+            )}
+            <IconButton
+              size="sm"
+              label={`Rename the ${g.genre_name} station`}
+              onClick={() => {
+                setName(g.name);
+                setEditing(true);
+              }}
+            >
+              <Pencil className="h-3.5 w-3.5" />
+            </IconButton>
+          </div>
+        )}
+        {g.name_is_custom && !editing && (
+          <button type="button" className="text-[12px] text-muted hover:text-ink hover:underline" onClick={() => rename('')}>
+            Rename back to {g.genre_name}
+          </button>
+        )}
+        <ErrorText error={update.error} />
+      </td>
+      <td className="py-2 pr-3 text-right tabular-nums">{g.tracks}</td>
+      <td className={clsx('py-2 pr-3', g.state === 'active' ? 'text-accent' : 'text-muted')}>{genreState(g, settings)}</td>
+      <td className="py-2 text-right">
+        <Button
+          size="sm"
+          variant="ghost"
+          loading={update.isPending && update.variables?.excluded !== undefined}
+          onClick={() => update.mutate({ genre: g.genre, excluded: g.state !== 'excluded' })}
+        >
+          {g.state === 'excluded' ? `Show ${g.genre_name}` : `Hide ${g.genre_name}`}
+        </Button>
+      </td>
+    </tr>
+  );
+}
+
+function GenreStations() {
+  const q = useGenreStations();
+  const setEnabled = useSetGenreStations();
+  const settings = q.data;
+  return (
+    <Card
+      title="Genre stations"
+      action={
+        settings && (
+          <label className="flex cursor-pointer items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={settings.enabled}
+              disabled={setEnabled.isPending}
+              onChange={() => setEnabled.mutate(!settings.enabled)}
+              className="h-4 w-4 accent-[#2dd4bf]"
+            />
+            A station for every main genre
+          </label>
+        )
+      }
+    >
+      {q.isLoading ? (
+        <Spinner />
+      ) : !settings ? (
+        <ErrorText error={q.error} />
+      ) : (
+        <>
+          <p className="text-sm text-muted">
+            Each genre station plays its genre from every playlist, shared with everyone. It appears once {plural(settings.show_at, 'track')} of
+            the genre are matched across your playlists and hides again below {settings.hide_below}. Hidden stations keep their listening
+            history.
+          </p>
+          <ErrorText error={setEnabled.error} />
+          <table className="mt-4 w-full text-left text-sm">
+            <thead className="text-[12px] uppercase tracking-wider text-muted">
+              <tr>
+                <th className="py-2 font-medium">Station</th>
+                <th className="py-2 pr-3 text-right font-medium">Tracks</th>
+                <th className="py-2 font-medium">State</th>
+                <th className="py-2" />
+              </tr>
+            </thead>
+            <tbody>
+              {settings.genres.map((g) => (
+                <GenreStationRow key={g.genre} g={g} settings={settings} />
+              ))}
+              {settings.genres.length === 0 && (
+                <tr>
+                  <td colSpan={4} className="py-4 text-muted">
+                    No genres yet.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </>
+      )}
+    </Card>
+  );
+}
+
+const triggers: Record<string, string> = {
+  startup: 'API started',
+  reconnect: 'Reconnected',
+  hourly: 'Hourly check',
+  admin: 'Refresh now',
+  settings: 'Settings changed',
+  playlist_added: 'Playlist added',
+  playlist_synced: 'Playlist synced',
+  playlist_deleted: 'Playlist removed',
+  scan_finished: 'Scan finished',
+  genres_scored: 'Genres scored',
+};
+
+const changeVerbs: Record<StationChange['change'], string> = {
+  created: 'created',
+  shown: 'shown again',
+  hidden: 'hidden',
+  renamed: 'renamed',
+};
+
+function RunRow({ run }: { run: PipelineRun }) {
+  const parts = [
+    ...(run.matched ? [`${plural(run.matched, 'track')} matched`] : []),
+    ...run.changes.map((c) => `${c.name} ${changeVerbs[c.change]}`),
+  ];
+  return (
+    <li className="flex flex-wrap gap-x-3 py-2 text-sm">
+      <span className="w-24 shrink-0 text-muted">{timeAgo(run.finished_at ?? run.started_at)}</span>
+      <span className="w-36 shrink-0 font-semibold">{triggers[run.trigger] ?? run.trigger.replace(/_/g, ' ')}</span>
+      <span className={clsx('min-w-0 flex-1', run.error ? 'text-danger' : !parts.length && 'text-muted')}>
+        {run.error ?? (parts.length ? parts.join(' · ') : 'Nothing changed')}
+      </span>
+    </li>
+  );
+}
+
+function Pipeline() {
+  const q = usePipeline();
+  const refresh = useRefreshPipeline();
+  const status = q.data;
+  return (
+    <Card
+      title="Keeping stations up to date"
+      action={
+        <Button size="sm" loading={refresh.isPending} onClick={() => refresh.mutate()}>
+          <RefreshCw className="h-4 w-4" /> Refresh now
+        </Button>
+      }
+    >
+      <p className="text-sm text-muted">
+        After a scan and genre scoring, after playlist changes, at startup and every hour, OwnWave matches playlist songs to your files and
+        brings the genre stations up to date.
+      </p>
+      <ErrorText error={refresh.error} />
+      {q.isLoading ? (
+        <Spinner />
+      ) : !status ? (
+        <ErrorText error={q.error} />
+      ) : (
+        <>
+          <dl className="mt-4 grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-sm">
+            <dt className="text-muted">Last scan</dt>
+            <dd>
+              {status.last_scan
+                ? `${status.last_scan.status}, ${timeAgo(status.last_scan.finished_at ?? status.last_scan.created_at)}`
+                : 'Never'}
+            </dd>
+            <dt className="text-muted">Genres scored</dt>
+            <dd>
+              {status.genres_scored
+                ? `${timeAgo(status.genres_scored.at)}, ${plural(status.genres_scored.scored, 'track')} of ${status.genres_scored.tracks.toLocaleString()}`
+                : 'Not yet'}
+            </dd>
+            <dt className="text-muted">Stations refreshed</dt>
+            <dd>{status.runs[0] ? timeAgo(status.runs[0].finished_at ?? status.runs[0].started_at) : 'Not yet'}</dd>
+          </dl>
+          {status.runs.length > 0 && (
+            <>
+              <h3 className="mb-1 mt-6 text-sm font-semibold">Recent refreshes</h3>
+              <ul className="divide-y divide-line">
+                {status.runs.slice(0, 12).map((run) => (
+                  <RunRow key={run.id} run={run} />
+                ))}
+              </ul>
+            </>
+          )}
+        </>
+      )}
+    </Card>
+  );
+}
+
 function Users() {
   const { user: me } = useAuth();
   const users = useUsers();
@@ -286,6 +543,8 @@ export function AdminPage() {
       <div className="grid gap-6 xl:grid-cols-2">
         <Scans />
         <Genres />
+        <GenreStations />
+        <Pipeline />
         <Users />
       </div>
     </div>

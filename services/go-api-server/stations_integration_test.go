@@ -56,16 +56,22 @@ func (f *stationsFixture) user(name string, admin bool) auth.User {
 // playlist adds a playlist with n matched tracks of the given genre.
 func (f *stationsFixture) playlist(name string, n int, genre string) string {
 	id := f.one(`INSERT INTO playlists (spotify_id, name) VALUES ($1, $1) RETURNING id::text`, name)
+	f.addTracks(id, name, n, genre)
+	return id
+}
+
+// addTracks adds n matched tracks of the genre ("" = none) to a playlist;
+// prefix keeps their paths and Spotify ids unique.
+func (f *stationsFixture) addTracks(playlistID, prefix string, n int, genre string) {
 	for i := 0; i < n; i++ {
-		track := f.one(`INSERT INTO tracks (path, title) VALUES ($1, $1) RETURNING id::text`, fmt.Sprintf("/m/%s/%d", name, i))
-		sp := fmt.Sprintf("sp-%s-%d", name, i)
-		f.exec(`INSERT INTO playlist_items (playlist_id, spotify_track_id, title) VALUES ($1::uuid, $2, $2)`, id, sp)
+		track := f.one(`INSERT INTO tracks (path, title) VALUES ($1, $1) RETURNING id::text`, fmt.Sprintf("/m/%s/%d", prefix, i))
+		sp := fmt.Sprintf("sp-%s-%d", prefix, i)
+		f.exec(`INSERT INTO playlist_items (playlist_id, spotify_track_id, title) VALUES ($1::uuid, $2, $2)`, playlistID, sp)
 		f.exec(`INSERT INTO spotify_track_matches (spotify_track_id, track_id, method) VALUES ($1, $2::uuid, 'exact')`, sp, track)
 		if genre != "" {
 			f.exec(`INSERT INTO track_station_genres (track_id, genre, score, is_primary) VALUES ($1::uuid, $2, 1, true)`, track, genre)
 		}
 	}
-	return id
 }
 
 func (f *stationsFixture) call(handler http.HandlerFunc, user auth.User, method, target, id, body string) *httptest.ResponseRecorder {
@@ -141,8 +147,11 @@ func TestStationSuggestionsAndGenreCounts(t *testing.T) {
 	f := newStationsFixture(t)
 	admin := f.user("admin", true)
 	techno := f.playlist("techno-list", 30, "techno")
-	mixed := f.playlist("mixed-list", 10, "house")
+	mixed := f.playlist("mixed-list", 26, "techno")
+	f.addTracks(mixed, "mixed-house", 10, "house")
 	f.playlist("tiny", 3, "techno")
+	_, err := f.h.pipeline.Run(f.ctx, "test", true) // Techno genre station: 59 tracks
+	require.NoError(t, err)
 
 	type suggestions struct {
 		Suggestions []stations.Suggestion `json:"suggestions"`
@@ -155,30 +164,56 @@ func TestStationSuggestionsAndGenreCounts(t *testing.T) {
 		}
 		return out
 	}
-	// "techno-list" alone is 100% techno, so its genre suggestion would be
-	// redundant; all playlists together (43 tracks) get Techno (33) and the
-	// whole pool. house (10) and "tiny" (3) are too small.
-	require.Equal(t, []string{"All playlists//43", "Techno/techno/33", "techno-list//30"}, names())
+	// One playlist at a time. "techno-list" is 100% techno, so its genre
+	// suggestion would be redundant; house (10) and "tiny" (3) are too
+	// small. Nothing for all playlists together: the genre stations cover it.
+	require.Equal(t, []string{"mixed-list//36", "techno-list//30", "Techno · mixed-list/techno/26"}, names())
 
 	rec := f.call(f.h.DismissStationSuggestion, admin, http.MethodPost, "/d", "",
 		`{"playlist_ids":["`+techno+`"],"genre":""}`)
 	require.Equal(t, http.StatusNoContent, rec.Code)
-	require.Equal(t, []string{"All playlists//43", "Techno/techno/33"}, names())
+	require.Equal(t, []string{"mixed-list//36", "Techno · mixed-list/techno/26"}, names())
+	rec = f.call(f.h.DismissStationSuggestion, admin, http.MethodPost, "/d", "",
+		`{"playlist_ids":["`+techno+`","`+mixed+`"],"genre":""}`)
+	require.Equal(t, http.StatusBadRequest, rec.Code, "suggestions are for one playlist")
 
 	// Accepting = creating the station; its suggestion disappears.
-	all := f.one(`SELECT string_agg(id::text, '","') FROM playlists`)
-	rec = f.call(f.h.CreateStation, admin, http.MethodPost, "/stations", "", `{"name":"Techno","playlist_ids":["`+all+`"],"genres":["techno"]}`)
+	rec = f.call(f.h.CreateStation, admin, http.MethodPost, "/stations", "", `{"name":"Mixed techno","playlist_ids":["`+mixed+`"],"genres":["techno"]}`)
 	require.Equal(t, http.StatusCreated, rec.Code, rec.Body.String())
-	require.Equal(t, []string{"All playlists//43"}, names())
+	require.Equal(t, []string{"mixed-list//36"}, names())
 
 	counts := decode[stations.PoolGenres](t, f.call(f.h.ListStationGenres, admin, http.MethodGet,
 		"/stations/genres?playlist_ids="+techno+","+mixed, "", ""))
-	require.Equal(t, 40, counts.Tracks)
+	require.Equal(t, 66, counts.Tracks)
 	require.Equal(t, []stations.GenreCount{
-		{Genre: stations.Genre{ID: "techno", Name: "Techno"}, Tracks: 30},
+		{Genre: stations.Genre{ID: "techno", Name: "Techno"}, Tracks: 56},
 		{Genre: stations.Genre{ID: "house", Name: "House"}, Tracks: 10},
 	}, counts.Genres)
+	counts = decode[stations.PoolGenres](t, f.call(f.h.ListStationGenres, admin, http.MethodGet,
+		"/stations/genres?all_playlists=true", "", ""))
+	require.Equal(t, 69, counts.Tracks)
 	require.Equal(t, http.StatusBadRequest, f.call(f.h.ListStationGenres, admin, http.MethodGet, "/stations/genres", "", "").Code)
+}
+
+func TestSuggestionsSkipWhatAGenreStationPlays(t *testing.T) {
+	f := newStationsFixture(t)
+	admin := f.user("admin", true)
+	mixed := f.playlist("mixed-list", 26, "techno")
+	f.addTracks(mixed, "mixed-house", 10, "house")
+	f.playlist("house-list", 30, "house")
+	_, err := f.h.pipeline.Run(f.ctx, "test", true)
+	require.NoError(t, err)
+
+	s := decode[struct {
+		Suggestions []stations.Suggestion `json:"suggestions"`
+	}](t, f.call(f.h.ListStationSuggestions, admin, http.MethodGet, "/s", "", ""))
+	var names []string
+	for _, x := range s.Suggestions {
+		names = append(names, x.Name)
+	}
+	// Every techno track is in mixed-list: "Techno · mixed-list" would play
+	// exactly what the Techno genre station plays.
+	require.Equal(t, []string{"mixed-list", "house-list"}, names)
 }
 
 func TestBrowseTreeAndVoiceSearch(t *testing.T) {

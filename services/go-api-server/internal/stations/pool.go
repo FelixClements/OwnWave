@@ -12,13 +12,18 @@ func (a *Args) Add(v any) string {
 }
 
 // Where returns an SQL predicate on `tracks t` that holds for the tracks
-// the definition plays: local matches of its playlists, and when it has
-// genres, tracks with one of them among their station genres.
+// the definition plays: local matches of its playlists (of every playlist
+// for AllPlaylists), and when it has genres, tracks with one of them among
+// their station genres.
 func (d Definition) Where(args *Args) string {
+	playlists := ""
+	if !d.AllPlaylists {
+		playlists = ` AND pi.playlist_id = ANY(` + args.Add(d.PlaylistIDs) + `::uuid[])`
+	}
 	cond := `t.id IN (
 		SELECT m.track_id FROM playlist_items pi
 		JOIN spotify_track_matches m ON m.spotify_track_id = pi.spotify_track_id
-		WHERE m.track_id IS NOT NULL AND pi.playlist_id = ANY(` + args.Add(d.PlaylistIDs) + `::uuid[]))`
+		WHERE m.track_id IS NOT NULL` + playlists + `)`
 	if len(d.Genres) > 0 {
 		cond += ` AND EXISTS (
 		SELECT 1 FROM track_station_genres g

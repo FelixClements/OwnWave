@@ -98,8 +98,8 @@ export function HomePage() {
           }
         >
           {user?.is_admin
-            ? 'Add Spotify playlists on the Playlists page, then create stations from them, or accept a suggestion below.'
-            : 'Create a station from the synced playlists, or wait for an admin to share one.'}
+            ? 'Add Spotify playlists on the Playlists page. Each main genre gets its own station once enough of their songs are in your library; you can also create stations or accept a suggestion below.'
+            : 'Create a station from the synced playlists. Genre stations appear by themselves once enough playlist songs are in the library.'}
         </Empty>
       ) : (
         <div className="mb-10 grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-4">
@@ -124,7 +124,7 @@ export function HomePage() {
           title="Suggested stations"
           action={
             <span className="flex items-center gap-1 text-[13px] text-muted">
-              <Sparkles className="h-4 w-4" /> From your playlists and genres
+              <Sparkles className="h-4 w-4" /> From single playlists and their genres
             </span>
           }
         >

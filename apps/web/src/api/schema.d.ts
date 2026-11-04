@@ -474,7 +474,11 @@ export interface paths {
         /** The user's stations and the shared ones (shared first) */
         get: operations["listStations"];
         put?: never;
-        /** Create a station (admins create shared stations) */
+        /**
+         * Create a custom station (admins create shared stations)
+         * @description 409 when the station would play exactly what a genre station plays
+         *     (every playlist, that one genre), unless the genre is excluded.
+         */
         post: operations["createStation"];
         delete?: never;
         options?: never;
@@ -508,10 +512,16 @@ export interface paths {
         };
         /** One station */
         get: operations["getStation"];
-        /** Change a station (omitted fields keep their value) */
+        /**
+         * Change a station (omitted fields keep their value)
+         * @description A genre station only changes its name; the refresh then keeps it.
+         */
         put: operations["updateStation"];
         post?: never;
-        /** Delete a station */
+        /**
+         * Delete a custom station
+         * @description Genre stations are not deleted (409); exclude the genre instead.
+         */
         delete: operations["deleteStation"];
         options?: never;
         head?: never;
@@ -762,7 +772,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Stations OwnWave proposes from the synced playlists */
+        /** Custom stations OwnWave proposes, one playlist at a time */
         get: operations["listStationSuggestions"];
         put?: never;
         post?: never;
@@ -783,6 +793,75 @@ export interface paths {
         put?: never;
         /** Hide a suggestion for good */
         post: operations["dismissStationSuggestion"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/genre-stations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Every station genre with its track count and genre station */
+        get: operations["getGenreStations"];
+        /** Switch genre stations on or off (off hides them, deletes nothing) */
+        put: operations["setGenreStations"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/genre-stations/{genre}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Rename a genre's station or exclude the genre */
+        put: operations["updateGenreStation"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/pipeline": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Last scan, last genre scoring and recent station refreshes */
+        get: operations["getPipeline"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/pipeline/refresh": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Match playlist tracks and refresh the genre stations now */
+        post: operations["refreshPipeline"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1061,6 +1140,14 @@ export interface components {
             name: string;
             /** @description Played by everyone, changed by admins only */
             shared: boolean;
+            /**
+             * @description genre = made and kept up to date by OwnWave, one per station genre; custom = made by hand
+             * @enum {string}
+             */
+            kind: "custom" | "genre";
+            /** @description Plays every playlist, including ones added later */
+            all_playlists: boolean;
+            /** @description For all_playlists stations, every playlist now */
             playlist_ids: string[];
             /** @description Station genre ids; empty = every genre */
             genres: string[];
@@ -1071,6 +1158,9 @@ export interface components {
         };
         StationRequest: {
             name?: string;
+            /** @description Every playlist, including ones added later; playlist_ids is then ignored */
+            all_playlists?: boolean;
+            /** @description At least one unless all_playlists */
             playlist_ids?: string[];
             genres?: string[];
         };
@@ -1092,6 +1182,64 @@ export interface components {
             track_count: number;
             /** @description Suggested station name */
             name: string;
+        };
+        GenreStation: {
+            genre: string;
+            genre_name: string;
+            /** @description Empty until the genre first reaches the threshold */
+            station_id?: string;
+            name: string;
+            name_is_custom: boolean;
+            /** @description Matched tracks of this genre across every playlist */
+            tracks: number;
+            /** @enum {string} */
+            state: "active" | "below_threshold" | "excluded" | "off";
+        };
+        GenreStationSettings: {
+            enabled: boolean;
+            /** @description A hidden station is shown from this many tracks */
+            show_at: number;
+            /** @description A shown station is hidden below this many tracks */
+            hide_below: number;
+            genres: components["schemas"]["GenreStation"][];
+        };
+        StationChange: {
+            genre: string;
+            name: string;
+            /** @enum {string} */
+            change: "created" | "shown" | "hidden" | "renamed";
+        };
+        PipelineRun: {
+            id: number;
+            /** @description What started it: startup, hourly, scan_finished, genres_scored, playlist_added, admin, ... */
+            trigger: string;
+            /** Format: date-time */
+            started_at: string;
+            /** Format: date-time */
+            finished_at?: string;
+            /** @description Playlist tracks newly matched to a local file; absent when matching did not run */
+            matched?: number;
+            changes: components["schemas"]["StationChange"][];
+            error?: string;
+        };
+        PipelineStatus: {
+            last_scan: {
+                id: string;
+                status: string;
+                /** Format: date-time */
+                created_at: string;
+                /** Format: date-time */
+                finished_at?: string;
+                error?: string;
+            } | null;
+            genres_scored: {
+                /** Format: date-time */
+                at: string;
+                tracks: number;
+                scored: number;
+            } | null;
+            /** @description Newest first; runs that changed nothing are kept only when newest */
+            runs: components["schemas"]["PipelineRun"][];
         };
         BrowseItem: {
             /** @description Node to open next, or station:<id> */
@@ -1227,6 +1375,15 @@ export interface components {
             };
             content: {
                 "application/json": components["schemas"]["Station"];
+            };
+        };
+        /** @description Genre stations */
+        GenreStationSettings: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["GenreStationSettings"];
             };
         };
     };
@@ -1874,13 +2031,16 @@ export interface operations {
         responses: {
             201: components["responses"]["Station"];
             400: components["responses"]["Error"];
+            409: components["responses"]["Error"];
         };
     };
     getPoolGenres: {
         parameters: {
-            query: {
-                /** @description Comma-separated playlist ids */
-                playlist_ids: string;
+            query?: {
+                /** @description Comma-separated playlist ids (required unless all_playlists=true) */
+                playlist_ids?: string;
+                /** @description true = every playlist */
+                all_playlists?: boolean;
             };
             header?: never;
             path?: never;
@@ -1934,6 +2094,7 @@ export interface operations {
             400: components["responses"]["Error"];
             403: components["responses"]["Error"];
             404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
         };
     };
     deleteStation: {
@@ -1956,6 +2117,7 @@ export interface operations {
             };
             403: components["responses"]["Error"];
             404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
         };
     };
     getQueue: {
@@ -2277,6 +2439,103 @@ export interface operations {
                 content?: never;
             };
             400: components["responses"]["Error"];
+        };
+    };
+    getGenreStations: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: components["responses"]["GenreStationSettings"];
+        };
+    };
+    setGenreStations: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    enabled: boolean;
+                };
+            };
+        };
+        responses: {
+            200: components["responses"]["GenreStationSettings"];
+            400: components["responses"]["Error"];
+        };
+    };
+    updateGenreStation: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                genre: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description Kept by every refresh; '' = the genre's name again */
+                    name?: string;
+                    /** @description true hides the station and keeps it hidden */
+                    excluded?: boolean;
+                };
+            };
+        };
+        responses: {
+            200: components["responses"]["GenreStationSettings"];
+            400: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+        };
+    };
+    getPipeline: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Pipeline status */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PipelineStatus"];
+                };
+            };
+        };
+    };
+    refreshPipeline: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The run */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PipelineRun"];
+                };
+            };
         };
     };
     rebuildAnalysis: {

@@ -64,3 +64,42 @@ func TestValidName(t *testing.T) {
 	_, err = validName(string(make([]rune, maxNameLen+1)))
 	require.Error(t, err)
 }
+
+func TestNormalizeAllPlaylists(t *testing.T) {
+	d, err := Definition{AllPlaylists: true, PlaylistIDs: []string{idA, "ignored"}, Genres: []string{"house"}}.Normalize()
+	require.NoError(t, err)
+	require.True(t, d.AllPlaylists)
+	require.Equal(t, []string{}, d.PlaylistIDs, "every playlist: none stored")
+	require.Equal(t, []string{"house"}, d.Genres)
+}
+
+func TestWhereAllPlaylistsHasNoPlaylistFilter(t *testing.T) {
+	var args Args
+	where := Definition{AllPlaylists: true, Genres: []string{"house"}}.Where(&args)
+	require.NotContains(t, where, "playlist_id")
+	require.Len(t, args, 1, "only the genres")
+
+	args = nil
+	where = Definition{PlaylistIDs: []string{idA}}.Where(&args)
+	require.Contains(t, where, "pi.playlist_id = ANY($1::uuid[])")
+}
+
+func TestGenreStationShowsAndHidesWithAMargin(t *testing.T) {
+	for _, c := range []struct {
+		name    string
+		a       autoStation
+		enabled bool
+		want    bool
+	}{
+		{"new, enough", autoStation{tracks: 25, stillAStationGenre: true}, true, true},
+		{"new, too few", autoStation{tracks: 24, stillAStationGenre: true}, true, false},
+		{"shown, in the margin", autoStation{tracks: 20, active: true, stillAStationGenre: true}, true, true},
+		{"shown, below the margin", autoStation{tracks: 19, active: true, stillAStationGenre: true}, true, false},
+		{"hidden, in the margin", autoStation{tracks: 22, stillAStationGenre: true}, true, false},
+		{"excluded", autoStation{tracks: 99, excluded: true, stillAStationGenre: true}, true, false},
+		{"switched off", autoStation{tracks: 99, active: true, stillAStationGenre: true}, false, false},
+		{"genre gone from the taxonomy", autoStation{tracks: 99, active: true}, true, false},
+	} {
+		require.Equal(t, c.want, c.a.shouldShow(c.enabled), c.name)
+	}
+}

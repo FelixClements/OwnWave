@@ -19,6 +19,8 @@ func writeStationError(w http.ResponseWriter, r *http.Request, op string, err er
 		http.Error(w, "station not found", http.StatusNotFound)
 	case errors.Is(err, stations.ErrForbidden):
 		http.Error(w, err.Error(), http.StatusForbidden)
+	case errors.Is(err, stations.ErrConflict):
+		http.Error(w, strings.TrimPrefix(err.Error(), stations.ErrConflict.Error()+": "), http.StatusConflict)
 	case errors.Is(err, stations.ErrInvalid):
 		http.Error(w, strings.TrimPrefix(err.Error(), stations.ErrInvalid.Error()+": "), http.StatusBadRequest)
 	default:
@@ -150,15 +152,16 @@ func (h *Handler) GetQueue(w http.ResponseWriter, r *http.Request) {
 }
 
 // ListStationGenres breaks a playlist pool down by station genre:
-// GET /stations/genres?playlist_ids=a,b.
+// GET /stations/genres?playlist_ids=a,b or ?all_playlists=true.
 func (h *Handler) ListStationGenres(w http.ResponseWriter, r *http.Request) {
+	all := r.URL.Query().Get("all_playlists") == "true"
 	var ids []string
 	for _, id := range strings.Split(r.URL.Query().Get("playlist_ids"), ",") {
 		if id = strings.TrimSpace(id); id != "" {
 			ids = append(ids, id)
 		}
 	}
-	counts, err := h.stations.GenreCounts(r.Context(), ids)
+	counts, err := h.stations.GenreCounts(r.Context(), ids, all)
 	if err != nil {
 		writeStationError(w, r, "station genres", err)
 		return
