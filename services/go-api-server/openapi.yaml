@@ -328,10 +328,13 @@ paths:
       operationId: getTrackCover
       tags: [library]
       summary: Embedded cover art of a track
-      description: Rate limited to 300 per minute per IP.
+      description: |
+        Rate limited to 300 per minute per IP. 204 when the track has no
+        embedded cover art; 404 only for an unknown track.
       parameters: [{ $ref: "#/components/parameters/id" }]
       responses:
         "200": { $ref: "#/components/responses/Image" }
+        "204": { $ref: "#/components/responses/NoCover" }
         "404": { $ref: "#/components/responses/Error" }
   /api/tracks/{id}/genres:
     get:
@@ -482,9 +485,11 @@ paths:
       operationId: getStationCover
       tags: [stations]
       summary: Cover art for a station (from one of its tracks)
+      description: 204 when none of the station's tracks has cover art; 404 only for an unknown station.
       parameters: [{ $ref: "#/components/parameters/id" }]
       responses:
         "200": { $ref: "#/components/responses/Image" }
+        "204": { $ref: "#/components/responses/NoCover" }
         "404": { $ref: "#/components/responses/Error" }
   /api/browse:
     get:
@@ -781,6 +786,13 @@ components:
     Image:
       description: JPEG image
       content: { image/jpeg: { schema: { type: string, format: binary } } }
+    NoCover:
+      description: |
+        No cover art (normal, not an error). Empty body, cacheable like the
+        image. Answered with 204 rather than 404 so lists of coverless tracks
+        don't look like path probing to the edge proxy.
+      headers:
+        Cache-Control: { schema: { type: string, example: "private, max-age=86400" } }
     Tracks:
       description: Tracks
       content:

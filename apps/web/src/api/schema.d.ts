@@ -384,7 +384,8 @@ export interface paths {
         };
         /**
          * Embedded cover art of a track
-         * @description Rate limited to 300 per minute per IP.
+         * @description Rate limited to 300 per minute per IP. 204 when the track has no
+         *     embedded cover art; 404 only for an unknown track.
          */
         get: operations["getTrackCover"];
         put?: never;
@@ -547,7 +548,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Cover art for a station (from one of its tracks) */
+        /**
+         * Cover art for a station (from one of its tracks)
+         * @description 204 when none of the station's tracks has cover art; 404 only for an unknown station.
+         */
         get: operations["getStationCover"];
         put?: never;
         post?: never;
@@ -1171,6 +1175,18 @@ export interface components {
                 "image/jpeg": string;
             };
         };
+        /**
+         * @description No cover art (normal, not an error). Empty body, cacheable like the
+         *     image. Answered with 204 rather than 404 so lists of coverless tracks
+         *     don't look like path probing to the edge proxy.
+         */
+        NoCover: {
+            headers: {
+                "Cache-Control"?: string;
+                [name: string]: unknown;
+            };
+            content?: never;
+        };
         /** @description Tracks */
         Tracks: {
             headers: {
@@ -1695,6 +1711,7 @@ export interface operations {
         requestBody?: never;
         responses: {
             200: components["responses"]["Image"];
+            204: components["responses"]["NoCover"];
             404: components["responses"]["Error"];
         };
     };
@@ -1956,6 +1973,7 @@ export interface operations {
         requestBody?: never;
         responses: {
             200: components["responses"]["Image"];
+            204: components["responses"]["NoCover"];
             404: components["responses"]["Error"];
         };
     };
