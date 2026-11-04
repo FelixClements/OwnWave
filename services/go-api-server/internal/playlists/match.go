@@ -210,11 +210,17 @@ func artistNames(credit string) []string {
 	return out
 }
 
-var stripMarks = transform.Chain(norm.NFD, runes.Remove(runes.In(unicode.Mn)), norm.NFC)
+// stripMarks drops accents. A transform chain keeps state between calls,
+// so each call builds its own: matchers run concurrently (the hourly sync
+// and the station pipeline both match at startup).
+func stripMarks() transform.Transformer {
+	return transform.Chain(norm.NFD, runes.Remove(runes.In(unicode.Mn)), norm.NFC)
+}
 
 // normalize lowercases, drops accents and punctuation, and spells "&" as "and".
+// It is safe for concurrent use.
 func normalize(s string) string {
-	s, _, _ = transform.String(stripMarks, strings.ToLower(s))
+	s, _, _ = transform.String(stripMarks(), strings.ToLower(s))
 	s = strings.ReplaceAll(s, "&", " and ")
 	s = strings.Map(func(r rune) rune {
 		if unicode.IsLetter(r) || unicode.IsDigit(r) {
