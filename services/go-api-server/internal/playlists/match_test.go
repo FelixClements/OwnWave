@@ -1,6 +1,7 @@
 package playlists
 
 import (
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -95,4 +96,23 @@ func TestMatcherPrefersHigherQualityDuplicate(t *testing.T) {
 	m = NewMatcher([]LocalTrack{{ID: "mixed", Title: "Affection (Mixed)", Artist: "Amelie Lens", DurationSec: 358}})
 	id, _, _ = m.Match(spotify.Track{Title: "Affection", Artists: []string{"Amelie Lens"}, DurationMS: 358_000})
 	require.Equal(t, "mixed", id)
+}
+
+// Matchers run at the same time (the hourly sync and the station
+// pipeline both match at startup); a shared transform chain panicked.
+func TestNormalizeIsSafeForConcurrentUse(t *testing.T) {
+	var wg sync.WaitGroup
+	for range 8 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for range 2000 {
+				if got := normalize("Beyoncé & Ñandú Café Déjà Vu"); got != "beyonce and nandu cafe deja vu" {
+					t.Errorf("normalize = %q", got)
+					return
+				}
+			}
+		}()
+	}
+	wg.Wait()
 }
