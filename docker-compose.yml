@@ -19,6 +19,10 @@ x-python: &python
     GENRE_MODEL_DIR: ${GENRE_MODEL_DIR:-/app/models}
     GENRE_WINDOW_SECONDS: ${GENRE_WINDOW_SECONDS:-20}
     MUSICBRAINZ_ENABLED: ${MUSICBRAINZ_ENABLED:-true}
+    # TensorFlow threads per worker process (genre model). Keep
+    # WORKER_CONCURRENCY x TF_NUM_INTRAOP_THREADS near the CPU count.
+    TF_NUM_INTRAOP_THREADS: ${TF_NUM_INTRAOP_THREADS:-3}
+    TF_NUM_INTEROP_THREADS: ${TF_NUM_INTEROP_THREADS:-1}
   volumes:
     - ${MUSIC_PATH:-./music}:/music:ro
   # go runs the database migrations, so it must be healthy first.
@@ -60,7 +64,7 @@ services:
   # that were running, which assumes no other worker holds them.
   worker:
     <<: *python
-    command: python -m main worker -c ${WORKER_CONCURRENCY:-2}
+    command: python -m main worker -c ${WORKER_CONCURRENCY:-4}
 
   # API under /api plus the static web UI at /.
   go:
