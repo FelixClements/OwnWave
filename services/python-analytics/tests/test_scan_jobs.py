@@ -53,3 +53,22 @@ def test_scan_without_folders_reports_its_own_progress(db_url):
         status = db.get_scan_status(conn, master)
         assert status["folders"] == {"total": 0, "done": 0, "failed": 0}
         assert status["stats"]["total_files"] == 0
+
+
+def test_queue_library_scan_reuses_an_active_scan_of_the_same_path(db_url):
+    import psycopg
+
+    import tasks
+
+    with psycopg.connect(db_url) as conn:
+        first = tasks.queue_library_scan(conn, "/music")
+        again = tasks.queue_library_scan(conn, "/music", force=True)
+        other = tasks.queue_library_scan(conn, "/music/Some Artist")
+        conn.commit()
+        assert again == first
+        assert other != first
+        triggers = conn.execute("SELECT count(*) FROM task_queue WHERE task = 'trigger_library_scan'").fetchone()[0]
+        assert triggers == 2
+
+        conn.execute("UPDATE scan_jobs SET status = 'completed' WHERE id = %s", (first,))
+        assert tasks.queue_library_scan(conn, "/music") != first

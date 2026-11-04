@@ -6,7 +6,7 @@ import clsx from 'clsx';
 import { api, call } from '@/api/client';
 import { useAuth } from '@/lib/auth';
 import { plural } from '@/lib/format';
-import { keys, usePlaylistActions, useScan, useSetupStatus, useStartScan } from '@/lib/queries';
+import { isScanFinished, keys, usePlaylistActions, useScan, useScans, useSetupStatus, useStartScan } from '@/lib/queries';
 import { scanPhase } from '@/lib/scan';
 import { AuthLayout } from '@/components/Shell';
 import { Button, ErrorText, Input, Spinner } from '@/components/ui';
@@ -94,8 +94,14 @@ function AccountStep({ onDone }: { onDone: () => void }) {
 
 function ScanStep({ onDone }: { onDone: () => void }) {
   const start = useStartScan();
-  const [jobId, setJobId] = useState<string | null>(null);
+  const status = useSetupStatus();
+  const scans = useScans();
+  const active = scans.data?.find((s) => !isScanFinished(s.status));
+  const [started, setStarted] = useState<string | null>(null);
+  // A scan already running (e.g. after a reload) is followed, never repeated.
+  const jobId = started ?? active?.id ?? null;
   const scan = useScan(jobId);
+  const tracks = status.data?.track_count ?? 0;
   const phase = scan.data ? scanPhase(scan.data) : null;
   const done = scan.data?.status === 'completed' || scan.data?.status === 'failed';
   return (
@@ -104,10 +110,27 @@ function ScanStep({ onDone }: { onDone: () => void }) {
         OwnWave reads your music folder, imports tags and analyses every track's genre. A large library takes a few hours; you can
         continue while it runs.
       </p>
+      {!jobId && tracks > 0 && (
+        <p className="rounded-md bg-card p-3 text-sm">
+          Your library already has {plural(tracks, 'track')}. Scan again only to pick up changes.
+        </p>
+      )}
       {!jobId ? (
-        <Button variant="primary" className="w-full" loading={start.isPending} onClick={() => start.mutate(false, { onSuccess: (r) => setJobId(r.job_id) })}>
-          Scan my library
-        </Button>
+        <div className="space-y-2">
+          <Button
+            variant={tracks > 0 ? 'secondary' : 'primary'}
+            className="w-full"
+            loading={start.isPending || scans.isLoading}
+            onClick={() => start.mutate(false, { onSuccess: (r) => setStarted(r.job_id) })}
+          >
+            {tracks > 0 ? 'Scan for changes' : 'Scan my library'}
+          </Button>
+          {tracks > 0 && (
+            <Button variant="primary" className="w-full" onClick={onDone}>
+              Next
+            </Button>
+          )}
+        </div>
       ) : (
         <div className="rounded-lg bg-card p-4">
           <div className="mb-2 flex justify-between text-sm">

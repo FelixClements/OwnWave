@@ -14,8 +14,33 @@ from models import ScanResult
 log = logging.getLogger(__name__)
 
 
+# Serialises scan creation so two requests cannot both find no active scan.
+_SCAN_LOCK = 4_242_002
+
+
+def active_scan(conn, path: str) -> Optional[UUID]:
+    """The pending or running top-level scan of path, if any."""
+    row = conn.execute(
+        """
+        SELECT id FROM scan_jobs
+        WHERE parent_id IS NULL AND path = %s AND status IN ('pending', 'running')
+        ORDER BY created_at DESC LIMIT 1
+        """,
+        (path,),
+    ).fetchone()
+    return row[0] if row else None
+
+
 def queue_library_scan(conn, path: str, force: bool = False) -> UUID:
-    """Create a scan job and queue it inside the caller's transaction."""
+    """Create a scan job and queue it inside the caller's transaction.
+
+    A scan of the same path that is still pending or running is returned
+    instead: a second one would only queue every folder again behind it.
+    """
+    conn.execute("SELECT pg_advisory_xact_lock(%s)", (_SCAN_LOCK,))
+    existing = active_scan(conn, path)
+    if existing:
+        return existing
     job_id = db.create_scan_job(conn, path)
     task_queue.enqueue(conn, "trigger_library_scan", master_job_id=str(job_id), path=path, force=force)
     return job_id
