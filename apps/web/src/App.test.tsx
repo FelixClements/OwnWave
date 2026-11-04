@@ -170,6 +170,23 @@ describe('App', () => {
     expect(screen.queryAllByText('Hymn')).toHaveLength(0);
   });
 
+  it('follows a running scan on the setup page instead of starting another', async () => {
+    const running = {
+      id: 'scan1', path: '/music', status: 'running', folders: { total: 10, done: 4, failed: 0 },
+      stats: { total_files: 0, imported: 600, scanned: 0, features: 0, model_success: 0, model_failed: 0, failed_files: 0, failed_paths: [] },
+    };
+    const calls = fakeApi({
+      'GET /api/setup/status': () => ({ setup_completed: false, has_users: true, track_count: 600 }),
+      'GET /api/me': () => admin,
+      'GET /api/admin/scans': () => ({ jobs: [running] }),
+      'GET /api/admin/scan/{id}': () => running,
+    });
+    renderAt('/');
+    expect(await screen.findByText('Importing folders: 4 of 10')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Scan my library|Scan for changes/ })).not.toBeInTheDocument();
+    expect(calls.some((c) => c.method === 'POST' && c.path === '/api/admin/scan')).toBe(false);
+  });
+
   it('keeps non-admins out of admin', async () => {
     signedIn({ 'GET /api/me': () => ({ ...admin, is_admin: false }) });
     renderAt('/admin');
