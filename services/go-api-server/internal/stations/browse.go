@@ -225,7 +225,10 @@ func (s *Service) playlistFolders(ctx context.Context, userID string) ([]BrowseI
 	var id, name string
 	_, err = pgx.ForEachRow(rows, []any{&id, &name}, func() error {
 		if n := stationsPer[id]; n > 0 {
-			items = append(items, BrowseItem{ID: "playlist:" + id, Title: name, Subtitle: plural(n, "station"), Browsable: true})
+			items = append(items, BrowseItem{
+				ID: "playlist:" + id, Title: name, Subtitle: plural(n, "station"), Browsable: true,
+				ArtworkURL: "/api/playlists/" + id + "/cover",
+			})
 		}
 		return nil
 	})

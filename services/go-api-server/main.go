@@ -263,6 +263,7 @@ func newRouter(h *Handler, webDir string) http.Handler {
 
 			r.Get("/playlists", h.ListPlaylists)
 			r.Get("/playlists/{id}", h.GetPlaylist)
+			r.Get("/playlists/{id}/cover", h.GetPlaylistCover)
 
 			r.Get("/stations", h.ListStations)
 			r.Get("/stations/genres", h.ListStationGenres)

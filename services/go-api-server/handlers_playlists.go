@@ -47,6 +47,28 @@ func (h *Handler) GetPlaylist(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]interface{}{"playlist": p, "items": items})
 }
 
+// GetPlaylistCover returns the playlist's Spotify cover, downloaded at
+// sync. 204 when it has none yet; 404 only for an unknown playlist.
+func (h *Handler) GetPlaylistCover(w http.ResponseWriter, r *http.Request) {
+	id, ok := parseUUIDParam(w, r, "id")
+	if !ok {
+		return
+	}
+	img, mediaType, err := h.playlists.Cover(r.Context(), id)
+	if err != nil {
+		writePlaylistError(w, r, "playlist cover", err)
+		return
+	}
+	if img == nil {
+		writeNoCover(w)
+		return
+	}
+	w.Header().Set("Content-Type", mediaType)
+	// A sync may bring a new cover: cache for an hour, like station covers.
+	w.Header().Set("Cache-Control", "private, max-age=3600")
+	_, _ = w.Write(img)
+}
+
 // AddPlaylist adds a Spotify playlist by URL and syncs it right away.
 func (h *Handler) AddPlaylist(w http.ResponseWriter, r *http.Request) {
 	var req struct {

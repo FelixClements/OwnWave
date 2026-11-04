@@ -48,7 +48,7 @@ function renderAt(path: string) {
 }
 
 const admin = { id: 'u1', username: 'felix', is_admin: true };
-const playlist: Playlist = { id: 'p1', spotify_id: 'sp1', name: 'Techno Bunker', track_count: 100, matched_count: 40 };
+const playlist: Playlist = { id: 'p1', spotify_id: 'sp1', name: 'Techno Bunker', track_count: 100, matched_count: 40, has_cover: false };
 const station: Station = { id: 's1', name: 'Bunker Techno', shared: true, playlist_ids: ['p1'], genres: ['techno'], track_count: 40, updated_at: '2026-11-03T12:00:00Z' };
 const genres = {
   scored_tracks: 40,
@@ -168,6 +168,27 @@ describe('App', () => {
     expect(screen.getByText('drift away')).toBeInTheDocument();
     expect(screen.getByText('Not in your library')).toBeInTheDocument();
     expect(screen.queryAllByText('Hymn')).toHaveLength(0);
+  });
+
+  it('shows a playlist Spotify cover once it is downloaded', async () => {
+    signedIn({ 'GET /api/playlists': () => ({ playlists: [playlist, { ...playlist, id: 'p2', name: 'Deep House', has_cover: true }] }) });
+    const { container } = renderAt('/playlists');
+    expect(await screen.findByText('Deep House')).toBeInTheDocument();
+    const covers = [...container.querySelectorAll('img')].map((img) => img.getAttribute('src'));
+    expect(covers).toContain('/api/playlists/p2/cover');
+    expect(covers).not.toContain('/api/playlists/p1/cover');
+  });
+
+  it('says how much of a station the preview shows', async () => {
+    const queue = Array.from({ length: 120 }, (_, i) => ({ id: `t${i}`, title: `Song ${i}`, position: i, liked: false }));
+    signedIn({
+      'GET /api/stations/{id}': () => ({ ...station, track_count: 257 }),
+      'GET /api/stations/{id}/queue': () => ({ queue }),
+    });
+    renderAt('/station/s1');
+    expect(await screen.findByText(/showing 100 of 257 tracks/)).toBeInTheDocument();
+    expect(screen.getByText('Song 99')).toBeInTheDocument();
+    expect(screen.queryByText('Song 100')).not.toBeInTheDocument();
   });
 
   it('follows a running scan on the setup page instead of starting another', async () => {

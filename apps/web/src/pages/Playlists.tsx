@@ -5,7 +5,7 @@ import type { Playlist } from '@/api/types';
 import { useAuth } from '@/lib/auth';
 import { timeAgo } from '@/lib/format';
 import { usePlaylistActions, usePlaylists } from '@/lib/queries';
-import { CardGrid } from '@/components/media';
+import { CardGrid, playlistCover } from '@/components/media';
 import { Art, Button, Empty, ErrorText, Input, Spinner } from '@/components/ui';
 
 export const matchPct = (p: Playlist) => (p.track_count ? Math.round((p.matched_count / p.track_count) * 100) : 0);
@@ -15,7 +15,7 @@ function PlaylistCard({ p }: { p: Playlist }) {
   return (
     <Link to={`/playlist/${p.id}`} className="group flex flex-col gap-3 rounded-lg p-3 transition hover:bg-card">
       <div className="relative">
-        <Art name={p.name} className="aspect-square w-full shadow-lift" />
+        <Art src={playlistCover(p)} name={p.name} className="aspect-square w-full shadow-lift" />
         <span className="absolute bottom-2 left-2 rounded-full bg-black/70 px-2 py-0.5 text-[11px] font-bold tabular-nums">{pct}% in library</span>
       </div>
       <div className="min-w-0">

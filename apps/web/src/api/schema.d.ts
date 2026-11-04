@@ -633,6 +633,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/playlists/{id}/cover": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The playlist's Spotify cover, downloaded at sync
+         * @description 204 while the playlist has no cover (not synced since covers were added, or Spotify lists none); 404 only for an unknown playlist.
+         */
+        get: operations["getPlaylistCover"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/genres": {
         parameters: {
             query?: never;
@@ -1105,6 +1125,8 @@ export interface components {
             /** Format: date-time */
             last_synced_at?: string;
             last_sync_error?: string;
+            /** @description Its Spotify cover is downloaded: GET /api/playlists/{id}/cover */
+            has_cover: boolean;
         };
         PlaylistItem: {
             spotify_track_id: string;
@@ -2075,6 +2097,32 @@ export interface operations {
                     };
                 };
             };
+            404: components["responses"]["Error"];
+        };
+    };
+    getPlaylistCover: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["id"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Image as Spotify serves it */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "image/jpeg": string;
+                    "image/png": string;
+                    "image/webp": string;
+                };
+            };
+            204: components["responses"]["NoCover"];
             404: components["responses"]["Error"];
         };
     };

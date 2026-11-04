@@ -21,6 +21,17 @@ const spotifyID = "37i9dQZF1DX6J5NfMJS675"
 type fakeSpotify struct {
 	playlist spotify.Playlist
 	err      error
+	images   map[string][]byte // cover URL -> image; others fail
+	fetched  []string          // image URLs requested
+}
+
+func (f *fakeSpotify) FetchImage(_ context.Context, url string) ([]byte, string, error) {
+	f.fetched = append(f.fetched, url)
+	img, ok := f.images[url]
+	if !ok {
+		return nil, "", errors.New("spotify answered 404")
+	}
+	return img, "image/png", nil
 }
 
 func (f *fakeSpotify) FetchPlaylist(_ context.Context, id string) (spotify.Playlist, error) {
@@ -153,5 +164,57 @@ func TestDeleteRefusesPlaylistsInUse(t *testing.T) {
 	_, err = svc.Get(ctx, p.ID)
 	require.ErrorIs(t, err, playlists.ErrNotFound)
 	_, err = svc.Delete(ctx, p.ID)
+	require.ErrorIs(t, err, playlists.ErrNotFound)
+}
+
+func TestSyncDownloadsCoverOnceAndKeepsItOnFailure(t *testing.T) {
+	pool := testdb.NewPool(t)
+	ctx := context.Background()
+	fake := &fakeSpotify{
+		playlist: spotify.Playlist{Name: "Mix", Tracks: []spotify.Track{track("t1", "Song", "Band")}},
+		images:   map[string][]byte{"https://i.scdn.co/image/a": []byte("cover-a"), "https://i.scdn.co/image/b": []byte("cover-b")},
+	}
+	svc := playlists.NewService(pool, fake)
+
+	// No cover listed: none stored.
+	p, err := svc.Add(ctx, spotifyID)
+	require.NoError(t, err)
+	require.False(t, p.HasCover)
+	img, _, err := svc.Cover(ctx, p.ID)
+	require.NoError(t, err)
+	require.Nil(t, img)
+
+	fake.playlist.CoverURL = "https://i.scdn.co/image/a"
+	p, err = svc.Sync(ctx, p.ID)
+	require.NoError(t, err)
+	require.True(t, p.HasCover)
+	img, kind, err := svc.Cover(ctx, p.ID)
+	require.NoError(t, err)
+	require.Equal(t, []byte("cover-a"), img)
+	require.Equal(t, "image/png", kind)
+
+	// Same cover: not downloaded again.
+	_, err = svc.Sync(ctx, p.ID)
+	require.NoError(t, err)
+	require.Equal(t, []string{"https://i.scdn.co/image/a"}, fake.fetched)
+
+	// A new cover that fails to download keeps the old one; the sync succeeds.
+	fake.playlist.CoverURL = "https://i.scdn.co/image/broken"
+	p, err = svc.Sync(ctx, p.ID)
+	require.NoError(t, err)
+	require.Nil(t, p.LastSyncError)
+	img, _, err = svc.Cover(ctx, p.ID)
+	require.NoError(t, err)
+	require.Equal(t, []byte("cover-a"), img)
+
+	// A new cover replaces the old one.
+	fake.playlist.CoverURL = "https://i.scdn.co/image/b"
+	_, err = svc.Sync(ctx, p.ID)
+	require.NoError(t, err)
+	img, _, err = svc.Cover(ctx, p.ID)
+	require.NoError(t, err)
+	require.Equal(t, []byte("cover-b"), img)
+
+	_, _, err = svc.Cover(ctx, "00000000-0000-0000-0000-000000000000")
 	require.ErrorIs(t, err, playlists.ErrNotFound)
 }

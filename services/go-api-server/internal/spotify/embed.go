@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"regexp"
 	"strings"
 )
@@ -31,6 +32,9 @@ type Playlist struct {
 	ID     string
 	Name   string
 	Tracks []Track
+	// CoverURL is the playlist's cover image on Spotify's image CDN, or ""
+	// when the page lists none (or one on a host CoverURL may not point to).
+	CoverURL string
 }
 
 type Track struct {
@@ -65,6 +69,8 @@ func ParsePlaylistID(input string) (string, error) {
 type Client struct {
 	HTTP    *http.Client
 	BaseURL string // defaults to https://open.spotify.com
+	// imageURLOK replaces IsImageURL in tests, which serve images over http.
+	imageURLOK func(string) bool
 }
 
 // FetchPlaylist downloads and parses the embed page of a public playlist.
@@ -120,9 +126,15 @@ func Parse(page []byte) (Playlist, error) {
 				State struct {
 					Data struct {
 						Entity struct {
-							Type      string `json:"type"`
-							ID        string `json:"id"`
-							Name      string `json:"name"`
+							Type     string `json:"type"`
+							ID       string `json:"id"`
+							Name     string `json:"name"`
+							CoverArt struct {
+								Sources []struct {
+									URL   string `json:"url"`
+									Width *int   `json:"width"`
+								} `json:"sources"`
+							} `json:"coverArt"`
 							TrackList []struct {
 								URI        string `json:"uri"`
 								Title      string `json:"title"`
@@ -145,6 +157,16 @@ func Parse(page []byte) (Playlist, error) {
 	}
 
 	p := Playlist{ID: e.ID, Name: strings.TrimSpace(e.Name)}
+	best := -1
+	for _, src := range e.CoverArt.Sources {
+		w := 0
+		if src.Width != nil {
+			w = *src.Width
+		}
+		if IsImageURL(src.URL) && w > best {
+			p.CoverURL, best = src.URL, w
+		}
+	}
 	for _, t := range e.TrackList {
 		id, ok := strings.CutPrefix(t.URI, "spotify:track:")
 		if !ok || strings.TrimSpace(t.Title) == "" {
@@ -172,4 +194,56 @@ func splitArtists(subtitle string) []string {
 		}
 	}
 	return out
+}
+
+// IsImageURL reports whether u is an https URL on Spotify's image CDNs,
+// the only place a playlist cover is downloaded from.
+func IsImageURL(u string) bool {
+	parsed, err := url.Parse(u)
+	if err != nil || parsed.Scheme != "https" || parsed.User != nil || parsed.Port() != "" {
+		return false
+	}
+	host := strings.ToLower(parsed.Hostname())
+	return strings.HasSuffix(host, ".scdn.co") || strings.HasSuffix(host, ".spotifycdn.com")
+}
+
+// maxImageBytes caps a downloaded cover; Spotify's are well under 1 MB.
+const maxImageBytes = 4 << 20
+
+// FetchImage downloads a cover image from Spotify's image CDN and returns
+// it with its media type (image/jpeg, image/png or image/webp).
+func (c Client) FetchImage(ctx context.Context, imageURL string) ([]byte, string, error) {
+	ok := IsImageURL
+	if c.imageURLOK != nil {
+		ok = c.imageURLOK
+	}
+	if !ok(imageURL) {
+		return nil, "", fmt.Errorf("fetch cover: %q is not a Spotify image URL", imageURL)
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, imageURL, nil)
+	if err != nil {
+		return nil, "", err
+	}
+	req.Header.Set("User-Agent", "Mozilla/5.0 (compatible; OwnWave playlist sync)")
+	resp, err := c.HTTP.Do(req)
+	if err != nil {
+		return nil, "", fmt.Errorf("fetch cover: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, "", fmt.Errorf("fetch cover: spotify answered %s", resp.Status)
+	}
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxImageBytes+1))
+	if err != nil {
+		return nil, "", fmt.Errorf("fetch cover: %w", err)
+	}
+	if len(body) > maxImageBytes {
+		return nil, "", errors.New("fetch cover: image is too large")
+	}
+	switch kind := http.DetectContentType(body); kind {
+	case "image/jpeg", "image/png", "image/webp":
+		return body, kind, nil
+	default:
+		return nil, "", fmt.Errorf("fetch cover: not an image (%s)", kind)
+	}
 }

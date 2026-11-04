@@ -125,3 +125,25 @@ func TestStationCover(t *testing.T) {
 		require.Equal(t, http.StatusNotFound, cover("6f1b8c6e-6a43-4e4b-9b1e-2b3f8d1a0c55").Code)
 	})
 }
+
+func TestPlaylistCover(t *testing.T) {
+	f := newStationsFixture(t)
+	user := f.user("listener", false)
+	id := f.playlist("rock", 1, "")
+	cover := func(id string) *httptest.ResponseRecorder {
+		return f.call(f.h.GetPlaylistCover, user, http.MethodGet, "/api/playlists/"+id+"/cover", id, "")
+	}
+
+	rec := cover(id)
+	require.Equal(t, http.StatusNoContent, rec.Code, "not synced since covers were added")
+	require.Empty(t, rec.Body.String())
+
+	f.exec(`UPDATE playlists SET cover_url = 'https://i.scdn.co/image/a', cover_image = 'png!', cover_type = 'image/png' WHERE id = $1::uuid`, id)
+	rec = cover(id)
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, "image/png", rec.Header().Get("Content-Type"))
+	require.Equal(t, "private, max-age=3600", rec.Header().Get("Cache-Control"))
+	require.Equal(t, "png!", rec.Body.String())
+
+	require.Equal(t, http.StatusNotFound, cover("00000000-0000-0000-0000-000000000000").Code)
+}
