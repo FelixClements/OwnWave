@@ -2,8 +2,10 @@
 // optionally limited to station genres. A station plays the local matches
 // of its playlists that carry one of its genres (primary or secondary).
 //
-// Stations created by admins are shared: everyone plays them, only admins
-// change them. Other users' stations are personal.
+// There are two kinds. Custom stations are made by hand: admins make shared
+// ones, everyone else personal ones. Genre stations are made by Refresh:
+// one shared station per station genre with enough tracks across every
+// playlist. Their pool is "all playlists", evaluated live.
 package stations
 
 import (
@@ -27,22 +29,40 @@ var ErrNotFound = errors.New("station not found")
 // ErrForbidden is returned when the user may not change the station.
 var ErrForbidden = errors.New("only admins change shared stations")
 
+// ErrConflict is returned for a change that would clash with a genre
+// station, e.g. a custom station that duplicates one.
+var ErrConflict = errors.New("station conflict")
+
+// Station kinds.
+const (
+	KindCustom = "custom"
+	KindGenre  = "genre"
+)
+
 const maxNameLen = 100
 
 var genreIDPattern = regexp.MustCompile(`^[a-z][a-z0-9_]{0,39}$`)
 
 // Definition is what a station plays.
 type Definition struct {
-	PlaylistIDs []string `json:"playlist_ids"`
+	// AllPlaylists: the pool is every playlist, including ones added
+	// later; PlaylistIDs is then ignored.
+	AllPlaylists bool     `json:"all_playlists"`
+	PlaylistIDs  []string `json:"playlist_ids"`
 	// Genres limits the pool to these station genres; empty means all.
 	Genres []string `json:"genres"`
 }
 
 // Station is a station as clients see it.
 type Station struct {
-	ID          string    `json:"id"`
-	Name        string    `json:"name"`
-	Shared      bool      `json:"shared"`
+	ID     string `json:"id"`
+	Name   string `json:"name"`
+	Shared bool   `json:"shared"`
+	// Kind is KindCustom or KindGenre.
+	Kind         string `json:"kind"`
+	AllPlaylists bool   `json:"all_playlists"`
+	// PlaylistIDs are the playlists the station plays; for AllPlaylists
+	// stations, every playlist right now.
 	PlaylistIDs []string  `json:"playlist_ids"`
 	Genres      []string  `json:"genres"`
 	TrackCount  int       `json:"track_count"`
@@ -51,23 +71,27 @@ type Station struct {
 
 // Definition returns what the station plays.
 func (s Station) Definition() Definition {
-	return Definition{PlaylistIDs: s.PlaylistIDs, Genres: s.Genres}
+	return Definition{AllPlaylists: s.AllPlaylists, PlaylistIDs: s.PlaylistIDs, Genres: s.Genres}
 }
 
 // Request is the create/update body. On update, nil fields keep their
-// current value.
+// current value. A genre station only changes its name.
 type Request struct {
-	Name        *string  `json:"name"`
-	PlaylistIDs []string `json:"playlist_ids"`
-	Genres      []string `json:"genres"`
+	Name         *string  `json:"name"`
+	AllPlaylists *bool    `json:"all_playlists"`
+	PlaylistIDs  []string `json:"playlist_ids"`
+	Genres       []string `json:"genres"`
 }
 
 // Normalize trims, dedupes and sorts the definition and checks its shape.
 // Whether the playlists and genres exist is checked against the database.
 func (d Definition) Normalize() (Definition, error) {
-	var out Definition
+	out := Definition{AllPlaylists: d.AllPlaylists, PlaylistIDs: []string{}}
 	seen := map[string]bool{}
 	for _, id := range d.PlaylistIDs {
+		if d.AllPlaylists {
+			break
+		}
 		u, err := uuid.Parse(strings.TrimSpace(id))
 		if err != nil {
 			return out, fmt.Errorf("%w: playlist_ids must be valid ids", ErrInvalid)
@@ -77,7 +101,7 @@ func (d Definition) Normalize() (Definition, error) {
 			out.PlaylistIDs = append(out.PlaylistIDs, s)
 		}
 	}
-	if len(out.PlaylistIDs) == 0 {
+	if len(out.PlaylistIDs) == 0 && !out.AllPlaylists {
 		return out, fmt.Errorf("%w: pick at least one playlist", ErrInvalid)
 	}
 	out.Genres = []string{}

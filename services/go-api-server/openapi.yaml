@@ -411,11 +411,15 @@ paths:
     post:
       operationId: createStation
       tags: [stations]
-      summary: Create a station (admins create shared stations)
+      summary: Create a custom station (admins create shared stations)
+      description: |
+        409 when the station would play exactly what a genre station plays
+        (every playlist, that one genre), unless the genre is excluded.
       requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/StationRequest" } } } }
       responses:
         "201": { $ref: "#/components/responses/Station" }
         "400": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
   /api/stations/genres:
     get:
       operationId: getPoolGenres
@@ -424,9 +428,12 @@ paths:
       parameters:
         - name: playlist_ids
           in: query
-          required: true
-          description: Comma-separated playlist ids
+          description: Comma-separated playlist ids (required unless all_playlists=true)
           schema: { type: string }
+        - name: all_playlists
+          in: query
+          description: true = every playlist
+          schema: { type: boolean }
       responses:
         "200": { description: Breakdown, content: { application/json: { schema: { $ref: "#/components/schemas/PoolGenres" } } } }
         "400": { $ref: "#/components/responses/Error" }
@@ -443,6 +450,7 @@ paths:
       operationId: updateStation
       tags: [stations]
       summary: Change a station (omitted fields keep their value)
+      description: A genre station only changes its name; the refresh then keeps it.
       parameters: [{ $ref: "#/components/parameters/id" }]
       requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/StationRequest" } } } }
       responses:
@@ -450,15 +458,18 @@ paths:
         "400": { $ref: "#/components/responses/Error" }
         "403": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
     delete:
       operationId: deleteStation
       tags: [stations]
-      summary: Delete a station
+      summary: Delete a custom station
+      description: Genre stations are not deleted (409); exclude the genre instead.
       parameters: [{ $ref: "#/components/parameters/id" }]
       responses:
         "204": { description: Deleted }
         "403": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
   /api/stations/{id}/queue:
     get:
       operationId: getQueue
@@ -645,7 +656,7 @@ paths:
     get:
       operationId: listStationSuggestions
       tags: [admin]
-      summary: Stations OwnWave proposes from the synced playlists
+      summary: Custom stations OwnWave proposes, one playlist at a time
       responses:
         "200":
           description: Suggestions, largest first
@@ -670,11 +681,69 @@ paths:
               type: object
               required: [playlist_ids]
               properties:
-                playlist_ids: { type: array, items: { type: string } }
+                playlist_ids: { type: array, items: { type: string }, minItems: 1, maxItems: 1 }
                 genre: { type: string, description: "'' = the all-genres suggestion" }
       responses:
         "204": { description: Dismissed }
         "400": { $ref: "#/components/responses/Error" }
+  /api/admin/genre-stations:
+    get:
+      operationId: getGenreStations
+      tags: [admin]
+      summary: Every station genre with its track count and genre station
+      responses:
+        "200": { $ref: "#/components/responses/GenreStationSettings" }
+    put:
+      operationId: setGenreStations
+      tags: [admin]
+      summary: Switch genre stations on or off (off hides them, deletes nothing)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, required: [enabled], properties: { enabled: { type: boolean } } }
+      responses:
+        "200": { $ref: "#/components/responses/GenreStationSettings" }
+        "400": { $ref: "#/components/responses/Error" }
+  /api/admin/genre-stations/{genre}:
+    put:
+      operationId: updateGenreStation
+      tags: [admin]
+      summary: Rename a genre's station or exclude the genre
+      parameters:
+        - { name: genre, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name: { type: string, maxLength: 100, description: "Kept by every refresh; '' = the genre's name again" }
+                excluded: { type: boolean, description: "true hides the station and keeps it hidden" }
+      responses:
+        "200": { $ref: "#/components/responses/GenreStationSettings" }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+  /api/admin/pipeline:
+    get:
+      operationId: getPipeline
+      tags: [admin]
+      summary: Last scan, last genre scoring and recent station refreshes
+      responses:
+        "200":
+          description: Pipeline status
+          content: { application/json: { schema: { $ref: "#/components/schemas/PipelineStatus" } } }
+  /api/admin/pipeline/refresh:
+    post:
+      operationId: refreshPipeline
+      tags: [admin]
+      summary: Match playlist tracks and refresh the genre stations now
+      responses:
+        "200":
+          description: The run
+          content: { application/json: { schema: { $ref: "#/components/schemas/PipelineRun" } } }
   /api/admin/rebuild-analysis:
     post:
       operationId: rebuildAnalysis
@@ -820,6 +889,9 @@ components:
     Station:
       description: Station
       content: { application/json: { schema: { $ref: "#/components/schemas/Station" } } }
+    GenreStationSettings:
+      description: Genre stations
+      content: { application/json: { schema: { $ref: "#/components/schemas/GenreStationSettings" } } }
 
   schemas:
     Quality:
@@ -912,12 +984,17 @@ components:
       properties: { id: { type: string }, name: { type: string } }
     Station:
       type: object
-      required: [id, name, shared, playlist_ids, genres, track_count, updated_at]
+      required: [id, name, shared, kind, all_playlists, playlist_ids, genres, track_count, updated_at]
       properties:
         id: { type: string }
         name: { type: string }
         shared: { type: boolean, description: "Played by everyone, changed by admins only" }
-        playlist_ids: { type: array, items: { type: string } }
+        kind:
+          type: string
+          enum: [custom, genre]
+          description: "genre = made and kept up to date by OwnWave, one per station genre; custom = made by hand"
+        all_playlists: { type: boolean, description: "Plays every playlist, including ones added later" }
+        playlist_ids: { type: array, items: { type: string }, description: "For all_playlists stations, every playlist now" }
         genres: { type: array, items: { type: string }, description: "Station genre ids; empty = every genre" }
         track_count: { type: integer, description: Tracks it plays for this user (bans excluded) }
         updated_at: { type: string, format: date-time }
@@ -925,7 +1002,8 @@ components:
       type: object
       properties:
         name: { type: string, maxLength: 100 }
-        playlist_ids: { type: array, items: { type: string }, minItems: 1 }
+        all_playlists: { type: boolean, description: "Every playlist, including ones added later; playlist_ids is then ignored" }
+        playlist_ids: { type: array, items: { type: string }, description: "At least one unless all_playlists" }
         genres: { type: array, items: { type: string } }
     PoolGenres:
       type: object
@@ -948,6 +1026,66 @@ components:
         genre_name: { type: string }
         track_count: { type: integer }
         name: { type: string, description: Suggested station name }
+    GenreStation:
+      type: object
+      required: [genre, genre_name, name, name_is_custom, tracks, state]
+      properties:
+        genre: { type: string }
+        genre_name: { type: string }
+        station_id: { type: string, description: "Empty until the genre first reaches the threshold" }
+        name: { type: string }
+        name_is_custom: { type: boolean }
+        tracks: { type: integer, description: Matched tracks of this genre across every playlist }
+        state:
+          type: string
+          enum: [active, below_threshold, excluded, "off"]
+    GenreStationSettings:
+      type: object
+      required: [enabled, show_at, hide_below, genres]
+      properties:
+        enabled: { type: boolean }
+        show_at: { type: integer, description: A hidden station is shown from this many tracks }
+        hide_below: { type: integer, description: A shown station is hidden below this many tracks }
+        genres: { type: array, items: { $ref: "#/components/schemas/GenreStation" } }
+    StationChange:
+      type: object
+      required: [genre, name, change]
+      properties:
+        genre: { type: string }
+        name: { type: string }
+        change: { type: string, enum: [created, shown, hidden, renamed] }
+    PipelineRun:
+      type: object
+      required: [id, trigger, started_at, changes]
+      properties:
+        id: { type: integer }
+        trigger: { type: string, description: "What started it: startup, hourly, scan_finished, genres_scored, playlist_added, admin, ..." }
+        started_at: { type: string, format: date-time }
+        finished_at: { type: string, format: date-time }
+        matched: { type: integer, description: Playlist tracks newly matched to a local file; absent when matching did not run }
+        changes: { type: array, items: { $ref: "#/components/schemas/StationChange" } }
+        error: { type: string }
+    PipelineStatus:
+      type: object
+      required: [last_scan, genres_scored, runs]
+      properties:
+        last_scan:
+          type: ["object", "null"]
+          required: [id, status, created_at]
+          properties:
+            id: { type: string }
+            status: { type: string }
+            created_at: { type: string, format: date-time }
+            finished_at: { type: string, format: date-time }
+            error: { type: string }
+        genres_scored:
+          type: ["object", "null"]
+          required: [at, tracks, scored]
+          properties:
+            at: { type: string, format: date-time }
+            tracks: { type: integer }
+            scored: { type: integer }
+        runs: { type: array, items: { $ref: "#/components/schemas/PipelineRun" }, description: Newest first; runs that changed nothing are kept only when newest }
     BrowseItem:
       type: object
       required: [id, title, browsable, playable]

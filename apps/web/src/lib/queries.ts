@@ -4,6 +4,7 @@ import type {
   AdminHealth,
   Feedback,
   GenreReport,
+  GenreStationSettings,
   QueueTrack,
   ScanStatus,
   ScanSummary,
@@ -20,7 +21,7 @@ export const keys = {
   stations: ['stations'] as const,
   station: (id: string) => ['stations', id] as const,
   queue: (id: string) => ['queue', id] as const,
-  poolGenres: (ids: string[]) => ['poolGenres', [...ids].sort().join(',')] as const,
+  poolGenres: (ids: string[] | 'all') => ['poolGenres', ids === 'all' ? 'all' : [...ids].sort().join(',')] as const,
   suggestions: ['suggestions'] as const,
   browse: (node: string) => ['browse', node] as const,
   playlists: ['playlists'] as const,
@@ -37,6 +38,8 @@ export const keys = {
   health: ['health'] as const,
   genreReport: ['genreReport'] as const,
   users: ['users'] as const,
+  genreStations: ['genreStations'] as const,
+  pipeline: ['pipeline'] as const,
 };
 
 // --- stations -----------------------------------------------------------
@@ -63,11 +66,17 @@ export const useQueue = (id: string | null) =>
 export const fetchQueue = (id: string): Promise<QueueTrack[]> =>
   call(api.GET('/api/stations/{id}/queue', { params: { path: { id } } })).then((r) => r.queue);
 
-export const usePoolGenres = (playlistIds: string[]) =>
+/** Genre counts of the picked playlists, or of every playlist ('all'). */
+export const usePoolGenres = (playlistIds: string[] | 'all') =>
   useQuery({
     queryKey: keys.poolGenres(playlistIds),
-    queryFn: () => call(api.GET('/api/stations/genres', { params: { query: { playlist_ids: playlistIds.join(',') } } })),
-    enabled: playlistIds.length > 0,
+    queryFn: () =>
+      call(
+        api.GET('/api/stations/genres', {
+          params: { query: playlistIds === 'all' ? { all_playlists: true } : { playlist_ids: playlistIds.join(',') } },
+        }),
+      ),
+    enabled: playlistIds === 'all' || playlistIds.length > 0,
     placeholderData: keepPreviousData,
   });
 
@@ -84,6 +93,7 @@ function useInvalidateStations() {
     void qc.invalidateQueries({ queryKey: keys.stations });
     void qc.invalidateQueries({ queryKey: keys.suggestions });
     void qc.invalidateQueries({ queryKey: ['browse'] });
+    void qc.invalidateQueries({ queryKey: keys.genreStations });
   };
 }
 
@@ -138,7 +148,12 @@ export function usePlaylistActions() {
   const qc = useQueryClient();
   const invalidate = () => {
     void qc.invalidateQueries({ queryKey: keys.playlists });
+    // A playlist change refreshes the genre stations on the server.
     void qc.invalidateQueries({ queryKey: keys.suggestions });
+    void qc.invalidateQueries({ queryKey: keys.stations });
+    void qc.invalidateQueries({ queryKey: ['browse'] });
+    void qc.invalidateQueries({ queryKey: keys.genreStations });
+    void qc.invalidateQueries({ queryKey: keys.pipeline });
   };
   return {
     add: useMutation({ mutationFn: (url: string) => call(api.POST('/api/admin/playlists', { body: { url } })), onSuccess: invalidate }),
@@ -273,3 +288,56 @@ export const useGenreReport = (enabled: boolean) =>
 
 export const useUsers = () =>
   useQuery({ queryKey: keys.users, queryFn: () => call(api.GET('/api/admin/users')).then((r) => r.users ?? []) });
+
+// --- genre stations and the pipeline (admin) ----------------------------
+
+export const useGenreStations = () =>
+  useQuery({ queryKey: keys.genreStations, queryFn: () => call(api.GET('/api/admin/genre-stations')) });
+
+/** After a settings change the server refreshes: stations may appear or go. */
+function useGenreStationsSaved() {
+  const qc = useQueryClient();
+  return (settings: GenreStationSettings) => {
+    qc.setQueryData(keys.genreStations, settings);
+    void qc.invalidateQueries({ queryKey: keys.stations });
+    void qc.invalidateQueries({ queryKey: keys.suggestions });
+    void qc.invalidateQueries({ queryKey: ['browse'] });
+    void qc.invalidateQueries({ queryKey: keys.pipeline });
+  };
+}
+
+export function useSetGenreStations() {
+  const onSuccess = useGenreStationsSaved();
+  return useMutation({
+    mutationFn: (enabled: boolean) => call(api.PUT('/api/admin/genre-stations', { body: { enabled } })),
+    onSuccess,
+  });
+}
+
+export function useUpdateGenreStation() {
+  const onSuccess = useGenreStationsSaved();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ genre, ...body }: { genre: string; name?: string; excluded?: boolean }) =>
+      call(api.PUT('/api/admin/genre-stations/{genre}', { params: { path: { genre } }, body })),
+    onSuccess: (settings, { genre }) => {
+      onSuccess(settings);
+      const id = settings.genres.find((g) => g.genre === genre)?.station_id;
+      if (id) void qc.invalidateQueries({ queryKey: keys.station(id) });
+    },
+  });
+}
+
+export const usePipeline = () =>
+  useQuery({ queryKey: keys.pipeline, queryFn: () => call(api.GET('/api/admin/pipeline')), refetchInterval: 30_000 });
+
+export function useRefreshPipeline() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => call(api.POST('/api/admin/pipeline/refresh')),
+    onSuccess: () => {
+      for (const key of [keys.pipeline, keys.genreStations, keys.stations, keys.suggestions, keys.playlists, ['browse']])
+        void qc.invalidateQueries({ queryKey: key });
+    },
+  });
+}

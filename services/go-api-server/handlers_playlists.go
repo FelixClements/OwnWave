@@ -3,9 +3,11 @@ package main
 import (
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
 	"strings"
 
+	"ownwave/api/internal/pipeline"
 	"ownwave/api/internal/playlists"
 	"ownwave/api/internal/spotify"
 )
@@ -84,6 +86,7 @@ func (h *Handler) AddPlaylist(w http.ResponseWriter, r *http.Request) {
 		writePlaylistError(w, r, "add playlist", err)
 		return
 	}
+	h.refreshStations(r, pipeline.TriggerAdded)
 	writeJSON(w, http.StatusOK, p)
 }
 
@@ -97,6 +100,7 @@ func (h *Handler) SyncPlaylist(w http.ResponseWriter, r *http.Request) {
 		writePlaylistError(w, r, "sync playlist", err)
 		return
 	}
+	h.refreshStations(r, pipeline.TriggerSynced)
 	writeJSON(w, http.StatusOK, p)
 }
 
@@ -114,7 +118,17 @@ func (h *Handler) DeletePlaylist(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "playlist is used by stations: "+strings.Join(usedBy, ", "), http.StatusConflict)
 		return
 	}
+	h.refreshStations(r, pipeline.TriggerDeleted)
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// refreshStations brings the genre stations in line after a playlist
+// change. The change itself already matched its tracks and is done, so a
+// failed refresh is only logged (the hourly pass retries it).
+func (h *Handler) refreshStations(r *http.Request, trigger string) {
+	if _, err := h.pipeline.Run(r.Context(), trigger, false); err != nil {
+		slog.Error("station refresh failed", "trigger", trigger, "error", err)
+	}
 }
 
 // writePlaylistError maps bad input to 400, unknown playlists to 404 and

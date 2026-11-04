@@ -19,6 +19,8 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/joho/godotenv"
 	"github.com/rs/cors"
+
+	"ownwave/api/internal/pipeline"
 )
 
 func waitForDB(ctx context.Context, dsn string) (*pgxpool.Pool, error) {
@@ -138,6 +140,8 @@ func main() {
 	// page only shows the current tracks, so sync daily to catch them all.
 	// Checking hourly picks up stale playlists soon after a restart and
 	// matches files added by a library scan within the hour.
+	// The hourly pass also refreshes the genre stations, which catches up
+	// on anything a missed pipeline notice left behind.
 	go func() {
 		ticker := time.NewTicker(1 * time.Hour)
 		defer ticker.Stop()
@@ -145,8 +149,15 @@ func main() {
 			if err := h.playlists.SyncStale(context.Background(), 24*time.Hour); err != nil {
 				slog.Error("playlist sync", "error", err)
 			}
+			h.pipeline.Trigger(pipeline.TriggerHourly)
 		}
 	}()
+
+	// After a library scan or genre scoring the analytics worker sends a
+	// NOTIFY; matching and the genre stations follow right away.
+	pipelineCtx, stopPipeline := context.WithCancel(context.Background())
+	defer stopPipeline()
+	h.pipeline.Start(pipelineCtx, dsn)
 
 	r := newRouter(h, "web")
 
@@ -282,6 +293,11 @@ func newRouter(h *Handler, webDir string) http.Handler {
 			r.Get("/admin/health", h.AdminHealth)
 			r.Get("/admin/stations", h.AdminStations)
 			r.Get("/admin/station-suggestions", h.ListStationSuggestions)
+			r.Get("/admin/genre-stations", h.AdminGenreStations)
+			r.Put("/admin/genre-stations", h.AdminSetGenreStations)
+			r.Put("/admin/genre-stations/{genre}", h.AdminUpdateGenreStation)
+			r.Get("/admin/pipeline", h.AdminPipeline)
+			r.Post("/admin/pipeline/refresh", h.AdminRefreshPipeline)
 			r.Post("/admin/station-suggestions/dismiss", h.DismissStationSuggestion)
 			r.Post("/admin/rebuild-analysis", h.AdminRebuildAnalysis)
 			r.Post("/admin/rebuild-genres", h.AdminRebuildGenres)

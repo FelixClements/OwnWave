@@ -5,7 +5,7 @@ Status: proposal, 2026-11-03. Decisions taken with the owner:
 - Keep the backend core: Go API, Postgres, streaming/transcoding, auth/invites, Spotify embed scraper, playlist matcher.
 - Rewrite the genre engine and stations. Build a new web UI. Add a native Android app.
 - Android: Kotlin + Jetpack Compose + Media3 (`MediaLibraryService`) for Android Auto.
-- Genre stations: OwnWave auto-suggests them, the user accepts, renames or drops.
+- Genre stations: OwnWave creates and maintains one shared station per main station genre from all playlists (see [ADR 0001](../adr/0001-auto-genre-stations.md)); suggestions remain for single playlists.
 - Android plays by streaming only (no offline downloads for now).
 
 ## Findings that drive this plan (live data, 2026-11-03)
@@ -42,9 +42,11 @@ The Next.js static export is replaced by Vite because the UI is a pure client-si
 - **Playlist item**: one Spotify track seen in a playlist, with first/last seen dates.
 - **Match**: the local library track for a Spotify track, or none. Unmatched items form the playlist's **missing list**.
 - **Station genre**: one of about 20 broad genres used for stations (see taxonomy below). Not the same as a Discogs label or a file tag.
-- **Pool**: the set of playlists a station draws from.
-- **Station**: a pool plus an optional station-genre filter. It plays the matched local tracks in the pool, filtered by genre.
-- **Suggestion**: a station OwnWave proposes after a sync: one per station genre with enough tracks in a pool.
+- **Pool**: the set of playlists a station draws from: picked playlists, or **all playlists** (every playlist, including ones added later; resolved when the station plays, never stored as a list).
+- **Station**: a pool plus an optional station-genre filter. It plays the matched local tracks in the pool, filtered by genre. A station is either a **custom station** (made by a user or admin) or a **genre station**.
+- **Genre station**: the shared station OwnWave keeps for one station genre: all playlists, that one genre. Created and shown once the genre has 25 matched tracks, hidden (never deleted) below 20. Admins can rename it, hide it for good, or turn genre stations off. See [ADR 0001](../adr/0001-auto-genre-stations.md).
+- **Suggestion**: a station OwnWave proposes for a single playlist: the whole playlist, or one station genre with enough tracks in it.
+- **Station refresh**: one pass of the pipeline that matches playlist tracks to local files and brings the genre stations in line with the library. Logged as a **refresh run**.
 
 ## Phase 1: genre engine
 
@@ -74,6 +76,7 @@ Status: implemented on branch `phase2/stations` (migration 019), stacked on Phas
 4. Pools: a station's pool is 1..n playlists. "Combine playlists into a station" = create a station whose pool has several playlists.
 5. Genre split: after a sync or analysis, compute matched tracks per station genre per pool. Suggest a station when a genre has at least 25 tracks (configurable). The suggestion list shows track counts and sample covers; accepting creates a normal station.
 6. Within a station: shuffle with recently played tracks last (as today), with no repeat of the same artist within 3 tracks. Likes and bans are respected.
+7. Genre stations (migration 022, [ADR 0001](../adr/0001-auto-genre-stations.md)): one shared station per station genre over all playlists, kept up to date by the station refresh. The worker sends a Postgres NOTIFY on `ownwave_pipeline` after a scan and after genre scoring; the API matches pending playlist tracks and refreshes right away, and also at startup, on reconnect, hourly and after playlist changes. Suggestions now cover single playlists only. Migration 022 deletes every station and suggestion dismissal; listening history and feedback stay.
 
 ## Phase 3: API for clients
 
