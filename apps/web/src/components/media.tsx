@@ -2,7 +2,7 @@ import { useEffect, useState, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import clsx from 'clsx';
 import { Ban, Heart } from 'lucide-react';
-import type { QueueTrack, Station } from '@/api/types';
+import type { Playlist, QueueTrack, Station } from '@/api/types';
 import { FALLBACK, imageColor, nameColor, rgb, type Rgb } from '@/lib/color';
 import { formatDuration, plural } from '@/lib/format';
 import { useGenreNames } from '@/lib/queries';
@@ -10,6 +10,10 @@ import { coverUrl, usePlayer } from '@/player/PlayerProvider';
 import { Art, Equalizer, IconButton, PlayButton } from './ui';
 
 export const stationCover = (id: string) => `/api/stations/${encodeURIComponent(id)}/cover`;
+
+/** The playlist's Spotify cover, once a sync has downloaded it. */
+export const playlistCover = (p: Pick<Playlist, 'id' | 'has_cover'>) =>
+  p.has_cover ? `/api/playlists/${encodeURIComponent(p.id)}/cover` : undefined;
 
 /** "Techno, House" or "All genres". */
 export function useStationGenreLabel() {

@@ -4,11 +4,10 @@ import clsx from 'clsx';
 import { ExternalLink, Radio, RefreshCw, Trash2 } from 'lucide-react';
 import type { PlaylistItem } from '@/api/types';
 import { useAuth } from '@/lib/auth';
-import { nameColor } from '@/lib/color';
 import { formatDuration, plural, timeAgo } from '@/lib/format';
 import { usePlaylist, usePlaylistActions } from '@/lib/queries';
 import { coverUrl } from '@/player/PlayerProvider';
-import { HeroBody, HeroHeader } from '@/components/media';
+import { HeroBody, HeroHeader, playlistCover, useArtColor } from '@/components/media';
 import { StationEditor } from '@/components/StationEditor';
 import { Art, Button, Empty, ErrorText, IconButton, Spinner, Tabs } from '@/components/ui';
 import { matchPct } from './Playlists';
@@ -58,6 +57,8 @@ export function PlaylistPage() {
   const [tab, setTab] = useState<'matched' | 'missing'>('matched');
   const all = usePlaylist(id);
   const { sync, remove } = usePlaylistActions();
+  const loaded = all.data?.playlist;
+  const color = useArtColor(loaded && playlistCover(loaded), loaded?.name ?? id);
   const navigate = useNavigate();
   const [creating, setCreating] = useState(false);
 
@@ -65,13 +66,12 @@ export function PlaylistPage() {
   if (!all.data) return <Empty title="Playlist not found" />;
   const p = all.data.playlist;
   const items = all.data.items.filter((i) => (tab === 'matched' ? !!i.track_id : !i.track_id));
-  const color = nameColor(p.name);
 
   return (
     <>
       <HeroHeader
         color={color}
-        art={<Art name={p.name} className="aspect-square w-full" />}
+        art={<Art src={playlistCover(p)} name={p.name} className="aspect-square w-full" />}
         kind="Spotify playlist"
         title={p.name}
         meta={

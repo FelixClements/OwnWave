@@ -9,6 +9,9 @@ import { HeroBody, HeroHeader, TrackList, stationCover, useArtColor, useStationG
 import { StationEditor } from '@/components/StationEditor';
 import { Art, Empty, ErrorText, IconButton, PlayButton, Spinner } from '@/components/ui';
 
+/** The station page lists this many of the queue, not the whole pool. */
+const PREVIEW_TRACKS = 100;
+
 export function StationPage() {
   const { id = '' } = useParams();
   const { user } = useAuth();
@@ -29,6 +32,7 @@ export function StationPage() {
   const canChange = !s.shared || !!user?.is_admin;
   const names = s.playlist_ids.map((pid) => playlists.find((p) => p.id === pid)).filter(Boolean);
   const tracks = active ? [...(player.track ? [player.track] : []), ...player.upcoming] : (preview.data ?? []);
+  const shown = Math.min(tracks.length, PREVIEW_TRACKS);
 
   return (
     <>
@@ -88,12 +92,20 @@ export function StationPage() {
           )}
         </div>
         <ErrorText error={del.error ?? (active ? player.error : null)} />
-        <h2 className="mb-2 mt-2 text-sm font-semibold text-muted">{active ? 'Now playing and up next' : 'Coming up when you press play (shuffled each time)'}</h2>
+        <h2 className="mb-2 mt-2 text-sm font-semibold text-muted">
+          {active ? 'Now playing and up next' : 'Coming up when you press play (shuffled each time)'}
+          {shown > 0 && shown < s.track_count && (
+            <span className="font-normal">
+              {' '}
+              · showing {shown} of {plural(s.track_count, 'track')}
+            </span>
+          )}
+        </h2>
         {preview.isLoading && !active ? (
           <Spinner />
         ) : (
           <TrackList
-            tracks={tracks.slice(0, 100)}
+            tracks={tracks.slice(0, PREVIEW_TRACKS)}
             empty={<Empty title="No tracks yet">None of this station's playlist tracks are in your library with these genres. Rescan, or widen the genres.</Empty>}
           />
         )}

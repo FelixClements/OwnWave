@@ -18,9 +18,10 @@ import (
 // ErrNotFound is returned for an unknown playlist id.
 var ErrNotFound = errors.New("playlist not found")
 
-// Fetcher loads a playlist's current tracks from Spotify.
+// Fetcher loads a playlist's current tracks and its cover from Spotify.
 type Fetcher interface {
 	FetchPlaylist(ctx context.Context, spotifyID string) (spotify.Playlist, error)
+	FetchImage(ctx context.Context, url string) (body []byte, mediaType string, err error)
 }
 
 type Service struct {
@@ -40,6 +41,8 @@ type Playlist struct {
 	MatchedCount  int        `json:"matched_count"`
 	LastSyncedAt  *time.Time `json:"last_synced_at,omitempty"`
 	LastSyncError *string    `json:"last_sync_error,omitempty"`
+	// HasCover is true once the playlist's Spotify cover is downloaded.
+	HasCover bool `json:"has_cover"`
 }
 
 type Item struct {
@@ -61,11 +64,11 @@ const playlistColumns = `
 	(SELECT COUNT(*) FROM playlist_items pi
 	 JOIN spotify_track_matches m ON m.spotify_track_id = pi.spotify_track_id
 	 WHERE pi.playlist_id = p.id AND m.track_id IS NOT NULL),
-	p.last_synced_at, p.last_sync_error`
+	p.last_synced_at, p.last_sync_error, p.cover_image IS NOT NULL`
 
 func scanPlaylist(row pgx.Row) (Playlist, error) {
 	var p Playlist
-	err := row.Scan(&p.ID, &p.SpotifyID, &p.Name, &p.TrackCount, &p.MatchedCount, &p.LastSyncedAt, &p.LastSyncError)
+	err := row.Scan(&p.ID, &p.SpotifyID, &p.Name, &p.TrackCount, &p.MatchedCount, &p.LastSyncedAt, &p.LastSyncError, &p.HasCover)
 	return p, err
 }
 
@@ -229,7 +232,55 @@ func (s *Service) store(ctx context.Context, id string, p spotify.Playlist) erro
 	if err := tx.SendBatch(ctx, batch).Close(); err != nil {
 		return err
 	}
-	return tx.Commit(ctx)
+	if err := tx.Commit(ctx); err != nil {
+		return err
+	}
+	return s.refreshCover(ctx, id, p.CoverURL)
+}
+
+// refreshCover downloads the playlist's cover when Spotify lists one the
+// playlist does not have yet. A failed download keeps the old cover (and
+// is retried next sync): the tracks matter, the cover does not.
+func (s *Service) refreshCover(ctx context.Context, id, coverURL string) error {
+	if coverURL == "" {
+		return nil
+	}
+	var current *string
+	var has bool
+	if err := s.pool.QueryRow(ctx, `SELECT cover_url, cover_image IS NOT NULL FROM playlists WHERE id = $1::uuid`, id).
+		Scan(&current, &has); err != nil {
+		return err
+	}
+	if has && current != nil && *current == coverURL {
+		return nil
+	}
+	img, mediaType, err := s.spotify.FetchImage(ctx, coverURL)
+	if err != nil {
+		slog.Warn("playlist cover download failed", "playlist_id", id, "error", err)
+		return nil
+	}
+	_, err = s.pool.Exec(ctx, `
+		UPDATE playlists SET cover_url = $2, cover_image = $3, cover_type = $4 WHERE id = $1::uuid
+	`, id, coverURL, img, mediaType)
+	return err
+}
+
+// Cover returns the playlist's downloaded cover and its media type, or a
+// nil image when it has none.
+func (s *Service) Cover(ctx context.Context, id string) (img []byte, mediaType string, err error) {
+	var kind *string
+	err = s.pool.QueryRow(ctx, `SELECT cover_image, cover_type FROM playlists WHERE id = $1::uuid`, id).Scan(&img, &kind)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, "", ErrNotFound
+	}
+	if err != nil || len(img) == 0 {
+		return nil, "", err
+	}
+	mediaType = "image/jpeg"
+	if kind != nil && *kind != "" {
+		mediaType = *kind
+	}
+	return img, mediaType, nil
 }
 
 // MatchPending tries to match every playlist track without a local file,

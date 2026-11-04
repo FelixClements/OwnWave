@@ -82,3 +82,76 @@ func TestFetchPlaylist(t *testing.T) {
 	var fetchErr *FetchError
 	require.ErrorAs(t, err, &fetchErr)
 }
+
+func TestParseCoverArt(t *testing.T) {
+	page := `<script id="__NEXT_DATA__" type="application/json">{"props":{"pageProps":{"state":{"data":{"entity":{
+		"type":"playlist","id":"x","name":"Mix",
+		"coverArt":{"sources":[
+			{"url":"https://evil.example.com/big.jpg","width":2000},
+			{"url":"https://i.scdn.co/image/small","width":60},
+			{"url":"https://mosaic.scdn.co/640/abc","width":640}
+		]},
+		"trackList":[{"uri":"spotify:track:1","title":"Song","subtitle":"Band"}]}}}}}}</script>`
+	p, err := Parse([]byte(page))
+	require.NoError(t, err)
+	require.Equal(t, "https://mosaic.scdn.co/640/abc", p.CoverURL, "largest source on a Spotify image host")
+
+	page = `<script id="__NEXT_DATA__" type="application/json">{"props":{"pageProps":{"state":{"data":{"entity":{
+		"type":"playlist","id":"x","name":"Mix","coverArt":{"sources":[{"url":"https://i.scdn.co/image/abc","width":null}]},
+		"trackList":[{"uri":"spotify:track:1","title":"Song","subtitle":"Band"}]}}}}}}</script>`
+	p, err = Parse([]byte(page))
+	require.NoError(t, err)
+	require.Equal(t, "https://i.scdn.co/image/abc", p.CoverURL, "width may be null")
+
+	p, err = Parse(mustRead(t, "testdata/embed.html"))
+	require.NoError(t, err)
+	require.Empty(t, p.CoverURL, "no coverArt, no cover")
+}
+
+func TestIsImageURL(t *testing.T) {
+	for _, u := range []string{"https://i.scdn.co/image/ab67", "https://mosaic.scdn.co/640/ab", "https://image-cdn-ak.spotifycdn.com/image/ab"} {
+		require.True(t, IsImageURL(u), u)
+	}
+	for _, u := range []string{
+		"", "http://i.scdn.co/image/ab", "https://scdn.co.evil.com/x", "https://i.scdn.co:8443/x",
+		"https://user@i.scdn.co/x", "https://example.com/i.scdn.co", "file:///etc/passwd",
+	} {
+		require.False(t, IsImageURL(u), u)
+	}
+}
+
+func TestFetchImage(t *testing.T) {
+	jpeg := append([]byte{0xFF, 0xD8, 0xFF, 0xE0}, make([]byte, 64)...)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/cover.jpg":
+			_, _ = w.Write(jpeg)
+		case "/page.html":
+			_, _ = w.Write([]byte("<html>not an image</html>"))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+	c := Client{HTTP: srv.Client(), imageURLOK: func(string) bool { return true }}
+
+	body, kind, err := c.FetchImage(context.Background(), srv.URL+"/cover.jpg")
+	require.NoError(t, err)
+	require.Equal(t, "image/jpeg", kind)
+	require.Equal(t, jpeg, body)
+
+	_, _, err = c.FetchImage(context.Background(), srv.URL+"/page.html")
+	require.ErrorContains(t, err, "not an image")
+	_, _, err = c.FetchImage(context.Background(), srv.URL+"/missing")
+	require.ErrorContains(t, err, "404")
+
+	_, _, err = Client{HTTP: srv.Client()}.FetchImage(context.Background(), srv.URL+"/cover.jpg")
+	require.ErrorContains(t, err, "not a Spotify image URL")
+}
+
+func mustRead(t *testing.T, path string) []byte {
+	t.Helper()
+	b, err := os.ReadFile(path)
+	require.NoError(t, err)
+	return b
+}

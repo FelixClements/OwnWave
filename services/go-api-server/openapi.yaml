@@ -563,6 +563,22 @@ paths:
                   playlist: { $ref: "#/components/schemas/Playlist" }
                   items: { type: array, items: { $ref: "#/components/schemas/PlaylistItem" } }
         "404": { $ref: "#/components/responses/Error" }
+  /api/playlists/{id}/cover:
+    get:
+      operationId: getPlaylistCover
+      tags: [playlists]
+      summary: The playlist's Spotify cover, downloaded at sync
+      description: 204 while the playlist has no cover (not synced since covers were added, or Spotify lists none); 404 only for an unknown playlist.
+      parameters: [{ $ref: "#/components/parameters/id" }]
+      responses:
+        "200":
+          description: Image as Spotify serves it
+          content:
+            image/jpeg: { schema: { type: string, format: binary } }
+            image/png: { schema: { type: string, format: binary } }
+            image/webp: { schema: { type: string, format: binary } }
+        "204": { $ref: "#/components/responses/NoCover" }
+        "404": { $ref: "#/components/responses/Error" }
 
   # --- genres -------------------------------------------------------------
   /api/genres:
@@ -959,7 +975,7 @@ components:
           properties: { reason: { type: string, enum: [station, genre, playlist, artist] } }
     Playlist:
       type: object
-      required: [id, spotify_id, name, track_count, matched_count]
+      required: [id, spotify_id, name, track_count, matched_count, has_cover]
       properties:
         id: { type: string }
         spotify_id: { type: string }
@@ -968,6 +984,7 @@ components:
         matched_count: { type: integer, description: "Of those, found in the library" }
         last_synced_at: { type: string, format: date-time }
         last_sync_error: { type: string }
+        has_cover: { type: boolean, description: "Its Spotify cover is downloaded: GET /api/playlists/{id}/cover" }
     PlaylistItem:
       type: object
       required: [spotify_track_id, title, artists, first_seen_at, last_seen_at]
