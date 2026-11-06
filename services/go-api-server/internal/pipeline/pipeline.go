@@ -1,7 +1,8 @@
 // Package pipeline keeps stations up to date with the library. After a
 // library scan or genre scoring (the analytics worker says so with a
 // Postgres NOTIFY), after playlist changes, at startup and every hour, it
-// matches playlist tracks to local files and refreshes the genre stations.
+// groups copies of a song, matches playlist tracks to local files, rebuilds
+// playlist picks and refreshes the genre stations.
 //
 // NOTIFY only wakes the runner: the state it acts on is all in the
 // database, so a missed notice is caught up by the next run.
@@ -57,9 +58,15 @@ type Run struct {
 	Error   *string           `json:"error,omitempty"`
 }
 
-// Matcher matches playlist tracks without a local file.
-type Matcher interface {
+// Library does the steps that work on playlists and library files.
+type Library interface {
+	// GroupCopies records which files are copies of one song.
+	GroupCopies(ctx context.Context) (int, error)
+	// MatchPending matches playlist tracks without a local file.
 	MatchPending(ctx context.Context) (int, error)
+	// RebuildPicks refreshes the library picks of playlists that changed;
+	// with followLibrary also after the library changed.
+	RebuildPicks(ctx context.Context, followLibrary bool) (int, error)
 }
 
 // Refresher brings the genre stations in line with the library.
@@ -69,26 +76,33 @@ type Refresher interface {
 
 type Runner struct {
 	pool    *pgxpool.Pool
-	matcher Matcher
+	library Library
 	refresh Refresher
 	kick    chan string
 }
 
-func New(pool *pgxpool.Pool, matcher *playlists.Service, refresh *stations.Service) *Runner {
-	return &Runner{pool: pool, matcher: matcher, refresh: refresh, kick: make(chan string, 1)}
+func New(pool *pgxpool.Pool, library *playlists.Service, refresh *stations.Service) *Runner {
+	return &Runner{pool: pool, library: library, refresh: refresh, kick: make(chan string, 1)}
 }
 
-// Run matches pending playlist tracks (when match is set), refreshes the
-// genre stations and logs the run. Concurrent runs are serialised by the
-// refresh's advisory lock.
+// Run groups copies and matches pending playlist tracks (when match is
+// set, as the background runs do; requests stay quick without), rebuilds the
+// picks of playlists that changed, refreshes the genre stations and logs the
+// run. Concurrent runs are serialised by each step's
+// advisory lock.
 func (r *Runner) Run(ctx context.Context, trigger string, match bool) (Run, error) {
 	run := Run{Trigger: trigger, StartedAt: time.Now(), Changes: []stations.Change{}}
 	var err error
 	if match {
 		var n int
-		if n, err = r.matcher.MatchPending(ctx); err == nil {
-			run.Matched = &n
+		if _, err = r.library.GroupCopies(ctx); err == nil {
+			if n, err = r.library.MatchPending(ctx); err == nil {
+				run.Matched = &n
+			}
 		}
+	}
+	if err == nil {
+		_, err = r.library.RebuildPicks(ctx, match)
 	}
 	if err == nil {
 		run.Changes, err = r.refresh.Refresh(ctx)

@@ -15,6 +15,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/stretchr/testify/require"
 
+	"ownwave/api/internal/analytics"
 	"ownwave/api/internal/auth"
 	"ownwave/api/internal/pipeline"
 	"ownwave/api/internal/playlists"
@@ -117,9 +118,141 @@ func TestGenreStationsFollowTheLibrary(t *testing.T) {
 	require.Equal(t, []stations.Change{{Genre: "house", Name: "House", Change: stations.ChangeShown}}, f.refresh())
 	require.Equal(t, houseID, f.one(`SELECT id::text FROM stations WHERE auto_genre = 'house'`), "same station back")
 
-	// A deleted playlist is never held by a genre station; its tracks leave.
+	// A genre station plays the library: a deleted playlist's songs stay.
 	require.Equal(t, http.StatusNoContent, f.call(f.h.DeletePlaylist, admin, http.MethodDelete, "/p", techno, "").Code)
-	require.Equal(t, []string{"House/genre/25"}, f.visible(alice), "Techno fell to 5 tracks and is hidden")
+	f.refresh()
+	require.Equal(t, []string{"House/genre/25", "Techno/genre/35"}, f.visible(alice))
+}
+
+func TestGenreStationsPlayTheWholeLibraryByMainGenre(t *testing.T) {
+	f := newStationsFixture(t)
+	alice := f.user("alice", false)
+
+	// No playlist at all: 25 songs of a main genre are enough for a station.
+	song := func(title, artist, genre string, duration float64) string {
+		a := f.one(`INSERT INTO artists (name) VALUES ($1)
+			ON CONFLICT (name) DO UPDATE SET name = EXCLUDED.name RETURNING id::text`, artist)
+		id := f.one(`INSERT INTO tracks (path, title, artist_id, duration_seconds) VALUES ($1, $2, $3::uuid, $4) RETURNING id::text`,
+			"/m/"+artist+"/"+title+fmt.Sprint(duration), title, a, duration)
+		f.exec(`INSERT INTO track_station_genres (track_id, genre, score, is_primary) VALUES ($1::uuid, $2, 1, true)`, id, genre)
+		return id
+	}
+	for i := 0; i < 25; i++ {
+		song(fmt.Sprintf("Song %d", i), "Oxia", "techno", 200)
+	}
+	f.refresh()
+	require.Equal(t, []string{"Techno/genre/25"}, f.visible(alice))
+	stationID := f.one(`SELECT id::text FROM stations WHERE auto_genre = 'techno'`)
+
+	// A second genre does not put a song on that genre's station.
+	second := song("Crossover", "Oxia", "house", 200)
+	f.exec(`INSERT INTO track_station_genres (track_id, genre, score, is_primary) VALUES ($1::uuid, 'techno', 0.8, false)`, second)
+	f.refresh()
+	require.Equal(t, []string{"Techno/genre/25"}, f.visible(alice))
+
+	// Copies count as one song, whichever copy carries the main genre.
+	song("Domino", "Oxia", "techno", 300)
+	f.refresh()
+	require.Equal(t, []string{"Techno/genre/26"}, f.visible(alice))
+	copyID := song("Domino (2011 Remaster)", "Oxia", "techno", 301)
+	f.refresh()
+	require.Equal(t, []string{"Techno/genre/26"}, f.visible(alice))
+	require.Equal(t, "1", f.one(`SELECT COUNT(*)::text FROM tracks WHERE copy_of IS NOT NULL`))
+	require.Equal(t, "2", f.one(`SELECT COUNT(*)::text FROM tracks WHERE title LIKE 'Domino%'`), "both files stay")
+
+	// A hide of one copy keeps the whole song off.
+	rec := f.call(f.h.HideTrack, alice, http.MethodPost, "/h", stationID, `{"track_id":"`+copyID+`"}`)
+	require.Equal(t, http.StatusNoContent, rec.Code, rec.Body.String())
+	require.Equal(t, []string{"Techno/genre/25"}, f.visible(alice))
+	hidden := decode[struct {
+		Tracks []stations.HiddenTrack `json:"tracks"`
+	}](t, f.call(f.h.ListHiddenTracks, alice, http.MethodGet, "/h", stationID, ""))
+	require.Len(t, hidden.Tracks, 1)
+	require.Contains(t, hidden.Tracks[0].Title, "Domino")
+	// Another user still hears it.
+	require.Equal(t, []string{"Techno/genre/26"}, f.visible(f.user("bob", false)))
+
+	// It comes back through either copy.
+	unhide := httptest.NewRequest(http.MethodDelete, "/h", nil)
+	rctx := chi.NewRouteContext()
+	rctx.URLParams.Add("id", stationID)
+	rctx.URLParams.Add("trackId", copyID)
+	w := httptest.NewRecorder()
+	f.h.UnhideTrack(w, unhide.WithContext(context.WithValue(auth.WithUser(unhide.Context(), alice), chi.RouteCtxKey, rctx)))
+	require.Equal(t, http.StatusNoContent, w.Code, w.Body.String())
+	require.Equal(t, []string{"Techno/genre/26"}, f.visible(alice))
+
+	// Hiding an unknown song is refused, as is a bad id.
+	require.Equal(t, http.StatusNotFound, f.call(f.h.HideTrack, alice, http.MethodPost, "/h", stationID, `{"track_id":"`+stationID+`"}`).Code)
+	require.Equal(t, http.StatusBadRequest, f.call(f.h.HideTrack, alice, http.MethodPost, "/h", stationID, `{"track_id":"nope"}`).Code)
+}
+
+func TestGenreReviewAndCorrections(t *testing.T) {
+	f := newStationsFixture(t)
+	admin, alice := f.user("admin", true), f.user("alice", false)
+	f.playlist("list", 30, "techno")
+	f.refresh()
+	stationID := f.one(`SELECT id::text FROM stations WHERE auto_genre = 'techno'`)
+	hiddenTrack := f.one(`SELECT id::text FROM tracks ORDER BY path LIMIT 1`)
+	low := f.one(`SELECT id::text FROM tracks ORDER BY path LIMIT 1 OFFSET 1`)
+	f.exec(`UPDATE track_station_genres SET score = 0.2 WHERE track_id = $1::uuid`, low)
+	rec := f.call(f.h.HideTrack, alice, http.MethodPost, "/h", stationID, `{"track_id":"`+hiddenTrack+`"}`)
+	require.Equal(t, http.StatusNoContent, rec.Code, rec.Body.String())
+
+	review := func() []stations.GenreReviewItem {
+		rec := f.call(f.h.AdminGenreReview, admin, http.MethodGet, "/r", "", "")
+		require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+		return decode[struct {
+			Items []stations.GenreReviewItem `json:"items"`
+		}](t, rec).Items
+	}
+	items := review()
+	require.Len(t, items, 30)
+	require.Equal(t, hiddenTrack, items[0].TrackID, "most hidden first")
+	require.Equal(t, 1, items[0].HiddenBy)
+	require.Equal(t, low, items[1].TrackID, "then the lowest score")
+	require.Equal(t, http.StatusBadRequest, f.call(f.h.AdminGenreReview, admin, http.MethodGet, "/r?limit=999", "", "").Code)
+
+	// Bad requests save nothing.
+	save := func(body string) int {
+		return f.call(f.h.AdminSaveGenreCorrection, admin, http.MethodPost, "/c", "", body).Code
+	}
+	require.Equal(t, http.StatusBadRequest, save(`{"genre":"techno"}`))
+	require.Equal(t, http.StatusBadRequest, save(`{"track_id":"`+low+`","artist":"X","genre":"techno"}`))
+	require.Equal(t, http.StatusBadRequest, save(`{"track_id":"`+low+`","genre":"nope"}`))
+	require.Equal(t, http.StatusBadRequest, save(`{"track_id":"nope","genre":"techno"}`))
+	require.Equal(t, http.StatusBadRequest, save(`{"track_id":"`+stationID+`","genre":"techno"}`), "unknown track")
+	require.Equal(t, "0", f.one(`SELECT COUNT(*)::text FROM genre_corrections`))
+
+	// Saving stores the correction and queues scoring; saving again replaces it.
+	stub := analytics.NewStub()
+	f.h.analytics = stub
+	listed := func(rec *httptest.ResponseRecorder) []stations.GenreCorrection {
+		require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+		return decode[struct {
+			Corrections []stations.GenreCorrection `json:"corrections"`
+		}](t, rec).Corrections
+	}
+	song := `{"track_id":"` + low + `","genre":"house"}`
+	require.Equal(t, http.StatusOK, save(song))
+	got := listed(f.call(f.h.AdminSaveGenreCorrection, admin, http.MethodPost, "/c", "", `{"track_id":"`+low+`","genre":"techno"}`))
+	require.Len(t, got, 1)
+	require.Equal(t, "techno", got[0].Genre)
+	require.Equal(t, low, *got[0].TrackID)
+	require.Len(t, listed(f.call(f.h.AdminSaveGenreCorrection, admin, http.MethodPost, "/c", "", `{"artist":"Oxia","genre":"house"}`)), 2)
+	require.Len(t, listed(f.call(f.h.AdminSaveGenreCorrection, admin, http.MethodPost, "/c", "", `{"artist":"OXIA ","genre":"techno"}`)), 2, "artists ignore case")
+
+	// A song scored from a correction leaves the review list.
+	f.exec(`UPDATE track_station_genres SET corrected = TRUE WHERE track_id = $1::uuid`, low)
+	require.Len(t, review(), 29)
+
+	// When scoring cannot be queued the admin hears it; the change is saved.
+	stub.Errors["RebuildGenres"] = errors.New("worker down")
+	require.Equal(t, http.StatusInternalServerError, f.call(f.h.AdminSaveGenreCorrection, admin, http.MethodPost, "/c", "", song).Code)
+	require.Equal(t, "house", f.one(`SELECT genre FROM genre_corrections WHERE track_id = $1::uuid`, low))
+	delete(stub.Errors, "RebuildGenres")
+
+	require.Len(t, listed(f.call(f.h.AdminDeleteGenreCorrection, admin, http.MethodDelete, "/c", got[0].ID, "")), 1)
 }
 
 func TestAddingAPlaylistCreatesNoDuplicateStation(t *testing.T) {
@@ -151,9 +284,9 @@ func TestAddingAPlaylistCreatesNoDuplicateStation(t *testing.T) {
 		require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
 	}
 	add("37i9dQZF1DX6J5NfMJS675")
-	require.Equal(t, []string{"Techno/genre/30"}, f.visible(admin))
+	require.Equal(t, []string{"Techno/genre/60"}, f.visible(admin), "the whole library")
 	add("37i9dQZF1DX0XUsuxWHRQd")
-	require.Equal(t, []string{"Techno/genre/60"}, f.visible(admin), "one station, both playlists")
+	require.Equal(t, []string{"Techno/genre/60"}, f.visible(admin), "one station")
 	require.Equal(t, "1", f.one(`SELECT COUNT(*)::text FROM stations`))
 
 	// Syncing and re-adding change nothing either.
@@ -165,8 +298,8 @@ func TestAddingAPlaylistCreatesNoDuplicateStation(t *testing.T) {
 
 	// The unique index is the last guard, whoever inserts.
 	_, err := f.h.db.pool.Exec(f.ctx, `
-		INSERT INTO stations (user_id, name, genres, all_playlists, auto_genre, auto_active)
-		VALUES (NULL, 'Techno 2', ARRAY['techno'], TRUE, 'techno', TRUE)`)
+		INSERT INTO stations (user_id, name, genres, auto_genre, auto_active)
+		VALUES (NULL, 'Techno 2', ARRAY['techno'], 'techno', TRUE)`)
 	require.Error(t, err)
 }
 
@@ -216,11 +349,11 @@ func TestGenreStationAdminControls(t *testing.T) {
 	require.Equal(t, http.StatusConflict, f.call(f.h.DeleteStation, admin, http.MethodDelete, "/s", technoID, "").Code)
 	require.Equal(t, http.StatusForbidden, f.call(f.h.UpdateStation, alice, http.MethodPut, "/s", technoID, `{"name":"Mine"}`).Code)
 
-	// A custom station may not duplicate a genre station...
-	dup := `{"name":"My techno","all_playlists":true,"genres":["techno"]}`
-	rec = f.call(f.h.CreateStation, alice, http.MethodPost, "/stations", "", dup)
-	require.Equal(t, http.StatusConflict, rec.Code, rec.Body.String())
-	// ...but may play every playlist with other genre filters.
+	// A custom station can play one genre of every playlist: the genre station
+	// plays that genre of the whole library, so they are different stations.
+	rec = f.call(f.h.CreateStation, alice, http.MethodPost, "/stations", "", `{"name":"My techno","all_playlists":true,"genres":["techno"]}`)
+	require.Equal(t, http.StatusCreated, rec.Code, rec.Body.String())
+	require.Equal(t, http.StatusNoContent, f.call(f.h.DeleteStation, alice, http.MethodDelete, "/s", decode[stations.Station](t, rec).ID, "").Code)
 	rec = f.call(f.h.CreateStation, alice, http.MethodPost, "/stations", "", `{"name":"Both","all_playlists":true,"genres":["techno","house"]}`)
 	require.Equal(t, http.StatusCreated, rec.Code, rec.Body.String())
 	both := decode[stations.Station](t, rec)
@@ -234,13 +367,6 @@ func TestGenreStationAdminControls(t *testing.T) {
 	require.Equal(t, []string{"House/genre/30", "Both/custom/60"}, f.visible(alice))
 	f.refresh()
 	require.Equal(t, []string{"House/genre/30", "Both/custom/60"}, f.visible(alice))
-	// While excluded, an admin may make the same station by hand; then the
-	// genre cannot come back until that one is gone.
-	rec = f.call(f.h.CreateStation, admin, http.MethodPost, "/stations", "", dup)
-	require.Equal(t, http.StatusCreated, rec.Code, rec.Body.String())
-	custom := decode[stations.Station](t, rec)
-	require.Equal(t, http.StatusConflict, update("techno", `{"excluded":false}`))
-	require.Equal(t, http.StatusNoContent, f.call(f.h.DeleteStation, admin, http.MethodDelete, "/s", custom.ID, "").Code)
 	require.Equal(t, http.StatusOK, update("techno", `{"excluded":false}`))
 	require.Equal(t, "active/Bunker", state("techno"))
 
@@ -301,11 +427,13 @@ func TestNewFileReachesItsGenreStation(t *testing.T) {
 	f.exec(`INSERT INTO track_station_genres (track_id, genre, score, is_primary) VALUES ($1::uuid, 'techno', 1, true)`, track)
 	f.exec(`SELECT pg_notify('ownwave_pipeline', 'genres_scored')`)
 
-	eventually("new file on the station", func() bool { return strings.Join(f.visible(admin), ",") == "Techno/genre/31" })
+	require.Equal(t, []string{"Techno/genre/31"}, f.visible(admin), "a genre station plays it as soon as it is scored")
+	var status pipeline.Status
+	eventually("run after the notify", func() bool {
+		status = decode[pipeline.Status](t, f.call(f.h.AdminPipeline, admin, http.MethodGet, "/p", "", ""))
+		return len(status.Runs) > 0 && status.Runs[0].Trigger == "genres_scored"
+	})
 	require.Equal(t, track, f.one(`SELECT track_id::text FROM spotify_track_matches WHERE spotify_track_id = 'sp-new'`))
-
-	status := decode[pipeline.Status](t, f.call(f.h.AdminPipeline, admin, http.MethodGet, "/p", "", ""))
-	require.NotEmpty(t, status.Runs)
 	last := status.Runs[0]
 	require.Equal(t, "genres_scored", last.Trigger)
 	require.NotNil(t, last.Matched)

@@ -1,11 +1,11 @@
 import { useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import clsx from 'clsx';
-import { ExternalLink, Radio, RefreshCw, Trash2 } from 'lucide-react';
-import type { PlaylistItem } from '@/api/types';
+import { ExternalLink, Radio, RefreshCw, Trash2, X } from 'lucide-react';
+import type { PlaylistItem, PlaylistPick } from '@/api/types';
 import { useAuth } from '@/lib/auth';
 import { formatDuration, plural, timeAgo } from '@/lib/format';
-import { usePlaylist, usePlaylistActions } from '@/lib/queries';
+import { usePlaylist, usePlaylistActions, usePlaylistPicks, useRemovePick } from '@/lib/queries';
 import { coverUrl } from '@/player/PlayerProvider';
 import { HeroBody, HeroHeader, playlistCover, useArtColor } from '@/components/media';
 import { StationEditor } from '@/components/StationEditor';
@@ -51,10 +51,60 @@ function ItemRow({ item, index, lastSync }: { item: PlaylistItem; index: number;
   );
 }
 
+function PickRow({ pick, index, onRemove, removing }: { pick: PlaylistPick; index: number; onRemove?: () => void; removing: boolean }) {
+  return (
+    <div className="grid grid-cols-[2rem_minmax(0,1fr)_auto_auto] items-center gap-4 rounded-md px-4 py-2 text-sm hover:bg-raised/70">
+      <span className="tabular-nums text-muted">{index}</span>
+      <span className="flex min-w-0 items-center gap-3">
+        <Art src={coverUrl(pick.track_id)} name={pick.title} className="h-10 w-10" />
+        <span className="min-w-0">
+          <span className="block truncate font-medium">{pick.title}</span>
+          <span className="block truncate text-[13px] text-muted">{pick.artist ?? 'Unknown artist'}</span>
+        </span>
+      </span>
+      <span className="text-right tabular-nums text-muted">{pick.duration_seconds ? formatDuration(pick.duration_seconds) : ''}</span>
+      {onRemove ? (
+        <IconButton label={`Remove ${pick.title} from this playlist's picks`} size="sm" disabled={removing} onClick={onRemove}>
+          <X className="h-4 w-4" />
+        </IconButton>
+      ) : (
+        <span />
+      )}
+    </div>
+  );
+}
+
+function Picks({ playlistId, canRemove }: { playlistId: string; canRemove: boolean }) {
+  const picks = usePlaylistPicks(playlistId, true);
+  const remove = useRemovePick();
+  if (picks.isLoading) return <Spinner />;
+  return (
+    <>
+      <ErrorText error={picks.error ?? remove.error} />
+      {picks.data?.length ? (
+        <>
+          <p className="mb-3 text-[13px] text-muted">Songs from your library that sound like this playlist. Its stations play them alongside the matched tracks.</p>
+          {picks.data.map((pick, i) => (
+            <PickRow
+              key={pick.track_id}
+              pick={pick}
+              index={i + 1}
+              removing={remove.isPending}
+              onRemove={canRemove ? () => remove.mutate({ playlistId, trackId: pick.track_id }) : undefined}
+            />
+          ))}
+        </>
+      ) : (
+        !picks.error && <Empty title="No picks yet">Picks follow the playlist's matched tracks once those are analysed.</Empty>
+      )}
+    </>
+  );
+}
+
 export function PlaylistPage() {
   const { id = '' } = useParams();
   const { user } = useAuth();
-  const [tab, setTab] = useState<'matched' | 'missing'>('matched');
+  const [tab, setTab] = useState<'matched' | 'picks' | 'missing'>('matched');
   const all = usePlaylist(id);
   const { sync, remove } = usePlaylistActions();
   const loaded = all.data?.playlist;
@@ -125,6 +175,7 @@ export function PlaylistPage() {
             onChange={setTab}
             tabs={[
               { id: 'matched', label: 'In your library', count: p.matched_count },
+              { id: 'picks', label: 'From your library', count: p.pick_count },
               { id: 'missing', label: 'Missing', count: p.track_count - p.matched_count },
             ]}
           />
@@ -132,7 +183,9 @@ export function PlaylistPage() {
         {tab === 'missing' && items.length > 0 && (
           <p className="mb-3 text-[13px] text-muted">Songs this playlist listed that are not in your library. Add the files and the next scan picks them up.</p>
         )}
-        {items.length ? (
+        {tab === 'picks' ? (
+          <Picks playlistId={p.id} canRemove={!!user?.is_admin} />
+        ) : items.length ? (
           items.map((it, i) => <ItemRow key={it.spotify_track_id} item={it} index={i + 1} lastSync={p.last_synced_at} />)
         ) : (
           <Empty title={tab === 'matched' ? 'No matches yet' : 'Nothing missing'}>

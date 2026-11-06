@@ -5,6 +5,9 @@ package playlists_test
 import (
 	"context"
 	"errors"
+	"fmt"
+	"math"
+	"strings"
 	"testing"
 	"time"
 
@@ -217,4 +220,155 @@ func TestSyncDownloadsCoverOnceAndKeepsItOnFailure(t *testing.T) {
 
 	_, _, err = svc.Cover(ctx, "00000000-0000-0000-0000-000000000000")
 	require.ErrorIs(t, err, playlists.ErrNotFound)
+}
+
+func TestGroupCopiesRecordsAndFollowsTheLibrary(t *testing.T) {
+	ctx := context.Background()
+	pool := testdb.NewPool(t)
+	svc := playlists.NewService(pool, &fakeSpotify{})
+	add := func(path, title string, rate int) string {
+		var artist, id string
+		require.NoError(t, pool.QueryRow(ctx, `INSERT INTO artists (name) VALUES ('X')
+			ON CONFLICT (name) DO UPDATE SET name = EXCLUDED.name RETURNING id::text`).Scan(&artist))
+		require.NoError(t, pool.QueryRow(ctx, `INSERT INTO tracks (path, title, artist_id, duration_seconds, sample_rate)
+			VALUES ($1, $2, $3::uuid, 200, $4) RETURNING id::text`, path, title, artist, rate).Scan(&id))
+		return id
+	}
+	copyOf := func(id string) string {
+		var v string
+		require.NoError(t, pool.QueryRow(ctx, `SELECT COALESCE(copy_of::text, '') FROM tracks WHERE id = $1::uuid`, id).Scan(&v))
+		return v
+	}
+	low := add("/m/low.mp3", "Song", 44100)
+	high := add("/m/high.flac", "Song", 96000)
+	add("/m/other.flac", "Other Song", 44100)
+
+	n, err := svc.GroupCopies(ctx)
+	require.NoError(t, err)
+	require.Equal(t, 1, n)
+	require.Equal(t, high, copyOf(low))
+	require.Equal(t, "", copyOf(high))
+
+	n, err = svc.GroupCopies(ctx)
+	require.NoError(t, err)
+	require.Zero(t, n, "nothing changed")
+
+	// A better file arrives: the song's best copy moves, in one step.
+	best := add("/m/best.flac", "Song", 192000)
+	n, err = svc.GroupCopies(ctx)
+	require.NoError(t, err)
+	require.Equal(t, 2, n)
+	require.Equal(t, best, copyOf(low))
+	require.Equal(t, best, copyOf(high))
+
+	// The best file goes: the others are their own song until the next run.
+	_, err = pool.Exec(ctx, `DELETE FROM tracks WHERE id = $1::uuid`, best)
+	require.NoError(t, err)
+	require.Equal(t, "", copyOf(low))
+	_, err = svc.GroupCopies(ctx)
+	require.NoError(t, err)
+	require.Equal(t, high, copyOf(low))
+}
+
+// vec is a unit embedding at the given angle (degrees) in the first plane:
+// the cosine similarity of two is the cosine of their angle's difference.
+func vec(deg float64) string {
+	parts := make([]string, 1280)
+	for i := range parts {
+		parts[i] = "0"
+	}
+	parts[0] = fmt.Sprint(math.Cos(deg * math.Pi / 180))
+	parts[1] = fmt.Sprint(math.Sin(deg * math.Pi / 180))
+	return "[" + strings.Join(parts, ",") + "]"
+}
+
+func TestRebuildPicksFindsSimilarLibrarySongs(t *testing.T) {
+	ctx := context.Background()
+	pool := testdb.NewPool(t)
+	svc := playlists.NewService(pool, &fakeSpotify{})
+	exec := func(sql string, args ...any) {
+		t.Helper()
+		_, err := pool.Exec(ctx, sql, args...)
+		require.NoError(t, err)
+	}
+	add := func(title string, deg float64) string {
+		t.Helper()
+		var id string
+		require.NoError(t, pool.QueryRow(ctx, `INSERT INTO tracks (path, title) VALUES ($1, $2) RETURNING id::text`, "/m/"+title, title).Scan(&id))
+		exec(`INSERT INTO track_audio_genres (track_id, model_version, activations, embedding) VALUES ($1::uuid, 'test', '{}', $2::vector)`, id, vec(deg))
+		return id
+	}
+	var playlist string
+	require.NoError(t, pool.QueryRow(ctx, `INSERT INTO playlists (spotify_id, name) VALUES ('s', 'List') RETURNING id::text`).Scan(&playlist))
+	seed := func(id, sp string) {
+		exec(`INSERT INTO playlist_items (playlist_id, spotify_track_id, title) VALUES ($1::uuid, $2, $2)`, playlist, sp)
+		exec(`INSERT INTO spotify_track_matches (spotify_track_id, track_id, method) VALUES ($1, $2::uuid, 'exact')`, sp, id)
+	}
+	picked := func() []string {
+		t.Helper()
+		list, err := svc.Picks(ctx, playlist)
+		require.NoError(t, err)
+		out := []string{}
+		for _, p := range list {
+			out = append(out, p.Title)
+		}
+		return out
+	}
+
+	one, two := add("seed-1", 0), add("seed-2", 10)
+	seed(one, "sp1")
+	seed(two, "sp2")
+	add("near", 4)
+	add("close", 15)
+	add("third", 20)
+	add("far", 80) // below the similarity floor: cos(70) is about 0.34
+
+	n, err := svc.RebuildPicks(ctx, true)
+	require.NoError(t, err)
+	require.Equal(t, 1, n)
+	require.Equal(t, []string{"near", "close"}, picked(), "no more picks than the playlist has songs")
+
+	n, err = svc.RebuildPicks(ctx, true)
+	require.NoError(t, err)
+	require.Zero(t, n, "same input, no rebuild")
+
+	// A library change waits for a background run; a playlist's own does not.
+	add("later", 170)
+	n, err = svc.RebuildPicks(ctx, false)
+	require.NoError(t, err)
+	require.Zero(t, n)
+	n, err = svc.RebuildPicks(ctx, true)
+	require.NoError(t, err)
+	require.Equal(t, 1, n)
+
+	got, err := svc.Get(ctx, playlist)
+	require.NoError(t, err)
+	require.Equal(t, 2, got.PickCount)
+
+	// An admin's removal lasts, and the next song takes the place.
+	var near string
+	require.NoError(t, pool.QueryRow(ctx, `SELECT id::text FROM tracks WHERE title = 'near'`).Scan(&near))
+	require.NoError(t, svc.RemovePick(ctx, playlist, near))
+	require.ErrorIs(t, svc.RemovePick(ctx, playlist, near), playlists.ErrNotFound)
+	exec(`UPDATE playlists SET picks_input = NULL`)
+	_, err = svc.RebuildPicks(ctx, true)
+	require.NoError(t, err)
+	require.Equal(t, []string{"close", "third"}, picked())
+
+	// A copy of a pick plays as that pick; a copy never is a pick itself.
+	var close string
+	require.NoError(t, pool.QueryRow(ctx, `SELECT id::text FROM tracks WHERE title = 'close'`).Scan(&close))
+	third := ""
+	require.NoError(t, pool.QueryRow(ctx, `SELECT id::text FROM tracks WHERE title = 'third'`).Scan(&third))
+	exec(`UPDATE tracks SET copy_of = $1::uuid WHERE id = $2::uuid`, close, third)
+	_, err = svc.RebuildPicks(ctx, true)
+	require.NoError(t, err)
+	require.Equal(t, []string{"close"}, picked())
+
+	// New matches change the seeds: a pick that became a seed stops being a pick.
+	seed(close, "sp3")
+	n, err = svc.RebuildPicks(ctx, false)
+	require.NoError(t, err)
+	require.Equal(t, 1, n, "new seeds rebuild even in a request")
+	require.NotContains(t, picked(), "close")
 }

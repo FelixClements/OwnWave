@@ -3,14 +3,40 @@ import { Link, useNavigate, useParams } from 'react-router-dom';
 import { Pencil, RefreshCw, Trash2 } from 'lucide-react';
 import { useAuth } from '@/lib/auth';
 import { plural } from '@/lib/format';
-import { useDeleteStation, usePlaylists, useQueue, useStation } from '@/lib/queries';
+import { useDeleteStation, useHiddenTracks, useHideTrack, usePlaylists, useQueue, useStation } from '@/lib/queries';
 import { usePlayer } from '@/player/PlayerProvider';
 import { HeroBody, HeroHeader, TrackList, stationCover, useArtColor, useStationGenreLabel } from '@/components/media';
 import { StationEditor } from '@/components/StationEditor';
-import { Art, Empty, ErrorText, IconButton, PlayButton, Spinner } from '@/components/ui';
+import { Art, Button, Empty, ErrorText, IconButton, PlayButton, Spinner } from '@/components/ui';
 
 /** The station page lists this many of the queue, not the whole pool. */
 const PREVIEW_TRACKS = 100;
+
+/** What the user took off this station, to bring back. */
+function HiddenTracks({ stationId }: { stationId: string }) {
+  const hidden = useHiddenTracks(stationId);
+  const restore = useHideTrack();
+  if (!hidden.data?.length) return null;
+  return (
+    <details className="mt-8">
+      <summary className="cursor-pointer text-sm font-semibold text-muted">Hidden on this station ({hidden.data.length})</summary>
+      <ul className="mt-2">
+        {hidden.data.map((t) => (
+          <li key={t.track_id} className="flex items-center gap-3 rounded-md px-4 py-2 text-sm hover:bg-raised/70">
+            <span className="min-w-0 flex-1 truncate">
+              <span className="font-medium">{t.title}</span>
+              <span className="text-muted"> · {t.artist ?? 'Unknown artist'}</span>
+            </span>
+            <Button size="sm" disabled={restore.isPending} onClick={() => restore.mutate({ stationId, trackId: t.track_id, restore: true })}>
+              Bring back
+            </Button>
+          </li>
+        ))}
+      </ul>
+      <ErrorText error={restore.error} />
+    </details>
+  );
+}
 
 export function StationPage() {
   const { id = '' } = useParams();
@@ -22,6 +48,7 @@ export function StationPage() {
   const genreLabel = useStationGenreLabel();
   const color = useArtColor(stationCover(id), station.data?.name ?? id);
   const del = useDeleteStation();
+  const hide = useHideTrack();
   const navigate = useNavigate();
   const [editing, setEditing] = useState(false);
 
@@ -48,10 +75,10 @@ export function StationPage() {
             <span className="font-semibold">{genreLabel(s)}</span>
             <span className="mx-1.5">•</span>
             {plural(s.track_count, 'track')}
-            {s.all_playlists && (
+            {(s.all_playlists || genreStation) && (
               <>
                 <span className="mx-1.5">•</span>
-                <span>from every playlist</span>
+                <span>{genreStation ? 'from your whole library' : 'from every playlist'}</span>
               </>
             )}
             {names.length > 0 && (
@@ -117,9 +144,18 @@ export function StationPage() {
         ) : (
           <TrackList
             tracks={tracks.slice(0, PREVIEW_TRACKS)}
-            empty={<Empty title="No tracks yet">None of this station's playlist tracks are in your library with these genres. Rescan, or widen the genres.</Empty>}
+            onHide={(t) => (active ? player.hide(t) : hide.mutate({ stationId: s.id, trackId: t.id }))}
+            empty={
+              <Empty title="No tracks yet">
+                {genreStation
+                  ? 'No song in your library has this main genre right now. Rescan, or check the genres in Admin.'
+                  : "None of this station's playlist tracks are in your library with these genres. Rescan, or widen the genres."}
+              </Empty>
+            }
           />
         )}
+        <ErrorText error={hide.error} />
+        <HiddenTracks stationId={s.id} />
       </HeroBody>
       <StationEditor open={editing} onClose={() => setEditing(false)} station={s} />
     </>

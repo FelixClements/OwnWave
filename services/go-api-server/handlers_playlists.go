@@ -49,6 +49,42 @@ func (h *Handler) GetPlaylist(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]interface{}{"playlist": p, "items": items})
 }
 
+// ListPlaylistPicks lists the library songs the playlist's stations play on
+// top of its matches.
+func (h *Handler) ListPlaylistPicks(w http.ResponseWriter, r *http.Request) {
+	id, ok := parseUUIDParam(w, r, "id")
+	if !ok {
+		return
+	}
+	if _, err := h.playlists.Get(r.Context(), id); err != nil {
+		writePlaylistError(w, r, "get playlist", err)
+		return
+	}
+	picks, err := h.playlists.Picks(r.Context(), id)
+	if err != nil {
+		writeInternalError(w, r, "playlist picks", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"picks": picks})
+}
+
+// RemovePlaylistPick takes a song out of this playlist's picks for good.
+func (h *Handler) RemovePlaylistPick(w http.ResponseWriter, r *http.Request) {
+	id, ok := parseUUIDParam(w, r, "id")
+	if !ok {
+		return
+	}
+	trackID, ok := parseUUIDParam(w, r, "trackId")
+	if !ok {
+		return
+	}
+	if err := h.playlists.RemovePick(r.Context(), id, trackID); err != nil {
+		writePlaylistError(w, r, "remove playlist pick", err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
 // GetPlaylistCover returns the playlist's Spotify cover, downloaded at
 // sync. 204 when it has none yet; 404 only for an unknown playlist.
 func (h *Handler) GetPlaylistCover(w http.ResponseWriter, r *http.Request) {

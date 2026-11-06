@@ -13,7 +13,7 @@ import (
 )
 
 // QueuePageSize caps one queue response; the client refetches when it reaches
-// the end. Recently played tracks sort last, so every track gets its turn.
+// the end. Songs played longest ago come first, so every song gets its turn.
 const QueuePageSize = 200
 
 // Service records playback events and builds live station queues.
@@ -43,9 +43,9 @@ func (s *Service) Record(ctx context.Context, userID, trackID, stationID string)
 	return err
 }
 
-// BuildQueue returns up to QueuePageSize tracks from the station's live pool:
-// tracks not played on this station within recentHours come first in random
-// order, followed by recently played ones, least recent first.
+// BuildQueue returns up to QueuePageSize songs from the station's live pool,
+// in the order orderQueue describes. History, bans, likes and hides count
+// for a whole song, through any of its copies.
 func (s *Service) BuildQueue(ctx context.Context, userID, stationID string, def stations.Definition, recentHours int) ([]TrackWithFeatures, error) {
 	args := stations.Args{userID, stationID}
 	joins := `
@@ -53,21 +53,22 @@ func (s *Service) BuildQueue(ctx context.Context, userID, stationID string, def 
 		LEFT JOIN artists a ON t.artist_id = a.id
 		LEFT JOIN albums al ON t.album_id = al.id
 		LEFT JOIN (
-			SELECT track_id, MAX(played_at) AS last_played
-			FROM listening_history
-			WHERE user_id = $1::uuid AND station_id = $2::uuid
-			GROUP BY track_id
-		) lp ON lp.track_id = t.id`
+			SELECT COALESCE(ht.copy_of, ht.id) AS song, MAX(h.played_at) AS last_played
+			FROM listening_history h
+			JOIN tracks ht ON ht.id = h.track_id
+			WHERE h.user_id = $1::uuid AND h.station_id = $2::uuid
+			GROUP BY 1
+		) lp ON lp.song = t.id`
 	rows, err := s.pool.Query(ctx, `
 		SELECT t.id::text, t.title, a.name, al.title, t.path, t.track_number,
 		       t.duration_seconds, t.sample_rate, t.channels,
 		       COALESCE(af.bpm, 0), COALESCE(af.key, ''), COALESCE(af.energy, 0), COALESCE(af.valence, 0), af.loudness,
 		       COALESCE(af.outro_start_seconds, 0), COALESCE(af.ideal_crossfade_seconds, 0),
 		       COALESCE(af.intro_start_seconds, 0), COALESCE(af.outro_end_seconds, 0),
-		       EXISTS (SELECT 1 FROM track_feedback l WHERE l.user_id = $1::uuid AND l.track_id = t.id AND l.feedback = 'like'),
+		       `+stations.Liked("$1")+`,
 		       lp.last_played
 		FROM tracks t`+joins+`
-		WHERE `+stations.NotBanned("$1")+` AND `+def.Where(&args), args...)
+		WHERE `+stations.NotBanned("$1")+` AND `+stations.NotHidden("$1", "$2")+` AND `+def.Where(&args), args...)
 	if err != nil {
 		return nil, err
 	}
@@ -167,30 +168,63 @@ func containsArtist(recent []string, a string) bool {
 	return false
 }
 
-// orderQueue dedupes by title+artist, then puts fresh tracks (shuffled) ahead
-// of recently played ones (least recent first), spaces out artists and
-// truncates to a page.
+// playedAgeGroup is the width of the age groups orderQueue shuffles within.
+const playedAgeGroup = 7 * 24 * time.Hour
+
+// orderQueue dedupes by title+artist, then orders songs so every one gets a
+// turn: never played on this station first, then played longest ago, then
+// (after everything else) those played within recentHours, least recent
+// first. Never-played songs and each week-wide age group are shuffled, so
+// repeat listens still vary. It then spaces out artists and truncates to a page.
 func orderQueue(items []queued, recentHours int, now time.Time) []TrackWithFeatures {
 	cutoff := now.Add(-time.Duration(recentHours) * time.Hour)
-	seen := make(map[string]bool, len(items))
-	var fresh, recent []queued
+	// Two entries with one title+artist play as one: it counts as played
+	// when either was, so the other cannot bring it back early.
+	first := make(map[string]int, len(items))
+	unique := make([]queued, 0, len(items))
 	for _, it := range items {
 		artist := ""
 		if it.track.Artist != nil {
 			artist = *it.track.Artist
 		}
 		key := strings.ToLower(strings.TrimSpace(it.track.Title) + "|" + strings.TrimSpace(artist))
-		if seen[key] {
+		if i, seen := first[key]; seen {
+			if p := it.lastPlayed; p != nil && (unique[i].lastPlayed == nil || p.After(*unique[i].lastPlayed)) {
+				unique[i].lastPlayed = p
+			}
 			continue
 		}
-		seen[key] = true
-		if it.lastPlayed == nil || it.lastPlayed.Before(cutoff) {
-			fresh = append(fresh, it)
-		} else {
+		first[key] = len(unique)
+		unique = append(unique, it)
+	}
+
+	var never, recent []queued
+	played := map[int64][]queued{}
+	for _, it := range unique {
+		switch {
+		case it.lastPlayed == nil:
+			never = append(never, it)
+		case it.lastPlayed.Before(cutoff):
+			age := int64(now.Sub(*it.lastPlayed) / playedAgeGroup)
+			played[age] = append(played[age], it)
+		default:
 			recent = append(recent, it)
 		}
 	}
-	rand.Shuffle(len(fresh), func(i, j int) { fresh[i], fresh[j] = fresh[j], fresh[i] })
+	shuffle := func(list []queued) {
+		rand.Shuffle(len(list), func(i, j int) { list[i], list[j] = list[j], list[i] })
+	}
+	shuffle(never)
+	ages := make([]int64, 0, len(played))
+	for age := range played {
+		ages = append(ages, age)
+	}
+	sort.Slice(ages, func(i, j int) bool { return ages[i] > ages[j] })
+	fresh := never
+	for _, age := range ages {
+		shuffle(played[age])
+		fresh = append(fresh, played[age]...)
+	}
 	sort.SliceStable(recent, func(i, j int) bool { return recent[i].lastPlayed.Before(*recent[j].lastPlayed) })
 
 	ordered := spreadArtists(append(fresh, recent...), artistGap)

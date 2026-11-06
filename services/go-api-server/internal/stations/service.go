@@ -21,12 +21,33 @@ func NewService(pool *pgxpool.Pool) *Service {
 	return &Service{pool: pool}
 }
 
-// NotBanned is an SQL predicate on `tracks t` that drops the tracks the
-// user (at placeholder userArg) banned.
+// sameSong is an SQL predicate: tracks a and b are copies of one song.
+func sameSong(a, b string) string {
+	return `COALESCE(` + a + `.copy_of, ` + a + `.id) = COALESCE(` + b + `.copy_of, ` + b + `.id)`
+}
+
+// NotBanned is an SQL predicate on `tracks t` that drops the songs the
+// user (at placeholder userArg) banned, through any of their copies.
 func NotBanned(userArg string) string {
 	return `NOT EXISTS (
-		SELECT 1 FROM track_feedback b
-		WHERE b.user_id = ` + userArg + `::uuid AND b.track_id = t.id AND b.feedback = 'ban')`
+		SELECT 1 FROM track_feedback b JOIN tracks bt ON bt.id = b.track_id
+		WHERE b.user_id = ` + userArg + `::uuid AND b.feedback = 'ban' AND ` + sameSong("bt", "t") + `)`
+}
+
+// Liked is an SQL predicate on `tracks t`: the user (at placeholder
+// userArg) liked this song, through any of its copies.
+func Liked(userArg string) string {
+	return `EXISTS (
+		SELECT 1 FROM track_feedback l JOIN tracks lt ON lt.id = l.track_id
+		WHERE l.user_id = ` + userArg + `::uuid AND l.feedback = 'like' AND ` + sameSong("lt", "t") + `)`
+}
+
+// NotHidden is an SQL predicate on `tracks t` that drops the songs the
+// user hid on the station (at placeholders userArg and stationArg).
+func NotHidden(userArg, stationArg string) string {
+	return `NOT EXISTS (
+		SELECT 1 FROM station_hidden_tracks h JOIN tracks ht ON ht.id = h.track_id
+		WHERE h.user_id = ` + userArg + `::uuid AND h.station_id = ` + stationArg + `::uuid AND ` + sameSong("ht", "t") + `)`
 }
 
 // stationColumns reads a station; an all-playlists station lists every
@@ -73,7 +94,7 @@ func (s *Service) List(ctx context.Context, userID string) ([]Station, error) {
 		return nil, err
 	}
 	for i := range list {
-		if list[i].TrackCount, err = s.PoolSize(ctx, userID, list[i].Definition()); err != nil {
+		if list[i].TrackCount, err = s.PoolSize(ctx, userID, list[i].ID, list[i].Definition()); err != nil {
 			return nil, err
 		}
 	}
@@ -92,21 +113,22 @@ func (s *Service) Get(ctx context.Context, userID, id string) (Station, error) {
 	if err != nil {
 		return st, err
 	}
-	st.TrackCount, err = s.PoolSize(ctx, userID, st.Definition())
+	st.TrackCount, err = s.PoolSize(ctx, userID, st.ID, st.Definition())
 	return st, err
 }
 
-// PoolSize counts the tracks the definition plays for the user (bans excluded).
-func (s *Service) PoolSize(ctx context.Context, userID string, d Definition) (int, error) {
-	args := Args{userID}
+// PoolSize counts the songs the station plays for the user (bans and hides
+// excluded).
+func (s *Service) PoolSize(ctx context.Context, userID, stationID string, d Definition) (int, error) {
+	args := Args{userID, stationID}
 	var n int
 	err := s.pool.QueryRow(ctx, `
-		SELECT COUNT(*) FROM tracks t WHERE `+NotBanned("$1")+` AND `+d.Where(&args), args...).Scan(&n)
+		SELECT COUNT(*) FROM tracks t
+		WHERE `+NotBanned("$1")+` AND `+NotHidden("$1", "$2")+` AND `+d.Where(&args), args...).Scan(&n)
 	return n, err
 }
 
-// checkExists returns ErrInvalid unless every playlist and genre exists,
-// and ErrConflict when the definition duplicates a genre station.
+// checkExists returns ErrInvalid unless every playlist and genre exists.
 func (s *Service) checkExists(ctx context.Context, q pgx.Tx, d Definition) error {
 	var playlists, genres int
 	if err := q.QueryRow(ctx, `
@@ -121,25 +143,7 @@ func (s *Service) checkExists(ctx context.Context, q pgx.Tx, d Definition) error
 	if genres != len(d.Genres) {
 		return fmt.Errorf("%w: unknown genre", ErrInvalid)
 	}
-	return checkNotGenreStation(ctx, q, d)
-}
-
-// checkNotGenreStation refuses a custom definition that plays exactly what
-// a genre station plays (every playlist, that one genre), unless the genre
-// is excluded from genre stations.
-func checkNotGenreStation(ctx context.Context, q pgx.Tx, d Definition) error {
-	if !d.AllPlaylists || len(d.Genres) != 1 {
-		return nil
-	}
-	var name string
-	err := q.QueryRow(ctx, `SELECT name FROM stations WHERE auto_genre = $1 AND NOT auto_excluded`, d.Genres[0]).Scan(&name)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return nil
-	}
-	if err != nil {
-		return err
-	}
-	return fmt.Errorf("%w: the genre station %q already plays this genre from every playlist", ErrConflict, name)
+	return nil
 }
 
 func setPlaylists(ctx context.Context, tx pgx.Tx, stationID string, ids []string) error {

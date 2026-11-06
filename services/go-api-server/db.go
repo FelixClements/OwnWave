@@ -241,10 +241,13 @@ func (db *DB) RecordFeedback(ctx context.Context, userID, trackID, feedback stri
 	return err
 }
 
+// DeleteFeedback takes a like or ban off the whole song, through any of its copies.
 func (db *DB) DeleteFeedback(ctx context.Context, userID, trackID, feedback string) error {
 	_, err := db.pool.Exec(ctx, `
-		DELETE FROM track_feedback
-		WHERE user_id = $1::uuid AND track_id = $2 AND feedback = $3
+		DELETE FROM track_feedback f
+		USING tracks ft, tracks t
+		WHERE f.user_id = $1::uuid AND f.feedback = $3 AND ft.id = f.track_id
+		  AND t.id = $2::uuid AND COALESCE(ft.copy_of, ft.id) = COALESCE(t.copy_of, t.id)
 	`, userID, trackID, feedback)
 	return err
 }
