@@ -3,7 +3,13 @@ import threading
 import time
 from pathlib import Path
 
-from watchdog.events import FileSystemEventHandler
+from watchdog.events import (
+    FileCreatedEvent,
+    FileDeletedEvent,
+    FileModifiedEvent,
+    FileMovedEvent,
+    FileSystemEventHandler,
+)
 from watchdog.observers import Observer
 
 from audio_metadata import SUPPORTED_EXTS
@@ -14,6 +20,11 @@ from config import MUSIC_DIR
 log = logging.getLogger(__name__)
 
 CHANGE_EVENTS = {"created", "deleted", "modified", "moved"}
+
+# Only subscribe to changes. watchdog's default also watches every open and
+# close: on a large library, walking the tree overflows the kernel's inotify
+# queue, and watchdog answers an overflow by walking the tree again.
+WATCHED_EVENTS = [FileCreatedEvent, FileDeletedEvent, FileModifiedEvent, FileMovedEvent]
 
 
 class MusicEventHandler(FileSystemEventHandler):
@@ -85,7 +96,7 @@ def start_watching(path: str = MUSIC_DIR, debounce_seconds: float = 2.0, cooldow
     event_handler = MusicEventHandler(str(root), debounce_seconds=debounce_seconds, cooldown_seconds=cooldown_seconds)
     observer = Observer()
     observer.daemon = True
-    observer.schedule(event_handler, str(root), recursive=True)
+    observer.schedule(event_handler, str(root), recursive=True, event_filter=WATCHED_EVENTS)
     observer.start()
     log.info("watching %s for music file changes", root)
     return observer
