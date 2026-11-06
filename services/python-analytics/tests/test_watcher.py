@@ -44,3 +44,73 @@ def test_reads_are_ignored(monkeypatch, tmp_path):
         )
     time.sleep(0.05)
     assert sent == []
+
+
+def watch(monkeypatch, path):
+    """Start a real observer on path; returns it with what its handler received and queued."""
+    seen, sent = [], []
+    original = watcher.MusicEventHandler.on_any_event
+
+    def spy(self, event):
+        seen.append(event.event_type)
+        original(self, event)
+
+    monkeypatch.setattr(watcher.MusicEventHandler, "on_any_event", spy)
+    monkeypatch.setattr(watcher, "queue_scan", sent.append)
+    return watcher.start_watching(str(path), debounce_seconds=0.01, cooldown_seconds=0), seen, sent
+
+
+def wait_for(condition, timeout=3.0):
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline and not condition():
+        time.sleep(0.02)
+    return condition()
+
+
+def test_reading_files_is_not_watched(monkeypatch, tmp_path):
+    song = tmp_path / "album" / "a.flac"
+    song.parent.mkdir()
+    song.write_bytes(b"x")
+    observer, seen, sent = watch(monkeypatch, tmp_path)
+    try:
+        song.read_bytes()
+        list(tmp_path.rglob("*"))
+        time.sleep(0.3)
+    finally:
+        observer.stop()
+        observer.join()
+    assert seen == []
+    assert sent == []
+
+
+def test_library_changes_still_queue_a_scan(monkeypatch, tmp_path):
+    (tmp_path / "album").mkdir()
+    observer, _, sent = watch(monkeypatch, tmp_path)
+    try:
+        # A new file in a folder that existed when watching started.
+        (tmp_path / "album" / "new.flac").write_bytes(b"x")
+        assert wait_for(lambda: len(sent) == 1)
+        # A file renamed.
+        sent.clear()
+        (tmp_path / "album" / "new.flac").rename(tmp_path / "album" / "renamed.flac")
+        assert wait_for(lambda: len(sent) == 1)
+        # A file removed.
+        sent.clear()
+        (tmp_path / "album" / "renamed.flac").unlink()
+        assert wait_for(lambda: len(sent) == 1)
+        # A new file in a folder made after watching started.
+        sent.clear()
+        (tmp_path / "later").mkdir()
+        time.sleep(0.1)
+        (tmp_path / "later" / "b.flac").write_bytes(b"x")
+        assert wait_for(lambda: len(sent) == 1)
+        # A whole album folder moved in from outside the library.
+        sent.clear()
+        outside = tmp_path.parent / f"{tmp_path.name}-outside"
+        outside.mkdir()
+        (outside / "c.flac").write_bytes(b"x")
+        outside.rename(tmp_path / "moved-in")
+        assert wait_for(lambda: len(sent) == 1)
+    finally:
+        observer.stop()
+        observer.join()
