@@ -36,7 +36,7 @@ function SuggestionCard({ s }: { s: StationSuggestion }) {
   const navigate = useNavigate();
   return (
     <div className="group relative flex flex-col gap-3 rounded-lg p-3 transition hover:bg-card">
-      <Art name={s.name} className="aspect-square w-full shadow-lift" />
+      <Art src={`/api/playlists/${encodeURIComponent(s.playlist_ids[0])}/cover`} name={s.name} className="aspect-square w-full shadow-lift" />
       <IconButton
         label={`Dismiss ${s.name}`}
         size="sm"
