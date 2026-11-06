@@ -26,16 +26,29 @@ CHANGE_EVENTS = {"created", "deleted", "modified", "moved"}
 # queue, and watchdog answers an overflow by walking the tree again.
 WATCHED_EVENTS = [FileCreatedEvent, FileDeletedEvent, FileModifiedEvent, FileMovedEvent]
 
+# A scan reads the whole library, so wait for a bulk write (a tag fixer, a large
+# download) to go quiet. Changes that never go quiet still get a scan this often.
+QUIET_SECONDS = 60.0
+MAX_WAIT_SECONDS = 900.0
+
 
 class MusicEventHandler(FileSystemEventHandler):
-    def __init__(self, root_path: str, debounce_seconds: float = 2.0, cooldown_seconds: float = 30.0):
+    def __init__(
+        self,
+        root_path: str,
+        debounce_seconds: float = QUIET_SECONDS,
+        cooldown_seconds: float = 30.0,
+        max_wait_seconds: float = MAX_WAIT_SECONDS,
+    ):
         self.root_path = Path(root_path).expanduser().resolve()
         self.debounce_seconds = debounce_seconds
         self.cooldown_seconds = cooldown_seconds
+        self.max_wait_seconds = max_wait_seconds
         self._lock = threading.Lock()
         self._timer: threading.Timer | None = None
         self._dirty = False
         self._next_allowed = 0.0
+        self._first_change: float | None = None
 
     def on_any_event(self, event):
         # Reads (opened/closed_no_write), e.g. by a running scan, are not changes.
@@ -47,10 +60,13 @@ class MusicEventHandler(FileSystemEventHandler):
 
         with self._lock:
             self._dirty = True
-            # Debounce bursts; changes during the cooldown are deferred to its
-            # end rather than dropped.
-            delay = max(self.debounce_seconds, self._next_allowed - time.monotonic())
-            self._schedule(delay)
+            now = time.monotonic()
+            if self._first_change is None:
+                self._first_change = now
+            # Debounce bursts, up to the max wait; changes during the cooldown
+            # are deferred to its end rather than dropped.
+            delay = min(self.debounce_seconds, self._first_change + self.max_wait_seconds - now)
+            self._schedule(max(delay, self._next_allowed - now, 0.0))
 
     def _is_music_file(self, path: str) -> bool:
         return Path(path).suffix.lower() in SUPPORTED_EXTS
@@ -72,6 +88,7 @@ class MusicEventHandler(FileSystemEventHandler):
                 self._schedule(self._next_allowed - now)
                 return
             self._dirty = False
+            self._first_change = None
             self._next_allowed = now + self.cooldown_seconds
 
         log.info("change detected, queuing scan of %s", self.root_path)
@@ -87,7 +104,11 @@ def queue_scan(path: str) -> None:
         conn.commit()
 
 
-def start_watching(path: str = MUSIC_DIR, debounce_seconds: float = 2.0, cooldown_seconds: float = 30.0) -> Observer:
+def start_watching(
+    path: str = MUSIC_DIR,
+    debounce_seconds: float = QUIET_SECONDS,
+    cooldown_seconds: float = 30.0,
+) -> Observer:
     """Queue a library scan whenever music files under path change."""
     root = Path(path).expanduser().resolve()
     if not root.exists():

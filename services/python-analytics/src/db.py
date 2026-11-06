@@ -4,6 +4,7 @@ from typing import List, Optional
 from uuid import UUID
 
 import psycopg
+from psycopg.adapt import AdaptersMap
 from psycopg.types.json import Jsonb
 
 from config import DATABASE_URL
@@ -12,12 +13,24 @@ from models import AudioFeatures, ScanResult
 log = logging.getLogger(__name__)
 
 
+# Adapters with the pgvector types, shared by every connection of this process.
+# register_vector builds new classes on each call and psycopg caches them for
+# good, so calling it per connection leaks about 24 KB each time. The type OIDs
+# are kept too: restart the process if the vector extension is ever recreated.
+_vector_adapters: Optional[AdaptersMap] = None
+
+
 def get_conn():
+    global _vector_adapters
+    if _vector_adapters is not None:
+        return psycopg.connect(DATABASE_URL, context=_vector_adapters)
+
     conn = psycopg.connect(DATABASE_URL)
     try:
         import pgvector.psycopg
 
         pgvector.psycopg.register_vector(conn)
+        _vector_adapters = conn.adapters
     except Exception:
         pass
     return conn

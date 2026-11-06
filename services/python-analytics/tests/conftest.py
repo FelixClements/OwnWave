@@ -24,4 +24,6 @@ def db_url(monkeypatch):
     import db
 
     monkeypatch.setattr(db, "DATABASE_URL", url)
+    # The schema was rebuilt, so the vector type has a new OID.
+    monkeypatch.setattr(db, "_vector_adapters", None)
     return url
