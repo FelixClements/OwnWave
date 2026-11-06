@@ -25,6 +25,33 @@ def test_changes_during_cooldown_are_deferred_not_dropped(monkeypatch, tmp_path)
     assert len(sent) == 2
 
 
+def test_steady_changes_wait_until_quiet(monkeypatch, tmp_path):
+    sent = []
+    monkeypatch.setattr(watcher, "queue_scan", sent.append)
+    handler = watcher.MusicEventHandler(str(tmp_path), debounce_seconds=0.2, cooldown_seconds=0)
+
+    for i in range(10):
+        handler.on_any_event(event(str(tmp_path / f"{i}.flac")))
+        time.sleep(0.05)
+    assert sent == []
+
+    time.sleep(0.4)
+    assert len(sent) == 1
+
+
+def test_changes_that_never_go_quiet_still_queue_a_scan(monkeypatch, tmp_path):
+    sent = []
+    monkeypatch.setattr(watcher, "queue_scan", sent.append)
+    handler = watcher.MusicEventHandler(
+        str(tmp_path), debounce_seconds=0.2, cooldown_seconds=0, max_wait_seconds=0.3
+    )
+
+    for i in range(12):
+        handler.on_any_event(event(str(tmp_path / f"{i}.flac")))
+        time.sleep(0.05)
+    assert len(sent) >= 1
+
+
 def test_non_music_files_are_ignored(monkeypatch, tmp_path):
     sent = []
     monkeypatch.setattr(watcher, "queue_scan", sent.append)
