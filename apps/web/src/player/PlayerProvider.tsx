@@ -1,7 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
 import { api, call } from '@/api/client';
 import type { QueueTrack, Station } from '@/api/types';
-import { fetchQueue, useFeedback } from '@/lib/queries';
+import { fetchQueue, useFeedback, useHideTrack } from '@/lib/queries';
 import { getSettings, streamQuality, useSettings } from '@/lib/settings';
 import { PlayerEngine } from './engine';
 
@@ -25,6 +25,8 @@ type PlayerValue = NowPlaying & {
   seek: (seconds: number) => void;
   like: (track: QueueTrack) => void;
   ban: (track: QueueTrack) => void;
+  /** Keep the song off the station that is playing, for this user. */
+  hide: (track: QueueTrack) => void;
   liked: (id: string) => boolean;
   expanded: boolean;
   setExpanded: (open: boolean) => void;
@@ -71,6 +73,7 @@ export const coverUrl = (trackId: string) => `/api/tracks/${encodeURIComponent(t
 export function PlayerProvider({ children }: { children: ReactNode }) {
   const settings = useSettings();
   const feedback = useFeedback();
+  const hideTrack = useHideTrack();
   const [state, setState] = useState<NowPlaying>({ station: null, track: null, upcoming: [], playing: false, loading: false, error: null });
   const [likes, setLikes] = useState<Record<string, boolean>>({});
   const [expanded, setExpanded] = useState(false);
@@ -177,6 +180,17 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     [engine, feedback],
   );
 
+  const stationId = state.station?.id;
+  const hide = useCallback(
+    (track: QueueTrack) => {
+      if (!stationId) return;
+      hideTrack.mutate({ stationId, trackId: track.id });
+      engine?.remove(track.id);
+      sync();
+    },
+    [engine, hideTrack, stationId],
+  );
+
   // Lock screen, notification and headset controls.
   useEffect(() => {
     if (!('mediaSession' in navigator)) return;
@@ -225,11 +239,12 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       seek: (s) => engine?.seek(s),
       like,
       ban,
+      hide,
       liked: (id) => !!likes[id],
       expanded,
       setExpanded,
     }),
-    [state, playStation, engine, like, ban, likes, expanded],
+    [state, playStation, engine, like, ban, hide, likes, expanded],
   );
 
   return <PlayerContext.Provider value={value}>{children}</PlayerContext.Provider>;

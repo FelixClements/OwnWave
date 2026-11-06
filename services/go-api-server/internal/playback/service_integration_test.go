@@ -267,3 +267,37 @@ func TestBuildQueue_IncludesUnanalysedTracks(t *testing.T) {
 	def := stations.Definition{PlaylistIDs: []string{f.playlistOf(analysed, unanalysed)}}
 	assert.Equal(t, sorted(analysed, unanalysed), sorted(f.queueIDs(f.station(def), def)...))
 }
+
+func TestBuildQueue_CopiesPlayAsOneSong(t *testing.T) {
+	f := newFixture(t)
+	best := f.addTrack(track{title: "Song", artist: "X", genres: []string{"techno"}})
+	other := f.addTrack(track{title: "Song (2011 Remaster)", artist: "X", genres: []string{"techno"}})
+	f.exec(`UPDATE tracks SET copy_of = $1::uuid WHERE id = $2::uuid`, best, other)
+	station := f.scalar(`INSERT INTO stations (user_id, name, genres, auto_genre, auto_active)
+		VALUES (NULL, 'Techno', ARRAY['techno'], 'techno', TRUE) RETURNING id::text`)
+	def := stations.Definition{Library: true, Genres: []string{"techno"}}
+	svc := playback.NewService(f.pool)
+
+	queue := func() []playback.TrackWithFeatures {
+		q, err := svc.BuildQueue(f.ctx, f.user, station, def, 24)
+		require.NoError(t, err)
+		return q
+	}
+	got := queue()
+	require.Len(t, got, 1, "only the best copy plays")
+	require.Equal(t, best, got[0].ID)
+
+	// Feedback given on the other copy counts for the song.
+	f.exec(`INSERT INTO track_feedback (user_id, track_id, feedback) VALUES ($1::uuid, $2::uuid, 'like')`, f.user, other)
+	require.True(t, queue()[0].Liked)
+	f.exec(`UPDATE track_feedback SET feedback = 'ban'`)
+	require.Empty(t, queue())
+	f.exec(`DELETE FROM track_feedback`)
+
+	f.exec(`INSERT INTO station_hidden_tracks (user_id, station_id, track_id) VALUES ($1::uuid, $2::uuid, $3::uuid)`, f.user, station, other)
+	require.Empty(t, queue())
+	other2 := f.newUser()
+	q2, err := svc.BuildQueue(f.ctx, other2, station, def, 24)
+	require.NoError(t, err)
+	require.Len(t, q2, 1, "another user still hears it")
+}

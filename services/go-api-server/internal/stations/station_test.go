@@ -103,3 +103,25 @@ func TestGenreStationShowsAndHidesWithAMargin(t *testing.T) {
 		require.Equal(t, c.want, c.a.shouldShow(c.enabled), c.name)
 	}
 }
+
+func TestWhereGenreStationPlaysTheLibraryByMainGenre(t *testing.T) {
+	st := Station{Kind: KindGenre, Genres: []string{"techno"}}
+	d := st.Definition()
+	require.True(t, d.Library)
+	var args Args
+	sql := d.Where(&args)
+	require.Contains(t, sql, "t.copy_of IS NULL")
+	require.Contains(t, sql, "g.is_primary")
+	require.NotContains(t, sql, "playlist")
+	require.Equal(t, Args{[]string{"techno"}}, args)
+}
+
+func TestWhereCustomStationPlaysMatchesAndPicksOfBestCopies(t *testing.T) {
+	var args Args
+	sql := Definition{PlaylistIDs: []string{idA}}.Where(&args)
+	require.Contains(t, sql, "t.copy_of IS NULL")
+	require.Contains(t, sql, "COALESCE(mt.copy_of, mt.id)")
+	require.Contains(t, sql, "pi.playlist_id = ANY($1::uuid[])")
+	require.Contains(t, sql, "lp.playlist_id = ANY($1::uuid[])")
+	require.Len(t, args, 1, "one placeholder for both")
+}

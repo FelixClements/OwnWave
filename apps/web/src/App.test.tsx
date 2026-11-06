@@ -48,7 +48,7 @@ function renderAt(path: string) {
 }
 
 const admin = { id: 'u1', username: 'felix', is_admin: true };
-const playlist: Playlist = { id: 'p1', spotify_id: 'sp1', name: 'Techno Bunker', track_count: 100, matched_count: 40, has_cover: false };
+const playlist: Playlist = { id: 'p1', spotify_id: 'sp1', name: 'Techno Bunker', track_count: 100, matched_count: 40, pick_count: 12, has_cover: false };
 const station: Station = {
   id: 's1',
   name: 'Bunker Techno',
@@ -60,7 +60,7 @@ const station: Station = {
   track_count: 40,
   updated_at: '2026-11-03T12:00:00Z',
 };
-const genreStation: Station = { ...station, id: 'g1', name: 'Techno', kind: 'genre', all_playlists: true, track_count: 30 };
+const genreStation: Station = { ...station, id: 'g1', name: 'Techno', kind: 'genre', all_playlists: false, playlist_ids: [], track_count: 30 };
 const genres = {
   scored_tracks: 40,
   warnings: [],
@@ -156,7 +156,7 @@ describe('App', () => {
     await user.type(within(dialog).getByLabelText('Name'), 'Late Techno');
     await user.click(within(dialog).getByRole('checkbox', { name: /Techno Bunker/ }));
     await user.click(await within(dialog).findByRole('button', { name: /Techno 30/ }));
-    expect(within(dialog).getByText(/Plays up to 30 tracks of 40 matched tracks/)).toBeInTheDocument();
+    expect(within(dialog).getByText(/Plays up to 30 tracks of 40 tracks/)).toBeInTheDocument();
     await user.click(within(dialog).getByRole('button', { name: 'Create station' }));
     await waitFor(() => expect(created).toEqual({ name: 'Late Techno', all_playlists: false, playlist_ids: ['p1'], genres: ['techno'] }));
   });
@@ -201,7 +201,7 @@ describe('App', () => {
     renderAt('/station/g1');
     const user = userEvent.setup();
     expect(await screen.findByText('Genre station')).toBeInTheDocument();
-    expect(screen.getByText('from every playlist')).toBeInTheDocument();
+    expect(screen.getByText('from your whole library')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Delete station' })).not.toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Rename station' }));
     const dialog = await screen.findByRole('dialog', { name: 'Edit station' });
@@ -270,6 +270,79 @@ describe('App', () => {
 
     await user.click(screen.getByRole('button', { name: /Refresh now/ }));
     await waitFor(() => expect(calls.some((c) => c.method === 'POST' && c.path === '/api/admin/pipeline/refresh')).toBe(true));
+  });
+
+  it('hides a song on a station and brings it back', async () => {
+    let hidden: { track_id: string; title: string; artist?: string }[] = [];
+    const song = { id: 't1', title: 'Domino', artist: 'Oxia', liked: false };
+    const calls = signedIn({
+      'GET /api/stations/{id}': () => genreStation,
+      'GET /api/stations/{id}/queue': () => ({ queue: hidden.length ? [] : [song] }),
+      'GET /api/stations/{id}/hidden-tracks': () => ({ tracks: hidden }),
+      'POST /api/stations/{id}/hidden-tracks': () => {
+        hidden = [{ track_id: 't1', title: 'Domino', artist: 'Oxia' }];
+        return undefined;
+      },
+      'DELETE /api/stations/{id}/hidden-tracks/{trackId}': () => {
+        hidden = [];
+        return undefined;
+      },
+    });
+    renderAt('/station/g1');
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('button', { name: 'Not in this station: Domino' }));
+    await waitFor(() => expect(calls.find((c) => c.method === 'POST' && c.path === '/api/stations/g1/hidden-tracks')?.body).toEqual({ track_id: 't1' }));
+    await user.click(await screen.findByText('Hidden on this station (1)'));
+    await user.click(screen.getByRole('button', { name: 'Bring back' }));
+    await waitFor(() => expect(calls.some((c) => c.method === 'DELETE' && c.path === '/api/stations/g1/hidden-tracks/t1')).toBe(true));
+    await waitFor(() => expect(screen.queryByText('Hidden on this station (1)')).not.toBeInTheDocument());
+  });
+
+  it('shows a playlist picks and lets an admin remove one', async () => {
+    let picks = [{ track_id: 't9', title: 'Sounds Alike', artist: 'Someone', hits: 3, similarity: 0.9 }];
+    const calls = signedIn({
+      'GET /api/playlists/{id}': () => ({ playlist, items: [] }),
+      'GET /api/playlists/{id}/picks': () => ({ picks }),
+      'DELETE /api/admin/playlists/{id}/picks/{trackId}': () => {
+        picks = [];
+        return undefined;
+      },
+    });
+    renderAt('/playlist/p1');
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('tab', { name: /From your library/ }));
+    expect(await screen.findByText('Sounds Alike')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: /Remove Sounds Alike/ }));
+    await waitFor(() => expect(calls.some((c) => c.method === 'DELETE' && c.path === '/api/admin/playlists/p1/picks/t9')).toBe(true));
+    expect(await screen.findByText('No picks yet')).toBeInTheDocument();
+  });
+
+  it('reviews and corrects genres from admin', async () => {
+    let corrections: unknown[] = [];
+    const calls = signedIn({
+      'GET /api/admin/health': () => ({ database: 'ok' }),
+      'GET /api/admin/scans': () => ({ jobs: [] }),
+      'GET /api/admin/users': () => ({ users: [admin] }),
+      'GET /api/admin/genre-stations': () => ({ enabled: true, show_at: 25, hide_below: 20, genres: [] }),
+      'GET /api/admin/pipeline': () => ({ runs: [] }),
+      'GET /api/admin/genre-review': () => ({
+        items: [{ track_id: 't1', title: 'Domino', artist: 'Oxia', genre: 'techno', score: 0.3, hidden_by: 2, copies_disagree: true }],
+      }),
+      'GET /api/admin/genre-corrections': () => ({ corrections }),
+      'POST /api/admin/genre-corrections': (body) => {
+        corrections = [{ id: 'c1', artist: 'Oxia', genre: (body as { genre: string }).genre, created_at: '2026-11-05T00:00:00Z' }];
+        return { corrections };
+      },
+    });
+    renderAt('/admin');
+    const user = userEvent.setup();
+    expect(await screen.findByText('Hidden by 2 listeners')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Looks right' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Set for this artist' })).not.toBeInTheDocument();
+    await user.selectOptions(await screen.findByRole('combobox', { name: 'Genre of Domino' }), 'house');
+    await user.click(screen.getByRole('button', { name: 'Set for this artist' }));
+    await waitFor(() => expect(calls.find((c) => c.method === 'POST' && c.path === '/api/admin/genre-corrections')?.body).toEqual({ artist: 'Oxia', genre: 'house' }));
+    expect(await screen.findByText('Everything by Oxia')).toBeInTheDocument();
   });
 
   it('lists the missing songs of a playlist', async () => {

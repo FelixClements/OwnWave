@@ -1,7 +1,7 @@
 import { useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import clsx from 'clsx';
-import { Ban, ChevronDown, Heart, ListMusic, SkipBack, SkipForward, Volume1, Volume2, VolumeX } from 'lucide-react';
+import { Ban, EyeOff, ChevronDown, Heart, ListMusic, SkipBack, SkipForward, Volume1, Volume2, VolumeX } from 'lucide-react';
 import { formatDuration } from '@/lib/format';
 import { QUALITY_LABELS, streamQuality, updateSettings, useSettings } from '@/lib/settings';
 import { rgb } from '@/lib/color';
@@ -205,6 +205,9 @@ export function NowPlaying() {
               <h2 className="truncate text-2xl font-bold">{t.title}</h2>
               <p className="truncate text-ink/70">{[t.artist, t.album].filter(Boolean).join(' · ')}</p>
             </div>
+            <IconButton label={`Not in this station: ${t.title}`} onClick={() => p.hide(t)}>
+              <EyeOff className="h-5 w-5" />
+            </IconButton>
             <IconButton label={`Never play ${t.title}`} onClick={() => p.ban(t)}>
               <Ban className="h-5 w-5" />
             </IconButton>

@@ -4,13 +4,17 @@ import clsx from 'clsx';
 import { AlertTriangle, CheckCircle2, Copy, Pencil, RefreshCw, Trash2, XCircle } from 'lucide-react';
 import { useQueryClient } from '@tanstack/react-query';
 import { api, call, callAs } from '@/api/client';
-import type { GenreStation, GenreStationSettings, PipelineRun, ScanSummary, StationChange } from '@/api/types';
+import type { GenreReviewItem, GenreStation, GenreStationSettings, PipelineRun, ScanSummary, StationChange } from '@/api/types';
 import { useAuth } from '@/lib/auth';
 import { plural, timeAgo } from '@/lib/format';
 import {
   isScanFinished,
   keys,
+  useGenreCorrectionActions,
+  useGenreCorrections,
+  useGenreNames,
   useGenreReport,
+  useGenreReview,
   useGenres,
   useGenreStations,
   useHealth,
@@ -336,8 +340,8 @@ function GenreStations() {
       ) : (
         <>
           <p className="text-sm text-muted">
-            Each genre station plays its genre from every playlist, shared with everyone. It appears once {plural(settings.show_at, 'track')} of
-            the genre are matched across your playlists and hides again below {settings.hide_below}. Hidden stations keep their listening
+            Each genre station plays every song in your library with that main genre, shared with everyone. It appears once{' '}
+            {plural(settings.show_at, 'song')} have the genre and hides again below {settings.hide_below}. Hidden stations keep their listening
             history.
           </p>
           <ErrorText error={setEnabled.error} />
@@ -365,6 +369,92 @@ function GenreStations() {
           </table>
         </>
       )}
+    </Card>
+  );
+}
+
+/** One song to check: pick its genre, for the song or for its whole artist. */
+function GenreReviewRow({ item, genres }: { item: GenreReviewItem; genres: { genre: string; name: string }[] }) {
+  const { save } = useGenreCorrectionActions();
+  const [genre, setGenre] = useState(item.genre);
+  return (
+    <li className="py-3 text-sm">
+      <div className="flex flex-wrap items-baseline gap-x-2">
+        <span className="min-w-0 truncate font-medium">{item.title}</span>
+        <span className="min-w-0 truncate text-muted">{item.artist ?? 'Unknown artist'}</span>
+        {item.hidden_by > 0 && <span className="rounded-full bg-raised px-2 py-0.5 text-[11px] text-muted">Hidden by {plural(item.hidden_by, 'listener')}</span>}
+        {item.copies_disagree && <span className="rounded-full bg-raised px-2 py-0.5 text-[11px] text-muted">Copies disagree</span>}
+      </div>
+      <div className="mt-2 flex flex-wrap items-center gap-2">
+        <select
+          aria-label={`Genre of ${item.title}`}
+          value={genre}
+          onChange={(e) => setGenre(e.target.value)}
+          className="h-9 rounded-md border border-line bg-card px-2 text-sm text-ink outline-none focus:border-ink"
+        >
+          {genres.map((g) => (
+            <option key={g.genre} value={g.genre}>
+              {g.name}
+            </option>
+          ))}
+        </select>
+        <Button size="sm" loading={save.isPending} onClick={() => save.mutate({ track_id: item.track_id, genre })}>
+          {genre === item.genre ? 'Looks right' : 'Set for this song'}
+        </Button>
+        {item.artist && genre !== item.genre && (
+          <Button size="sm" loading={save.isPending} onClick={() => save.mutate({ artist: item.artist, genre })}>
+            Set for this artist
+          </Button>
+        )}
+      </div>
+      <ErrorText error={save.error} />
+    </li>
+  );
+}
+
+function GenreReview() {
+  const review = useGenreReview();
+  const corrections = useGenreCorrections();
+  const genreData = useGenres();
+  const genreName = useGenreNames();
+  const { remove } = useGenreCorrectionActions();
+  const genres = (genreData.data?.genres ?? []).filter((g) => g.station).map((g) => ({ genre: g.genre, name: g.name }));
+  return (
+    <Card title="Genre review">
+      <p className="text-sm text-muted">
+        Songs most worth checking: those people hid on a genre station, then those whose copies disagree, then the least certain. A correction
+        replaces the scored genre at the next scoring, which starts right away.
+      </p>
+      {review.isLoading ? (
+        <Spinner />
+      ) : (
+        <>
+          <ErrorText error={review.error} />
+          <ul className="mt-2 max-h-96 divide-y divide-line overflow-y-auto">
+            {review.data?.map((item) => <GenreReviewRow key={`${item.track_id}-${item.genre}`} item={item} genres={genres} />)}
+            {review.data?.length === 0 && <li className="py-4 text-sm text-muted">Nothing to check.</li>}
+          </ul>
+        </>
+      )}
+      <div className="mt-4 border-t border-line pt-4">
+        <h3 className="mb-2 text-sm font-semibold">Corrections{corrections.data?.length ? ` (${corrections.data.length})` : ''}</h3>
+        <ErrorText error={corrections.error ?? remove.error} />
+        {corrections.data?.length === 0 && <p className="text-sm text-muted">None yet.</p>}
+        <ul className="max-h-64 divide-y divide-line overflow-y-auto">
+          {corrections.data?.map((c) => {
+            const what = c.artist ? `Everything by ${c.artist}` : `${c.track_title} · ${c.track_artist ?? 'Unknown artist'}`;
+            return (
+              <li key={c.id} className="flex items-center gap-3 py-2 text-sm">
+                <span className="min-w-0 flex-1 truncate">{what}</span>
+                <span className="shrink-0 font-semibold">{genreName(c.genre)}</span>
+                <IconButton label={`Remove the correction of ${what}`} size="sm" disabled={remove.isPending} onClick={() => remove.mutate(c.id)}>
+                  <Trash2 className="h-4 w-4" />
+                </IconButton>
+              </li>
+            );
+          })}
+        </ul>
+      </div>
     </Card>
   );
 }
@@ -544,6 +634,7 @@ export function AdminPage() {
         <Scans />
         <Genres />
         <GenreStations />
+        <GenreReview />
         <Pipeline />
         <Users />
       </div>

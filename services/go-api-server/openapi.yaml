@@ -476,10 +476,12 @@ paths:
       tags: [stations]
       summary: The next tracks to play (up to 200)
       description: |
-        Shuffled on every request: tracks not played on this station in the
-        last day first, then recently played ones (least recent first); the
-        same artist at most once every 4 tracks when possible; banned tracks
-        never. Fetch again when the queue runs out.
+        Every song gets a turn: songs never played on this station first, in
+        random order, then those played longest ago (shuffled within each
+        week), and last those played in the last day, least recent first. The
+        same artist at most once every 4 tracks when possible. Of several
+        copies of a song, the best one. Banned songs and songs the user hid
+        on this station never. Fetch again when the queue runs out.
       parameters: [{ $ref: "#/components/parameters/id" }]
       responses:
         "200":
@@ -490,6 +492,52 @@ paths:
                 type: object
                 required: [queue]
                 properties: { queue: { type: array, items: { $ref: "#/components/schemas/QueueTrack" } } }
+        "404": { $ref: "#/components/responses/Error" }
+  /api/stations/{id}/hidden-tracks:
+    get:
+      operationId: listHiddenTracks
+      tags: [stations]
+      summary: Songs the user hid on this station
+      parameters: [{ $ref: "#/components/parameters/id" }]
+      responses:
+        "200":
+          description: Hidden songs, newest first
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [tracks]
+                properties: { tracks: { type: array, items: { $ref: "#/components/schemas/HiddenTrack" } } }
+        "404": { $ref: "#/components/responses/Error" }
+    post:
+      operationId: hideTrack
+      tags: [stations]
+      summary: Keep a song off this station for this user
+      description: Other stations and other users are not affected. Any copy of the song hides the whole song.
+      parameters: [{ $ref: "#/components/parameters/id" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [track_id]
+              properties: { track_id: { type: string } }
+      responses:
+        "204": { description: Hidden }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /api/stations/{id}/hidden-tracks/{trackId}:
+    delete:
+      operationId: unhideTrack
+      tags: [stations]
+      summary: Bring a hidden song back to this station
+      parameters:
+        - { $ref: "#/components/parameters/id" }
+        - { name: trackId, in: path, required: true, schema: { type: string } }
+      responses:
+        "204": { description: Back on the station }
+        "400": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
   /api/stations/{id}/cover:
     get:
@@ -573,6 +621,23 @@ paths:
                 properties:
                   playlist: { $ref: "#/components/schemas/Playlist" }
                   items: { type: array, items: { $ref: "#/components/schemas/PlaylistItem" } }
+        "404": { $ref: "#/components/responses/Error" }
+  /api/playlists/{id}/picks:
+    get:
+      operationId: listPlaylistPicks
+      tags: [playlists]
+      summary: Library songs that sound like this playlist
+      description: Its stations play these alongside its matched tracks, each with the same chance. Strongest first.
+      parameters: [{ $ref: "#/components/parameters/id" }]
+      responses:
+        "200":
+          description: Picks
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [picks]
+                properties: { picks: { type: array, items: { $ref: "#/components/schemas/PlaylistPick" } } }
         "404": { $ref: "#/components/responses/Error" }
   /api/playlists/{id}/cover:
     get:
@@ -725,7 +790,63 @@ paths:
         "200": { $ref: "#/components/responses/GenreStationSettings" }
         "400": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
-        "409": { $ref: "#/components/responses/Error" }
+  /api/admin/genre-review:
+    get:
+      operationId: getGenreReview
+      tags: [admin]
+      summary: Songs whose main genre is most worth checking
+      description: Most often hidden on a genre station first, then songs whose copies disagree, then the lowest scores. Corrected songs are left out.
+      parameters:
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
+      responses:
+        "200":
+          description: Review list
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties: { items: { type: array, items: { $ref: "#/components/schemas/GenreReviewItem" } } }
+        "400": { $ref: "#/components/responses/Error" }
+  /api/admin/genre-corrections:
+    get:
+      operationId: listGenreCorrections
+      tags: [admin]
+      summary: Genre corrections, newest first
+      responses:
+        "200": { $ref: "#/components/responses/GenreCorrections" }
+    post:
+      operationId: saveGenreCorrection
+      tags: [admin]
+      summary: Correct the genre of a song or of an artist
+      description: |
+        A song's correction wins over its artist's, which wins over the
+        blended score. Saving twice replaces it. Queues genre scoring; if
+        queueing fails the correction is saved, and saving again retries.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [genre]
+              properties:
+                track_id: { type: string, description: "The song; give this or artist" }
+                artist: { type: string, description: "Every track of this artist; give this or track_id" }
+                genre: { type: string, description: A station genre }
+      responses:
+        "200": { $ref: "#/components/responses/GenreCorrections" }
+        "400": { $ref: "#/components/responses/Error" }
+  /api/admin/genre-corrections/{id}:
+    delete:
+      operationId: deleteGenreCorrection
+      tags: [admin]
+      summary: Take a genre correction back
+      description: Queues genre scoring; if queueing fails the correction is gone, and deleting again retries.
+      parameters: [{ $ref: "#/components/parameters/id" }]
+      responses:
+        "200": { $ref: "#/components/responses/GenreCorrections" }
+        "400": { $ref: "#/components/responses/Error" }
   /api/admin/pipeline:
     get:
       operationId: getPipeline
@@ -801,6 +922,19 @@ paths:
       responses:
         "204": { description: Deleted }
         "409": { $ref: "#/components/responses/Error" }
+  /api/admin/playlists/{id}/picks/{trackId}:
+    delete:
+      operationId: removePlaylistPick
+      tags: [admin]
+      summary: Take a song out of a playlist's picks for good
+      description: Its other playlists are not affected. The freed place fills at the next rebuild.
+      parameters:
+        - { $ref: "#/components/parameters/id" }
+        - { name: trackId, in: path, required: true, schema: { type: string } }
+      responses:
+        "204": { description: Removed }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
   /api/admin/metrics:
     get:
       operationId: getMetrics
@@ -889,6 +1023,14 @@ components:
     Station:
       description: Station
       content: { application/json: { schema: { $ref: "#/components/schemas/Station" } } }
+    GenreCorrections:
+      description: Every genre correction
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [corrections]
+            properties: { corrections: { type: array, items: { $ref: "#/components/schemas/GenreCorrection" } } }
     GenreStationSettings:
       description: Genre stations
       content: { application/json: { schema: { $ref: "#/components/schemas/GenreStationSettings" } } }
@@ -1035,7 +1177,7 @@ components:
         station_id: { type: string, description: "Empty until the genre first reaches the threshold" }
         name: { type: string }
         name_is_custom: { type: boolean }
-        tracks: { type: integer, description: Matched tracks of this genre across every playlist }
+        tracks: { type: integer, description: Songs of the library with this main genre }
         state:
           type: string
           enum: [active, below_threshold, excluded, "off"]
@@ -1113,16 +1255,56 @@ components:
           properties: { reason: { type: string, enum: [station, genre, playlist, artist] } }
     Playlist:
       type: object
-      required: [id, spotify_id, name, track_count, matched_count, has_cover]
+      required: [id, spotify_id, name, track_count, matched_count, pick_count, has_cover]
       properties:
         id: { type: string }
         spotify_id: { type: string }
         name: { type: string }
         track_count: { type: integer, description: Every track it ever listed }
         matched_count: { type: integer, description: "Of those, found in the library" }
+        pick_count: { type: integer, description: "Library songs that sound like it; its stations play them too" }
         last_synced_at: { type: string, format: date-time }
         last_sync_error: { type: string }
         has_cover: { type: boolean, description: "Its Spotify cover is downloaded: GET /api/playlists/{id}/cover" }
+    PlaylistPick:
+      type: object
+      required: [track_id, title, hits, similarity]
+      properties:
+        track_id: { type: string }
+        title: { type: string }
+        artist: { type: string }
+        duration_seconds: { type: number, format: double }
+        hits: { type: integer, description: "How many of the playlist's tracks have this song among their nearest" }
+        similarity: { type: number, description: Cosine similarity to the closest of them }
+    HiddenTrack:
+      type: object
+      required: [track_id, title]
+      properties:
+        track_id: { type: string }
+        title: { type: string }
+        artist: { type: string }
+    GenreReviewItem:
+      type: object
+      required: [track_id, title, genre, score, hidden_by, copies_disagree]
+      properties:
+        track_id: { type: string }
+        title: { type: string }
+        artist: { type: string }
+        genre: { type: string }
+        score: { type: number }
+        hidden_by: { type: integer, description: How many users hid it on a genre station }
+        copies_disagree: { type: boolean, description: Another copy of the song has a different main genre }
+    GenreCorrection:
+      type: object
+      required: [id, genre, created_at]
+      properties:
+        id: { type: string }
+        track_id: { type: string, description: Set when it corrects a song }
+        track_title: { type: string }
+        track_artist: { type: string }
+        artist: { type: string, description: Set when it corrects an artist }
+        genre: { type: string }
+        created_at: { type: string, format: date-time }
     PlaylistItem:
       type: object
       required: [spotify_track_id, title, artists, first_seen_at, last_seen_at]

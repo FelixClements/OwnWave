@@ -34,11 +34,13 @@ func NewService(pool *pgxpool.Pool, fetcher Fetcher) *Service {
 }
 
 type Playlist struct {
-	ID            string     `json:"id"`
-	SpotifyID     string     `json:"spotify_id"`
-	Name          string     `json:"name"`
-	TrackCount    int        `json:"track_count"`
-	MatchedCount  int        `json:"matched_count"`
+	ID           string `json:"id"`
+	SpotifyID    string `json:"spotify_id"`
+	Name         string `json:"name"`
+	TrackCount   int    `json:"track_count"`
+	MatchedCount int    `json:"matched_count"`
+	// PickCount is how many library songs its stations play on top of the matches.
+	PickCount     int        `json:"pick_count"`
 	LastSyncedAt  *time.Time `json:"last_synced_at,omitempty"`
 	LastSyncError *string    `json:"last_sync_error,omitempty"`
 	// HasCover is true once the playlist's Spotify cover is downloaded.
@@ -64,11 +66,12 @@ const playlistColumns = `
 	(SELECT COUNT(*) FROM playlist_items pi
 	 JOIN spotify_track_matches m ON m.spotify_track_id = pi.spotify_track_id
 	 WHERE pi.playlist_id = p.id AND m.track_id IS NOT NULL),
+	(SELECT COUNT(*) FROM playlist_library_picks lp WHERE lp.playlist_id = p.id),
 	p.last_synced_at, p.last_sync_error, p.cover_image IS NOT NULL`
 
 func scanPlaylist(row pgx.Row) (Playlist, error) {
 	var p Playlist
-	err := row.Scan(&p.ID, &p.SpotifyID, &p.Name, &p.TrackCount, &p.MatchedCount, &p.LastSyncedAt, &p.LastSyncError, &p.HasCover)
+	err := row.Scan(&p.ID, &p.SpotifyID, &p.Name, &p.TrackCount, &p.MatchedCount, &p.PickCount, &p.LastSyncedAt, &p.LastSyncError, &p.HasCover)
 	return p, err
 }
 
@@ -305,19 +308,7 @@ func (s *Service) MatchPending(ctx context.Context) (int, error) {
 		return 0, err
 	}
 
-	rows, err = s.pool.Query(ctx, `
-		SELECT t.id::text, t.title, COALESCE(a.name, ''), COALESCE(t.duration_seconds, 0),
-		       COALESCE(t.sample_rate, 0), COALESCE(t.file_size, 0)
-		FROM tracks t LEFT JOIN artists a ON a.id = t.artist_id
-	`)
-	if err != nil {
-		return 0, err
-	}
-	local, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (LocalTrack, error) {
-		var t LocalTrack
-		err := row.Scan(&t.ID, &t.Title, &t.Artist, &t.DurationSec, &t.SampleRate, &t.FileSize)
-		return t, err
-	})
+	local, err := loadLocal(ctx, s.pool)
 	if err != nil {
 		return 0, err
 	}

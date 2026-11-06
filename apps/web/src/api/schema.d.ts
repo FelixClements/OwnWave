@@ -537,15 +537,55 @@ export interface paths {
         };
         /**
          * The next tracks to play (up to 200)
-         * @description Shuffled on every request: tracks not played on this station in the
-         *     last day first, then recently played ones (least recent first); the
-         *     same artist at most once every 4 tracks when possible; banned tracks
-         *     never. Fetch again when the queue runs out.
+         * @description Every song gets a turn: songs never played on this station first, in
+         *     random order, then those played longest ago (shuffled within each
+         *     week), and last those played in the last day, least recent first. The
+         *     same artist at most once every 4 tracks when possible. Of several
+         *     copies of a song, the best one. Banned songs and songs the user hid
+         *     on this station never. Fetch again when the queue runs out.
          */
         get: operations["getQueue"];
         put?: never;
         post?: never;
         delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/stations/{id}/hidden-tracks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Songs the user hid on this station */
+        get: operations["listHiddenTracks"];
+        put?: never;
+        /**
+         * Keep a song off this station for this user
+         * @description Other stations and other users are not affected. Any copy of the song hides the whole song.
+         */
+        post: operations["hideTrack"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/stations/{id}/hidden-tracks/{trackId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Bring a hidden song back to this station */
+        delete: operations["unhideTrack"];
         options?: never;
         head?: never;
         patch?: never;
@@ -635,6 +675,26 @@ export interface paths {
         };
         /** A playlist with every track it ever listed */
         get: operations["getPlaylist"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/playlists/{id}/picks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Library songs that sound like this playlist
+         * @description Its stations play these alongside its matched tracks, each with the same chance. Strongest first.
+         */
+        get: operations["listPlaylistPicks"];
         put?: never;
         post?: never;
         delete?: never;
@@ -834,6 +894,69 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/admin/genre-review": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Songs whose main genre is most worth checking
+         * @description Most often hidden on a genre station first, then songs whose copies disagree, then the lowest scores. Corrected songs are left out.
+         */
+        get: operations["getGenreReview"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/genre-corrections": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Genre corrections, newest first */
+        get: operations["listGenreCorrections"];
+        put?: never;
+        /**
+         * Correct the genre of a song or of an artist
+         * @description A song's correction wins over its artist's, which wins over the
+         *     blended score. Saving twice replaces it. Queues genre scoring; if
+         *     queueing fails the correction is saved, and saving again retries.
+         */
+        post: operations["saveGenreCorrection"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/genre-corrections/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Take a genre correction back
+         * @description Queues genre scoring; if queueing fails the correction is gone, and deleting again retries.
+         */
+        delete: operations["deleteGenreCorrection"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/admin/pipeline": {
         parameters: {
             query?: never;
@@ -965,6 +1088,26 @@ export interface paths {
         post?: never;
         /** Delete a playlist no station uses */
         delete: operations["deletePlaylist"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/playlists/{id}/picks/{trackId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Take a song out of a playlist's picks for good
+         * @description Its other playlists are not affected. The freed place fills at the next rebuild.
+         */
+        delete: operations["removePlaylistPick"];
         options?: never;
         head?: never;
         patch?: never;
@@ -1190,7 +1333,7 @@ export interface components {
             station_id?: string;
             name: string;
             name_is_custom: boolean;
-            /** @description Matched tracks of this genre across every playlist */
+            /** @description Songs of the library with this main genre */
             tracks: number;
             /** @enum {string} */
             state: "active" | "below_threshold" | "excluded" | "off";
@@ -1270,11 +1413,52 @@ export interface components {
             track_count: number;
             /** @description Of those, found in the library */
             matched_count: number;
+            /** @description Library songs that sound like it; its stations play them too */
+            pick_count: number;
             /** Format: date-time */
             last_synced_at?: string;
             last_sync_error?: string;
             /** @description Its Spotify cover is downloaded: GET /api/playlists/{id}/cover */
             has_cover: boolean;
+        };
+        PlaylistPick: {
+            track_id: string;
+            title: string;
+            artist?: string;
+            /** Format: double */
+            duration_seconds?: number;
+            /** @description How many of the playlist's tracks have this song among their nearest */
+            hits: number;
+            /** @description Cosine similarity to the closest of them */
+            similarity: number;
+        };
+        HiddenTrack: {
+            track_id: string;
+            title: string;
+            artist?: string;
+        };
+        GenreReviewItem: {
+            track_id: string;
+            title: string;
+            artist?: string;
+            genre: string;
+            score: number;
+            /** @description How many users hid it on a genre station */
+            hidden_by: number;
+            /** @description Another copy of the song has a different main genre */
+            copies_disagree: boolean;
+        };
+        GenreCorrection: {
+            id: string;
+            /** @description Set when it corrects a song */
+            track_id?: string;
+            track_title?: string;
+            track_artist?: string;
+            /** @description Set when it corrects an artist */
+            artist?: string;
+            genre: string;
+            /** Format: date-time */
+            created_at: string;
         };
         PlaylistItem: {
             spotify_track_id: string;
@@ -1375,6 +1559,17 @@ export interface components {
             };
             content: {
                 "application/json": components["schemas"]["Station"];
+            };
+        };
+        /** @description Every genre correction */
+        GenreCorrections: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": {
+                    corrections: components["schemas"]["GenreCorrection"][];
+                };
             };
         };
         /** @description Genre stations */
@@ -2145,6 +2340,82 @@ export interface operations {
             404: components["responses"]["Error"];
         };
     };
+    listHiddenTracks: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["id"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Hidden songs, newest first */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        tracks: components["schemas"]["HiddenTrack"][];
+                    };
+                };
+            };
+            404: components["responses"]["Error"];
+        };
+    };
+    hideTrack: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["id"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    track_id: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Hidden */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    unhideTrack: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["id"];
+                trackId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Back on the station */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
     getStationCover: {
         parameters: {
             query?: never;
@@ -2256,6 +2527,31 @@ export interface operations {
                     "application/json": {
                         playlist: components["schemas"]["Playlist"];
                         items: components["schemas"]["PlaylistItem"][];
+                    };
+                };
+            };
+            404: components["responses"]["Error"];
+        };
+    };
+    listPlaylistPicks: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["id"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Picks */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        picks: components["schemas"]["PlaylistPick"][];
                     };
                 };
             };
@@ -2495,7 +2791,82 @@ export interface operations {
             200: components["responses"]["GenreStationSettings"];
             400: components["responses"]["Error"];
             404: components["responses"]["Error"];
-            409: components["responses"]["Error"];
+        };
+    };
+    getGenreReview: {
+        parameters: {
+            query?: {
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Review list */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        items: components["schemas"]["GenreReviewItem"][];
+                    };
+                };
+            };
+            400: components["responses"]["Error"];
+        };
+    };
+    listGenreCorrections: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: components["responses"]["GenreCorrections"];
+        };
+    };
+    saveGenreCorrection: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description The song; give this or artist */
+                    track_id?: string;
+                    /** @description Every track of this artist; give this or track_id */
+                    artist?: string;
+                    /** @description A station genre */
+                    genre: string;
+                };
+            };
+        };
+        responses: {
+            200: components["responses"]["GenreCorrections"];
+            400: components["responses"]["Error"];
+        };
+    };
+    deleteGenreCorrection: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["id"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: components["responses"]["GenreCorrections"];
+            400: components["responses"]["Error"];
         };
     };
     getPipeline: {
@@ -2645,6 +3016,29 @@ export interface operations {
                 content?: never;
             };
             409: components["responses"]["Error"];
+        };
+    };
+    removePlaylistPick: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["id"];
+                trackId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Removed */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["Error"];
+            404: components["responses"]["Error"];
         };
     };
     getMetrics: {

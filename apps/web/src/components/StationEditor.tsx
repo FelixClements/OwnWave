@@ -97,7 +97,7 @@ export function StationEditor({
 
         {genreStation ? (
           <p className="text-sm text-muted">
-            A genre station plays its genre from every playlist and keeps itself up to date, so only its name changes. Admins can hide it
+            A genre station plays every song in your library with this main genre and keeps itself up to date, so only its name changes. Admins can hide it
             or give it back its genre's name on the Admin page.
           </p>
         ) : (
@@ -160,7 +160,7 @@ export function StationEditor({
                 )}
                 <p className="mt-3 text-[13px] text-muted">
                   Plays {genres.length ? 'up to ' : ''}
-                  {plural(plays, 'track')} of {plural(pool.data?.tracks ?? 0, 'matched track')}.
+                  {plural(plays, 'track')} of {plural(pool.data?.tracks ?? 0, 'track')}.
                 </p>
               </fieldset>
             )}

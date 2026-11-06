@@ -1,11 +1,16 @@
-// Package stations owns stations: a pool of synced Spotify playlists,
-// optionally limited to station genres. A station plays the local matches
-// of its playlists that carry one of its genres (primary or secondary).
+// Package stations owns stations. There are two kinds.
 //
-// There are two kinds. Custom stations are made by hand: admins make shared
-// ones, everyone else personal ones. Genre stations are made by Refresh:
-// one shared station per station genre with enough tracks across every
-// playlist. Their pool is "all playlists", evaluated live.
+// Custom stations are made by hand: admins make shared ones, everyone else
+// personal ones. A custom station's pool is one or more synced Spotify
+// playlists: their local matches and library picks, optionally limited to
+// station genres (primary or secondary).
+//
+// Genre stations are made by Refresh: one shared station per station genre
+// with enough songs in the library. A genre station plays every song whose
+// main genre is that genre, evaluated live.
+//
+// Every station plays songs: of several copies of a song, its best copy
+// (tracks.copy_of). Bans, likes, history and hides count for the whole song.
 package stations
 
 import (
@@ -45,6 +50,9 @@ var genreIDPattern = regexp.MustCompile(`^[a-z][a-z0-9_]{0,39}$`)
 
 // Definition is what a station plays.
 type Definition struct {
+	// Library: a genre station's pool, every song of the library whose main
+	// genre is in Genres. Playlists play no part.
+	Library bool `json:"-"`
 	// AllPlaylists: the pool is every playlist, including ones added
 	// later; PlaylistIDs is then ignored.
 	AllPlaylists bool     `json:"all_playlists"`
@@ -71,7 +79,7 @@ type Station struct {
 
 // Definition returns what the station plays.
 func (s Station) Definition() Definition {
-	return Definition{AllPlaylists: s.AllPlaylists, PlaylistIDs: s.PlaylistIDs, Genres: s.Genres}
+	return Definition{Library: s.Kind == KindGenre, AllPlaylists: s.AllPlaylists, PlaylistIDs: s.PlaylistIDs, Genres: s.Genres}
 }
 
 // Request is the create/update body. On update, nil fields keep their

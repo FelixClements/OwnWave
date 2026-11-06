@@ -1,6 +1,10 @@
 # 0001: Genre stations that build and maintain themselves
 
-Status: accepted, 2026-11-04. Migration 022.
+Status: accepted, 2026-11-04. Migration 022. Partly superseded by
+[ADR 0002](0002-library-genre-stations.md), 2026-11-05: genre stations now
+play the whole library by main genre, so `all_playlists` no longer applies
+to them (decisions 1 and 2), the thresholds in decision 4 count library songs,
+and decision 6 is gone.
 
 ## Context
 

@@ -17,7 +17,7 @@ const redundantShare = 0.9
 
 // Suggestion is a custom station OwnWave proposes for one playlist.
 // Accepting it creates a station with that playlist and (unless Genre is
-// empty) this one genre. Genres across all playlists are covered by genre
+// empty) this one genre. Genres across the library are covered by genre
 // stations, which need no accepting.
 type Suggestion struct {
 	PlaylistIDs   []string `json:"playlist_ids"`
@@ -31,15 +31,14 @@ type Suggestion struct {
 type playlistRef struct{ id, name string }
 
 // poolData is everything suggestions are computed from, loaded at once:
-// the library is small enough (thousands of matched tracks) to count in memory.
+// the library is small enough (thousands of songs) to count in memory.
 type poolData struct {
 	playlists   []playlistRef
-	matched     map[string]map[string]bool // playlist id -> local track ids
+	matched     map[string]map[string]bool // playlist id -> songs it plays: matches and picks, by best copy
 	trackGenres map[string]map[string]bool // track id -> station genres
 	genres      []Genre                    // station genres, display order
 	stations    map[string]bool            // pool key + "|" + genres key of existing custom stations
 	dismissed   map[string]bool            // pool key + "|" + genre
-	active      map[string]bool            // genres with an active genre station
 }
 
 func (d *poolData) allPlaylistIDs() []string {
@@ -56,7 +55,6 @@ func (s *Service) loadPools(ctx context.Context) (*poolData, error) {
 		trackGenres: map[string]map[string]bool{},
 		stations:    map[string]bool{},
 		dismissed:   map[string]bool{},
-		active:      map[string]bool{},
 	}
 	collect := func(sql string, each func(a, b string)) error {
 		rows, err := s.pool.Query(ctx, sql)
@@ -74,9 +72,11 @@ func (s *Service) loadPools(ctx context.Context) (*poolData, error) {
 		{`SELECT id::text, name FROM playlists ORDER BY lower(name)`, func(id, name string) {
 			d.playlists = append(d.playlists, playlistRef{id, name})
 		}},
-		{`SELECT DISTINCT pi.playlist_id::text, m.track_id::text FROM playlist_items pi
+		{`SELECT pi.playlist_id::text, COALESCE(mt.copy_of, mt.id)::text FROM playlist_items pi
 		  JOIN spotify_track_matches m ON m.spotify_track_id = pi.spotify_track_id
-		  WHERE m.track_id IS NOT NULL`, func(p, t string) {
+		  JOIN tracks mt ON mt.id = m.track_id
+		  UNION
+		  SELECT lp.playlist_id::text, lp.track_id::text FROM playlist_library_picks lp`, func(p, t string) {
 			if d.matched[p] == nil {
 				d.matched[p] = map[string]bool{}
 			}
@@ -97,9 +97,6 @@ func (s *Service) loadPools(ctx context.Context) (*poolData, error) {
 		  FROM stations s WHERE s.auto_genre IS NULL AND NOT s.all_playlists`, func(pool, genres string) {
 			d.stations[pool+"|"+genres] = true
 		}},
-		{`SELECT auto_genre, '' FROM stations WHERE auto_genre IS NOT NULL AND auto_active`, func(g, _ string) {
-			d.active[g] = true
-		}},
 		{`SELECT pool_key, genre FROM station_suggestion_dismissals`, func(pool, genre string) {
 			d.dismissed[pool+"|"+genre] = true
 		}},
@@ -112,7 +109,7 @@ func (s *Service) loadPools(ctx context.Context) (*poolData, error) {
 	return d, nil
 }
 
-// poolTracks is the union of the playlists' matched tracks.
+// poolTracks is the union of the songs the playlists play.
 func (d *poolData) poolTracks(playlistIDs []string) map[string]bool {
 	out := map[string]bool{}
 	for _, p := range playlistIDs {
@@ -136,9 +133,8 @@ func (d *poolData) countGenre(tracks map[string]bool, genre string) int {
 // Suggestions proposes custom stations, one playlist at a time: the
 // whole playlist and each station genre with at least MinSuggestionTracks
 // tracks in it. Skipped: pools that already have such a station,
-// dismissed suggestions, a genre covering almost the whole playlist, and
-// a genre whose genre station plays exactly the same tracks (every track
-// of that genre is in this playlist). Largest first.
+// dismissed suggestions and a genre covering almost the whole playlist.
+// Largest first.
 //
 // Pool keys of one playlist never change, so a dismissal stays valid when
 // playlists are added.
@@ -147,7 +143,6 @@ func (s *Service) Suggestions(ctx context.Context) ([]Suggestion, error) {
 	if err != nil {
 		return nil, err
 	}
-	everything := d.poolTracks(d.allPlaylistIDs())
 
 	out := []Suggestion{}
 	for _, p := range d.playlists {
@@ -165,8 +160,7 @@ func (s *Service) Suggestions(ctx context.Context) ([]Suggestion, error) {
 		for _, g := range d.genres {
 			n := d.countGenre(tracks, g.ID)
 			if n < MinSuggestionTracks || float64(n) >= redundantShare*float64(len(tracks)) ||
-				d.stations[key+"|"+g.ID] || d.dismissed[key+"|"+g.ID] ||
-				(d.active[g.ID] && n == d.countGenre(everything, g.ID)) {
+				d.stations[key+"|"+g.ID] || d.dismissed[key+"|"+g.ID] {
 				continue
 			}
 			out = append(out, Suggestion{

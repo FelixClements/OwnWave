@@ -70,3 +70,54 @@ def test_sync_catalog_writes_station_genres(db_url):
         assert [r[0] for r in rows] == list(tx.STATION_GENRES)
         assert ("techno", "Techno", True) in rows
         assert ("other", "Other", False) in rows
+
+
+def test_score_library_applies_corrections(db_url):
+    with psycopg.connect(db_url) as conn:
+        artist = conn.execute("INSERT INTO artists (name) VALUES ('Röyksopp feat. Robyn') RETURNING id").fetchone()[0]
+
+        def track(path, artist_id=None, copy_of=None):
+            return conn.execute(
+                """
+                INSERT INTO tracks (path, title, genre_tag, artist_id, copy_of)
+                VALUES (%s, %s, 'Techno', %s, %s) RETURNING id
+                """,
+                (path, path, artist_id, copy_of),
+            ).fetchone()[0]
+
+        best = track("/m/best.flac")
+        copy = track("/m/copy.mp3", copy_of=best)
+        by_artist = track("/m/by-artist.flac", artist)
+        both = track("/m/both.flac", artist)
+        untouched = track("/m/untouched.flac")
+        genre_scoring.sync_catalog(conn)
+        # Stored on the copy: applies to the whole song.
+        conn.execute("INSERT INTO genre_corrections (track_id, genre) VALUES (%s, 'jazz')", (copy,))
+        # Matches the credit's primary artist, ignoring case and accents.
+        conn.execute("INSERT INTO genre_corrections (artist, genre) VALUES ('ROYKSOPP', 'ambient')")
+        # A song's correction wins over its artist's.
+        conn.execute("INSERT INTO genre_corrections (track_id, genre) VALUES (%s, 'rock')", (both,))
+
+        assert genre_scoring.score_library(conn, None) == {"tracks": 5, "scored": 5}
+
+        def genres(track_id):
+            return conn.execute(
+                "SELECT genre, score, is_primary, corrected FROM track_station_genres WHERE track_id = %s",
+                (track_id,),
+            ).fetchall()
+
+        assert genres(best) == [("jazz", 1.0, True, True)]
+        assert genres(copy) == [("jazz", 1.0, True, True)]
+        assert genres(by_artist) == [("ambient", 1.0, True, True)]
+        assert genres(both) == [("rock", 1.0, True, True)]
+        assert genres(untouched) == [("techno", 1.0, True, False)]
+
+
+def test_score_library_ignores_correction_to_unknown_genre(db_url):
+    with psycopg.connect(db_url) as conn:
+        tid = conn.execute(
+            "INSERT INTO tracks (path, title, genre_tag) VALUES ('/m/a.flac', 'a', 'Techno') RETURNING id"
+        ).fetchone()[0]
+        conn.execute("INSERT INTO genre_corrections (track_id, genre) VALUES (%s, 'gone')", (tid,))
+        genre_scoring.score_library(conn, None)
+        assert db.get_track_station_genres(conn, tid)[0]["genre"] == "techno"

@@ -195,7 +195,7 @@ func TestStationSuggestionsAndGenreCounts(t *testing.T) {
 	require.Equal(t, http.StatusBadRequest, f.call(f.h.ListStationGenres, admin, http.MethodGet, "/stations/genres", "", "").Code)
 }
 
-func TestSuggestionsSkipWhatAGenreStationPlays(t *testing.T) {
+func TestSuggestionsOfferAGenreOfAPlaylist(t *testing.T) {
 	f := newStationsFixture(t)
 	admin := f.user("admin", true)
 	mixed := f.playlist("mixed-list", 26, "techno")
@@ -211,9 +211,9 @@ func TestSuggestionsSkipWhatAGenreStationPlays(t *testing.T) {
 	for _, x := range s.Suggestions {
 		names = append(names, x.Name)
 	}
-	// Every techno track is in mixed-list: "Techno · mixed-list" would play
-	// exactly what the Techno genre station plays.
-	require.Equal(t, []string{"mixed-list", "house-list"}, names)
+	// "Techno · mixed-list" plays the playlist's techno; the Techno genre
+	// station plays the library's, so they are never the same station.
+	require.Equal(t, []string{"mixed-list", "house-list", "Techno · mixed-list"}, names)
 }
 
 func TestBrowseTreeAndVoiceSearch(t *testing.T) {

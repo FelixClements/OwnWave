@@ -2,8 +2,10 @@ package main
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
 	"regexp"
+	"strconv"
 
 	"github.com/go-chi/chi/v5"
 
@@ -100,4 +102,79 @@ func (h *Handler) AdminRefreshPipeline(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, run)
+}
+
+const (
+	genreReviewDefault = 50
+	genreReviewMax     = 200
+)
+
+// AdminGenreReview lists the songs most worth checking: ?limit= up to 200.
+func (h *Handler) AdminGenreReview(w http.ResponseWriter, r *http.Request) {
+	limit := genreReviewDefault
+	if v := r.URL.Query().Get("limit"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n < 1 || n > genreReviewMax {
+			http.Error(w, fmt.Sprintf("limit must be 1 to %d", genreReviewMax), http.StatusBadRequest)
+			return
+		}
+		limit = n
+	}
+	items, err := h.stations.GenreReview(r.Context(), limit)
+	if err != nil {
+		writeInternalError(w, r, "genre review", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"items": items})
+}
+
+// AdminGenreCorrections lists every genre correction.
+func (h *Handler) AdminGenreCorrections(w http.ResponseWriter, r *http.Request) {
+	list, err := h.stations.GenreCorrections(r.Context())
+	if err != nil {
+		writeInternalError(w, r, "genre corrections", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"corrections": list})
+}
+
+// AdminSaveGenreCorrection corrects a song or an artist:
+// POST {"track_id" or "artist", "genre"}. Saving twice replaces it.
+func (h *Handler) AdminSaveGenreCorrection(w http.ResponseWriter, r *http.Request) {
+	var req stations.GenreCorrectionRequest
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	if err := h.stations.SaveGenreCorrection(r.Context(), req); err != nil {
+		writeStationError(w, r, "save genre correction", err)
+		return
+	}
+	h.rescoreAndListCorrections(w, r)
+}
+
+// AdminDeleteGenreCorrection takes a correction back.
+func (h *Handler) AdminDeleteGenreCorrection(w http.ResponseWriter, r *http.Request) {
+	id, ok := parseUUIDParam(w, r, "id")
+	if !ok {
+		return
+	}
+	if err := h.stations.DeleteGenreCorrection(r.Context(), id); err != nil {
+		writeInternalError(w, r, "delete genre correction", err)
+		return
+	}
+	h.rescoreAndListCorrections(w, r)
+}
+
+// rescoreAndListCorrections queues genre scoring, which applies corrections.
+// The change is saved either way, so a client can retry when queueing fails.
+func (h *Handler) rescoreAndListCorrections(w http.ResponseWriter, r *http.Request) {
+	resp, err := h.analytics.RebuildGenres(r.Context())
+	if err == nil && resp.StatusCode >= http.StatusBadRequest {
+		err = fmt.Errorf("analytics answered %d", resp.StatusCode)
+	}
+	if err != nil {
+		writeInternalError(w, r, "queue genre scoring", err)
+		return
+	}
+	h.AdminGenreCorrections(w, r)
 }

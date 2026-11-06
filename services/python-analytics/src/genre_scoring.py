@@ -11,6 +11,9 @@ The blend is a weighted average; a missing source's weight is shared by
 the others. The top genre is the track's primary genre; any other genre
 scoring at least SECONDARY_RATIO of the top is a secondary genre, so a
 track can sit in more than one station.
+
+An admin's correction (genre_corrections) replaces all of that: the track
+gets that genre alone. A song's correction wins over its artist's.
 """
 
 import logging
@@ -87,7 +90,7 @@ def primary_of(dist: Dict[str, float]) -> Optional[str]:
 # --- database pass -----------------------------------------------------------
 
 _TRACKS_SQL = """
-    SELECT t.id, a.name, t.genre_tag, g.activations
+    SELECT t.id, COALESCE(t.copy_of, t.id), a.name, t.genre_tag, g.activations
     FROM tracks t
     LEFT JOIN artists a ON a.id = t.artist_id
     LEFT JOIN track_audio_genres g ON g.track_id = t.id
@@ -109,6 +112,44 @@ def artist_mb_tags(credit: Optional[str], by_key: Dict[str, List[dict]]) -> Opti
     if tags is None:
         tags = by_key.get(name_key(primary_artist(credit)))
     return tags
+
+
+@dataclass
+class Corrections:
+    """Admin corrections: genre by song id, and by artist name key."""
+
+    songs: Dict[object, str]
+    artists: Dict[str, str]
+
+    def genre_for(self, song_id, credit: Optional[str]) -> Optional[str]:
+        from musicbrainz import name_key, primary_artist
+
+        genre = self.songs.get(song_id)
+        if genre is None and credit:
+            genre = self.artists.get(name_key(credit)) or self.artists.get(name_key(primary_artist(credit)))
+        return genre
+
+
+def load_corrections(conn) -> Corrections:
+    """Corrections with a known genre; the newest wins when two end up on one song."""
+    from musicbrainz import name_key
+
+    fixes = Corrections({}, {})
+    rows = conn.execute(
+        """
+        SELECT COALESCE(t.copy_of, t.id), c.artist, c.genre
+        FROM genre_corrections c LEFT JOIN tracks t ON t.id = c.track_id
+        ORDER BY c.created_at
+        """
+    ).fetchall()
+    for song_id, artist, genre in rows:
+        if genre not in tx.STATION_GENRES:
+            continue
+        if artist is not None:
+            fixes.artists[name_key(artist)] = genre
+        else:
+            fixes.songs[song_id] = genre
+    return fixes
 
 
 def sync_catalog(conn) -> None:
@@ -133,18 +174,27 @@ def score_library(conn, labels: Optional[List[str]]) -> dict:
     """Recompute track_station_genres for every track. The caller commits."""
     sync_catalog(conn)
     mb = _mb_tags_by_key(conn)
+    fixes = load_corrections(conn)
     rows = conn.execute(_TRACKS_SQL).fetchall()
     values = []
     scored = 0
-    for track_id, artist, genre_tag, activations in rows:
+    for track_id, song_id, artist, genre_tag, activations in rows:
+        fixed = fixes.genre_for(song_id, artist)
+        if fixed is not None:
+            scored += 1
+            values.append((track_id, fixed, 1.0, True, True))
+            continue
         genres = score_track(labels, activations, genre_tag, artist_mb_tags(artist, mb))
         if genres:
             scored += 1
-        values.extend((track_id, g.genre, g.score, g.is_primary) for g in genres)
+        values.extend((track_id, g.genre, g.score, g.is_primary, False) for g in genres)
     conn.execute("DELETE FROM track_station_genres")
     with conn.cursor() as cur:
         cur.executemany(
-            "INSERT INTO track_station_genres (track_id, genre, score, is_primary) VALUES (%s, %s, %s, %s)",
+            """
+            INSERT INTO track_station_genres (track_id, genre, score, is_primary, corrected)
+            VALUES (%s, %s, %s, %s, %s)
+            """,
             values,
         )
     log.info("scored genres for %d of %d tracks", scored, len(rows))

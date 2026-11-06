@@ -3,19 +3,18 @@ package stations
 import (
 	"context"
 	"errors"
-	"fmt"
 	"strings"
 
 	"github.com/jackc/pgx/v5"
 )
 
-// Genre stations: one shared station per station genre, playing that
-// genre from every playlist. Refresh creates, shows and hides them; it
+// Genre stations: one shared station per station genre, playing every song
+// of the library with that main genre. Refresh creates, shows and hides them; it
 // never deletes one, so a station keeps its id, name and history while
 // its genre is below the threshold.
 const (
-	// GenreStationShowAt is how many matched tracks a genre needs before
-	// its station is shown.
+	// GenreStationShowAt is how many songs a genre needs before its
+	// station is shown.
 	GenreStationShowAt = MinSuggestionTracks
 	// GenreStationHideBelow: a shown station is hidden only below this, so
 	// a genre near the threshold does not flicker in and out.
@@ -95,15 +94,13 @@ func autoEnabled(ctx context.Context, q queryer) (bool, error) {
 	return err == nil && *enabled, err
 }
 
-// genreTrackCounts counts, per station genre, the matched tracks of every
-// playlist that carry it (primary or secondary), as genre stations play them.
+// genreTrackCounts counts, per station genre, the songs of the library with
+// that main genre, as genre stations play them.
 func genreTrackCounts(ctx context.Context, q queryer) (map[string]int, error) {
 	rows, err := q.Query(ctx, `
 		SELECT g.genre, COUNT(*) FROM track_station_genres g
-		WHERE g.track_id IN (
-			SELECT m.track_id FROM playlist_items pi
-			JOIN spotify_track_matches m ON m.spotify_track_id = pi.spotify_track_id
-			WHERE m.track_id IS NOT NULL)
+		JOIN tracks t ON t.id = g.track_id
+		WHERE g.is_primary AND t.copy_of IS NULL
 		GROUP BY g.genre`)
 	if err != nil {
 		return nil, err
@@ -183,8 +180,8 @@ func (s *Service) Refresh(ctx context.Context) ([]Change, error) {
 		case a.id == "" && show:
 			// ON CONFLICT: the unique index is the last guard against a duplicate.
 			tag, err := tx.Exec(ctx, `
-				INSERT INTO stations (user_id, name, genres, all_playlists, auto_genre, auto_active)
-				VALUES (NULL, $1, ARRAY[$2], TRUE, $2, TRUE)
+				INSERT INTO stations (user_id, name, genres, auto_genre, auto_active)
+				VALUES (NULL, $1, ARRAY[$2], $2, TRUE)
 				ON CONFLICT (auto_genre) WHERE auto_genre IS NOT NULL DO NOTHING
 			`, a.stationGenreName, a.genre)
 			if err != nil {
@@ -305,24 +302,9 @@ func (s *Service) UpdateGenreStation(ctx context.Context, genre string, u GenreS
 		return err
 	}
 	defer tx.Rollback(ctx)
-	if u.Excluded != nil && !*u.Excluded {
-		// Coming back would duplicate a custom station made while excluded.
-		var other string
-		err := tx.QueryRow(ctx, `
-			SELECT name FROM stations
-			WHERE auto_genre IS NULL AND user_id IS NULL AND all_playlists AND genres = ARRAY[$1]::text[]
-			ORDER BY created_at LIMIT 1
-		`, genre).Scan(&other)
-		if err == nil {
-			return fmt.Errorf("%w: the custom station %q already plays this genre from every playlist; delete it first", ErrConflict, other)
-		}
-		if !errors.Is(err, pgx.ErrNoRows) {
-			return err
-		}
-	}
 	if _, err := tx.Exec(ctx, `
-		INSERT INTO stations (user_id, name, genres, all_playlists, auto_genre, auto_active, auto_excluded, name_is_custom)
-		VALUES (NULL, COALESCE($2, $3), ARRAY[$1], TRUE, $1, FALSE, COALESCE($4, FALSE), COALESCE($5, FALSE))
+		INSERT INTO stations (user_id, name, genres, auto_genre, auto_active, auto_excluded, name_is_custom)
+		VALUES (NULL, COALESCE($2, $3), ARRAY[$1], $1, FALSE, COALESCE($4, FALSE), COALESCE($5, FALSE))
 		ON CONFLICT (auto_genre) WHERE auto_genre IS NOT NULL DO UPDATE SET
 			name = COALESCE($2, stations.name),
 			auto_excluded = COALESCE($4, stations.auto_excluded),

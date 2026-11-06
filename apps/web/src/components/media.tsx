@@ -1,7 +1,7 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import clsx from 'clsx';
-import { Ban, Heart } from 'lucide-react';
+import { Ban, EyeOff, Heart } from 'lucide-react';
 import type { Playlist, QueueTrack, Station } from '@/api/types';
 import { FALLBACK, imageColor, nameColor, rgb, type Rgb } from '@/lib/color';
 import { formatDuration, plural } from '@/lib/format';
@@ -112,7 +112,20 @@ export function HeroBody({ color, children }: { color: Rgb; children: ReactNode 
 }
 
 /** A station's queue or any list of tracks. */
-export function TrackList({ tracks, startIndex = 1, showActions = true, empty }: { tracks: readonly QueueTrack[]; startIndex?: number; showActions?: boolean; empty?: ReactNode }) {
+export function TrackList({
+  tracks,
+  startIndex = 1,
+  showActions = true,
+  empty,
+  onHide,
+}: {
+  tracks: readonly QueueTrack[];
+  startIndex?: number;
+  showActions?: boolean;
+  empty?: ReactNode;
+  /** Offers "Not in this station" on each row. */
+  onHide?: (track: QueueTrack) => void;
+}) {
   const player = usePlayer();
   if (!tracks.length) return <>{empty}</>;
   return (
@@ -158,6 +171,16 @@ export function TrackList({ tracks, startIndex = 1, showActions = true, empty }:
                     <IconButton label={player.liked(t.id) ? `Unlike ${t.title}` : `Like ${t.title}`} active={player.liked(t.id)} size="sm" onClick={() => player.like(t)}>
                       <Heart className="h-4 w-4" fill={player.liked(t.id) ? 'currentColor' : 'none'} />
                     </IconButton>
+                    {onHide && (
+                      <IconButton
+                        label={`Not in this station: ${t.title}`}
+                        size="sm"
+                        className="opacity-0 focus:opacity-100 group-hover:opacity-100"
+                        onClick={() => onHide(t)}
+                      >
+                        <EyeOff className="h-4 w-4" />
+                      </IconButton>
+                    )}
                     <IconButton
                       label={`Never play ${t.title}`}
                       size="sm"

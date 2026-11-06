@@ -3,6 +3,7 @@ import { api, call, callAs } from '@/api/client';
 import type {
   AdminHealth,
   Feedback,
+  GenreCorrection,
   GenreReport,
   GenreStationSettings,
   QueueTrack,
@@ -21,11 +22,13 @@ export const keys = {
   stations: ['stations'] as const,
   station: (id: string) => ['stations', id] as const,
   queue: (id: string) => ['queue', id] as const,
+  hidden: (id: string) => ['hidden', id] as const,
   poolGenres: (ids: string[] | 'all') => ['poolGenres', ids === 'all' ? 'all' : [...ids].sort().join(',')] as const,
   suggestions: ['suggestions'] as const,
   browse: (node: string) => ['browse', node] as const,
   playlists: ['playlists'] as const,
   playlist: (id: string, items?: string) => ['playlists', id, items ?? 'all'] as const,
+  picks: (id: string) => ['playlists', id, 'picks'] as const,
   genres: ['genres'] as const,
   tracks: (q: string) => ['tracks', q] as const,
   search: (q: string) => ['search', q] as const,
@@ -39,6 +42,8 @@ export const keys = {
   genreReport: ['genreReport'] as const,
   users: ['users'] as const,
   genreStations: ['genreStations'] as const,
+  genreReview: ['genreReview'] as const,
+  genreCorrections: ['genreCorrections'] as const,
   pipeline: ['pipeline'] as const,
 };
 
@@ -121,6 +126,28 @@ export function useDeleteStation() {
   });
 }
 
+export const useHiddenTracks = (stationId: string) =>
+  useQuery({
+    queryKey: keys.hidden(stationId),
+    queryFn: () => call(api.GET('/api/stations/{id}/hidden-tracks', { params: { path: { id: stationId } } })).then((r) => r.tracks),
+  });
+
+/** Hide a song on a station, or bring it back (`restore`). */
+export function useHideTrack() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ stationId, trackId, restore }: { stationId: string; trackId: string; restore?: boolean }) =>
+      restore
+        ? call(api.DELETE('/api/stations/{id}/hidden-tracks/{trackId}', { params: { path: { id: stationId, trackId } } }))
+        : call(api.POST('/api/stations/{id}/hidden-tracks', { params: { path: { id: stationId } }, body: { track_id: trackId } })),
+    onSettled: (_d, _e, { stationId }) => {
+      void qc.invalidateQueries({ queryKey: keys.hidden(stationId) });
+      void qc.invalidateQueries({ queryKey: keys.queue(stationId) });
+      void qc.invalidateQueries({ queryKey: keys.stations });
+    },
+  });
+}
+
 export function useDismissSuggestion() {
   const invalidate = useInvalidateStations();
   return useMutation({
@@ -143,6 +170,25 @@ export const usePlaylist = (id: string, items?: 'matched' | 'missing') =>
     queryKey: keys.playlist(id, items),
     queryFn: () => call(api.GET('/api/playlists/{id}', { params: { path: { id }, query: items ? { items } : {} } })),
   });
+
+export const usePlaylistPicks = (id: string, enabled: boolean) =>
+  useQuery({
+    queryKey: keys.picks(id),
+    enabled,
+    queryFn: () => call(api.GET('/api/playlists/{id}/picks', { params: { path: { id } } })).then((r) => r.picks),
+  });
+
+export function useRemovePick() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ playlistId, trackId }: { playlistId: string; trackId: string }) =>
+      call(api.DELETE('/api/admin/playlists/{id}/picks/{trackId}', { params: { path: { id: playlistId, trackId } } })),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: keys.playlists });
+      void qc.invalidateQueries({ queryKey: keys.stations });
+    },
+  });
+}
 
 export function usePlaylistActions() {
   const qc = useQueryClient();
@@ -326,6 +372,34 @@ export function useUpdateGenreStation() {
       if (id) void qc.invalidateQueries({ queryKey: keys.station(id) });
     },
   });
+}
+
+export const useGenreReview = () =>
+  useQuery({ queryKey: keys.genreReview, queryFn: () => call(api.GET('/api/admin/genre-review')).then((r) => r.items) });
+
+export const useGenreCorrections = () =>
+  useQuery({ queryKey: keys.genreCorrections, queryFn: () => call(api.GET('/api/admin/genre-corrections')).then((r) => r.corrections) });
+
+/** Saves or removes a correction. Scoring runs in the worker, so genre data changes a little later. */
+export function useGenreCorrectionActions() {
+  const qc = useQueryClient();
+  const done = (corrections: { corrections: GenreCorrection[] }) => {
+    qc.setQueryData(keys.genreCorrections, corrections.corrections);
+    void qc.invalidateQueries({ queryKey: keys.genreReview });
+    setTimeout(() => {
+      for (const key of [keys.genreReview, keys.genres, keys.genreStations, keys.stations]) void qc.invalidateQueries({ queryKey: key });
+    }, 5000);
+  };
+  return {
+    save: useMutation({
+      mutationFn: (body: { track_id?: string; artist?: string; genre: string }) => call(api.POST('/api/admin/genre-corrections', { body })),
+      onSuccess: done,
+    }),
+    remove: useMutation({
+      mutationFn: (id: string) => call(api.DELETE('/api/admin/genre-corrections/{id}', { params: { path: { id } } })),
+      onSuccess: done,
+    }),
+  };
 }
 
 export const usePipeline = () =>

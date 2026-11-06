@@ -6,8 +6,10 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
+	"ownwave/api/internal/auth"
 	"ownwave/api/internal/stations"
 	"ownwave/api/internal/streaming"
 )
@@ -149,6 +151,79 @@ func (h *Handler) GetQueue(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"queue": queue})
+}
+
+// ListHiddenTracks lists the songs the user hid on a station.
+func (h *Handler) ListHiddenTracks(w http.ResponseWriter, r *http.Request) {
+	user, st, ok := h.visibleStation(w, r)
+	if !ok {
+		return
+	}
+	tracks, err := h.stations.HiddenTracks(r.Context(), user.ID, st.ID)
+	if err != nil {
+		writeInternalError(w, r, "list hidden tracks", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"tracks": tracks})
+}
+
+// HideTrack keeps a song off the station for this user: POST {"track_id": id}.
+func (h *Handler) HideTrack(w http.ResponseWriter, r *http.Request) {
+	user, st, ok := h.visibleStation(w, r)
+	if !ok {
+		return
+	}
+	var req struct {
+		TrackID string `json:"track_id"`
+	}
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	if _, err := uuid.Parse(req.TrackID); err != nil {
+		http.Error(w, "invalid track_id", http.StatusBadRequest)
+		return
+	}
+	if err := h.stations.HideTrack(r.Context(), user.ID, st.ID, req.TrackID); err != nil {
+		writeStationError(w, r, "hide track", err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// UnhideTrack brings a hidden song back to the station.
+func (h *Handler) UnhideTrack(w http.ResponseWriter, r *http.Request) {
+	user, st, ok := h.visibleStation(w, r)
+	if !ok {
+		return
+	}
+	trackID, ok := parseUUIDParam(w, r, "trackId")
+	if !ok {
+		return
+	}
+	if err := h.stations.UnhideTrack(r.Context(), user.ID, st.ID, trackID); err != nil {
+		writeInternalError(w, r, "unhide track", err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// visibleStation reads the {id} station the user may play, answering the
+// request itself when there is none.
+func (h *Handler) visibleStation(w http.ResponseWriter, r *http.Request) (auth.User, stations.Station, bool) {
+	user, ok := h.currentUser(w, r)
+	if !ok {
+		return user, stations.Station{}, false
+	}
+	id, ok := parseUUIDParam(w, r, "id")
+	if !ok {
+		return user, stations.Station{}, false
+	}
+	st, err := h.stations.Get(r.Context(), user.ID, id)
+	if err != nil {
+		writeStationError(w, r, "get station", err)
+		return user, st, false
+	}
+	return user, st, true
 }
 
 // ListStationGenres breaks a playlist pool down by station genre:
