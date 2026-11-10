@@ -26,7 +26,7 @@ func useFakeCovers(f *stationsFixture) (*testffmpeg.Fake, string) {
 	music := t.TempDir()
 	f.h.ffmpegPath = ff.Path
 	f.h.stream = streaming.New(streaming.Config{MusicDir: music, FFmpegPath: ff.Path})
-	f.h.coverCache = streaming.NewCoverCache(10, 2)
+	f.h.coverCache = streaming.NewCoverCache("", 10, 2)
 	f.exec(`UPDATE tracks SET path = replace(path, '/m/', $1)`, music+"/")
 	for _, p := range strings.Fields(f.one(`SELECT string_agg(path, ' ') FROM tracks`)) {
 		testffmpeg.WriteFile(t, p, "no art")

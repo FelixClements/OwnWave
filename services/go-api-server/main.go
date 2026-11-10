@@ -121,6 +121,7 @@ func main() {
 		RecentHours:       envInt("STATION_RECENT_HOURS", 24),
 		TranscodeCacheDir: envString("TRANSCODE_CACHE_DIR", "/cache/transcodes"),
 		TranscodeCacheMB:  envInt("TRANSCODE_CACHE_MB", 10240),
+		CoverCacheDir:     envString("COVER_CACHE_DIR", "/cache/covers"),
 	})
 
 	go func() {

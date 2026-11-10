@@ -44,6 +44,8 @@ type Config struct {
 	TranscodeCacheDir string
 	// TranscodeCacheMB caps the cache size; least recently played go first.
 	TranscodeCacheMB int
+	// CoverCacheDir holds cover thumbnails across restarts ("" = memory only).
+	CoverCacheDir string
 }
 
 func NewHandler(pool *pgxpool.Pool, cfg Config) *Handler {
@@ -70,7 +72,7 @@ func NewHandler(pool *pgxpool.Pool, cfg Config) *Handler {
 		stations:     stationService,
 		pipeline:     pipeline.New(pool, playlistService, stationService),
 		stream:       streaming.New(streaming.Config{MusicDir: cfg.MusicDir, FFmpegPath: cfg.FFmpegPath}),
-		coverCache:   streaming.NewCoverCache(500, 4),
+		coverCache:   streaming.NewCoverCache(cfg.CoverCacheDir, 1000, 4),
 		analytics:    analytics.NewHTTPClient(cfg.PythonURL),
 		musicDir:     cfg.MusicDir,
 		ffmpegPath:   cfg.FFmpegPath,
