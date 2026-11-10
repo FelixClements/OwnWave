@@ -116,12 +116,25 @@ func TestWhereGenreStationPlaysTheLibraryByMainGenre(t *testing.T) {
 	require.Equal(t, Args{[]string{"techno"}}, args)
 }
 
-func TestWhereCustomStationPlaysMatchesAndPicksOfBestCopies(t *testing.T) {
+func TestWhereCustomStationPlaysMatchesOfBestCopies(t *testing.T) {
 	var args Args
 	sql := Definition{PlaylistIDs: []string{idA}}.Where(&args)
 	require.Contains(t, sql, "t.copy_of IS NULL")
 	require.Contains(t, sql, "COALESCE(mt.copy_of, mt.id)")
 	require.Contains(t, sql, "pi.playlist_id = ANY($1::uuid[])")
+	require.NotContains(t, sql, "playlist_library_picks", "picks only with Enhance")
+	require.Len(t, args, 1)
+}
+
+func TestWhereEnhancedStationAlsoPlaysPicks(t *testing.T) {
+	var args Args
+	sql := Definition{PlaylistIDs: []string{idA}, Enhance: true}.Where(&args)
+	require.Contains(t, sql, "pi.playlist_id = ANY($1::uuid[])")
 	require.Contains(t, sql, "lp.playlist_id = ANY($1::uuid[])")
 	require.Len(t, args, 1, "one placeholder for both")
+
+	args = nil
+	sql = Definition{AllPlaylists: true, Enhance: true}.Where(&args)
+	require.Contains(t, sql, "FROM playlist_library_picks lp)")
+	require.Empty(t, args)
 }

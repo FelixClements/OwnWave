@@ -152,7 +152,7 @@ export function useDismissSuggestion() {
   const invalidate = useInvalidateStations();
   return useMutation({
     mutationFn: (s: StationSuggestion) =>
-      call(api.POST('/api/admin/station-suggestions/dismiss', { body: { playlist_ids: s.playlist_ids, genre: s.genre } })),
+      call(api.POST('/api/admin/station-suggestions/dismiss', { body: { playlist_ids: s.playlist_ids } })),
     onSuccess: invalidate,
   });
 }

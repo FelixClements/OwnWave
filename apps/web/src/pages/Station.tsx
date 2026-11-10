@@ -1,9 +1,9 @@
 import { useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
-import { Pencil, RefreshCw, Trash2 } from 'lucide-react';
+import { Pencil, RefreshCw, Sparkles, Trash2 } from 'lucide-react';
 import { useAuth } from '@/lib/auth';
 import { plural } from '@/lib/format';
-import { useDeleteStation, useHiddenTracks, useHideTrack, usePlaylists, useQueue, useStation } from '@/lib/queries';
+import { useDeleteStation, useHiddenTracks, useHideTrack, usePlaylists, useQueue, useSaveStation, useStation } from '@/lib/queries';
 import { usePlayer } from '@/player/PlayerProvider';
 import { HeroBody, HeroHeader, TrackList, stationCover, useArtColor, useStationGenreLabel } from '@/components/media';
 import { StationEditor } from '@/components/StationEditor';
@@ -48,6 +48,7 @@ export function StationPage() {
   const genreLabel = useStationGenreLabel();
   const color = useArtColor(stationCover(id), station.data?.name ?? id);
   const del = useDeleteStation();
+  const save = useSaveStation();
   const hide = useHideTrack();
   const navigate = useNavigate();
   const [editing, setEditing] = useState(false);
@@ -110,6 +111,18 @@ export function StationPage() {
               <RefreshCw className="h-5 w-5" />
             </IconButton>
           )}
+          {canChange && !genreStation && (
+            <Button
+              size="sm"
+              variant={s.enhance ? 'primary' : 'ghost'}
+              aria-pressed={s.enhance}
+              loading={save.isPending}
+              title={s.enhance ? 'Playing similar songs from your library too' : 'Mix in songs from your library that sound like this station'}
+              onClick={() => save.mutate({ id: s.id, body: { enhance: !s.enhance } })}
+            >
+              <Sparkles className="h-4 w-4" /> {s.enhance ? 'Enhanced' : 'Enhance'}
+            </Button>
+          )}
           {canChange && (
             <>
               <IconButton label={genreStation ? 'Rename station' : 'Edit station'} onClick={() => setEditing(true)}>
@@ -129,7 +142,7 @@ export function StationPage() {
             </>
           )}
         </div>
-        <ErrorText error={del.error ?? (active ? player.error : null)} />
+        <ErrorText error={del.error ?? save.error ?? (active ? player.error : null)} />
         <h2 className="mb-2 mt-2 text-sm font-semibold text-muted">
           {active ? 'Now playing and up next' : 'Coming up when you press play (shuffled each time)'}
           {shown > 0 && shown < s.track_count && (

@@ -57,6 +57,7 @@ const station: Station = {
   all_playlists: false,
   playlist_ids: ['p1'],
   genres: ['techno'],
+  enhance: false,
   track_count: 40,
   updated_at: '2026-11-03T12:00:00Z',
 };
@@ -158,7 +159,7 @@ describe('App', () => {
     await user.click(await within(dialog).findByRole('button', { name: /Techno 30/ }));
     expect(within(dialog).getByText(/Plays up to 30 tracks of 40 tracks/)).toBeInTheDocument();
     await user.click(within(dialog).getByRole('button', { name: 'Create station' }));
-    await waitFor(() => expect(created).toEqual({ name: 'Late Techno', all_playlists: false, playlist_ids: ['p1'], genres: ['techno'] }));
+    await waitFor(() => expect(created).toEqual({ name: 'Late Techno', all_playlists: false, playlist_ids: ['p1'], genres: ['techno'], enhance: false }));
   });
 
   it('creates a station from every playlist, including later ones', async () => {
@@ -184,7 +185,7 @@ describe('App', () => {
     await user.click(await within(dialog).findByRole('button', { name: /House 50/ }));
     expect(counted).toContain('?all_playlists=true');
     await user.click(within(dialog).getByRole('button', { name: 'Create station' }));
-    await waitFor(() => expect(created).toEqual({ name: 'All House', all_playlists: true, playlist_ids: [], genres: ['house'] }));
+    await waitFor(() => expect(created).toEqual({ name: 'All House', all_playlists: true, playlist_ids: [], genres: ['house'], enhance: false }));
   });
 
   it('shows a genre station that can be renamed but not deleted', async () => {
@@ -203,6 +204,7 @@ describe('App', () => {
     expect(await screen.findByText('Genre station')).toBeInTheDocument();
     expect(screen.getByText('from your whole library')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Delete station' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Enhance/ })).not.toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Rename station' }));
     const dialog = await screen.findByRole('dialog', { name: 'Edit station' });
     expect(within(dialog).queryByRole('checkbox')).not.toBeInTheDocument();
@@ -211,6 +213,26 @@ describe('App', () => {
     await user.type(name, 'Peak Techno');
     await user.click(within(dialog).getByRole('button', { name: 'Save' }));
     await waitFor(() => expect(renamed).toEqual({ name: 'Peak Techno' }));
+  });
+
+  it('turns Enhance on for a playlist station', async () => {
+    let sent: unknown;
+    let current = station;
+    signedIn({
+      'GET /api/playlists': () => ({ playlists: [playlist] }),
+      'GET /api/stations/{id}': () => current,
+      'GET /api/stations/{id}/queue': () => ({ queue: [] }),
+      'PUT /api/stations/{id}': (body) => {
+        sent = body;
+        current = { ...station, enhance: true, track_count: 52 };
+        return current;
+      },
+    });
+    renderAt('/station/s1');
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('button', { name: /^Enhance$/ }));
+    await waitFor(() => expect(sent).toEqual({ enhance: true }));
+    expect(await screen.findByRole('button', { name: /Enhanced/ })).toHaveAttribute('aria-pressed', 'true');
   });
 
   it('lists genre stations by kind', async () => {

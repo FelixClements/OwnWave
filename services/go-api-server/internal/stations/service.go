@@ -53,7 +53,7 @@ func NotHidden(userArg, stationArg string) string {
 // stationColumns reads a station; an all-playlists station lists every
 // playlist there is now.
 const stationColumns = `
-	s.id::text, s.name, s.user_id IS NULL, s.auto_genre IS NOT NULL, s.all_playlists, s.genres, s.updated_at,
+	s.id::text, s.name, s.user_id IS NULL, s.auto_genre IS NOT NULL, s.all_playlists, s.genres, s.enhance, s.updated_at,
 	CASE WHEN s.all_playlists
 	     THEN COALESCE((SELECT array_agg(p.id::text ORDER BY p.id) FROM playlists p), '{}')
 	     ELSE COALESCE((SELECT array_agg(sp.playlist_id::text ORDER BY sp.playlist_id)
@@ -69,7 +69,7 @@ func visibleTo(userArg string) string {
 func scanStation(row pgx.Row) (Station, error) {
 	var st Station
 	var genre bool
-	err := row.Scan(&st.ID, &st.Name, &st.Shared, &genre, &st.AllPlaylists, &st.Genres, &st.UpdatedAt, &st.PlaylistIDs)
+	err := row.Scan(&st.ID, &st.Name, &st.Shared, &genre, &st.AllPlaylists, &st.Genres, &st.Enhance, &st.UpdatedAt, &st.PlaylistIDs)
 	st.Kind = KindCustom
 	if genre {
 		st.Kind = KindGenre
@@ -171,6 +171,7 @@ func (s *Service) Create(ctx context.Context, user auth.User, req Request) (Stat
 		AllPlaylists: req.AllPlaylists != nil && *req.AllPlaylists,
 		PlaylistIDs:  req.PlaylistIDs,
 		Genres:       req.Genres,
+		Enhance:      req.Enhance != nil && *req.Enhance,
 	}.Normalize()
 	if err != nil {
 		return Station{}, err
@@ -190,9 +191,9 @@ func (s *Service) Create(ctx context.Context, user auth.User, req Request) (Stat
 	}
 	var id string
 	if err := tx.QueryRow(ctx, `
-		INSERT INTO stations (user_id, name, genres, all_playlists) VALUES (NULLIF($1, '')::uuid, $2, $3, $4)
+		INSERT INTO stations (user_id, name, genres, all_playlists, enhance) VALUES (NULLIF($1, '')::uuid, $2, $3, $4, $5)
 		RETURNING id::text
-	`, owner, name, def.Genres, def.AllPlaylists).Scan(&id); err != nil {
+	`, owner, name, def.Genres, def.AllPlaylists, def.Enhance).Scan(&id); err != nil {
 		return Station{}, err
 	}
 	if err := setPlaylists(ctx, tx, id, def.PlaylistIDs); err != nil {
@@ -218,7 +219,7 @@ func (s *Service) Update(ctx context.Context, user auth.User, id string, req Req
 		}
 	}
 	if st.Kind == KindGenre {
-		if req.AllPlaylists != nil || req.PlaylistIDs != nil || req.Genres != nil {
+		if req.AllPlaylists != nil || req.PlaylistIDs != nil || req.Genres != nil || req.Enhance != nil {
 			return Station{}, fmt.Errorf("%w: a genre station only changes its name", ErrInvalid)
 		}
 		if req.Name != nil {
@@ -239,6 +240,9 @@ func (s *Service) Update(ctx context.Context, user auth.User, id string, req Req
 	if req.Genres != nil {
 		def.Genres = req.Genres
 	}
+	if req.Enhance != nil {
+		def.Enhance = *req.Enhance
+	}
 	if def, err = def.Normalize(); err != nil {
 		return Station{}, err
 	}
@@ -252,8 +256,8 @@ func (s *Service) Update(ctx context.Context, user auth.User, id string, req Req
 		return Station{}, err
 	}
 	if _, err := tx.Exec(ctx, `
-		UPDATE stations SET name = $2, genres = $3, all_playlists = $4, updated_at = NOW() WHERE id = $1::uuid
-	`, id, name, def.Genres, def.AllPlaylists); err != nil {
+		UPDATE stations SET name = $2, genres = $3, all_playlists = $4, enhance = $5, updated_at = NOW() WHERE id = $1::uuid
+	`, id, name, def.Genres, def.AllPlaylists, def.Enhance); err != nil {
 		return Station{}, err
 	}
 	if err := setPlaylists(ctx, tx, id, def.PlaylistIDs); err != nil {
@@ -317,7 +321,7 @@ type GenreCount struct {
 
 // PoolGenres is the genre breakdown of a playlist pool.
 type PoolGenres struct {
-	Tracks int          `json:"tracks"` // matched tracks in the pool
+	Tracks int          `json:"tracks"` // the playlists' matched tracks, without library picks
 	Genres []GenreCount `json:"genres"` // most tracks first; a track counts once per genre
 }
 
