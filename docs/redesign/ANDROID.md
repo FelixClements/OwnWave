@@ -1,6 +1,6 @@
 # Android app: implementation plan
 
-Detail for [Phase 5 of the redesign plan](PLAN.md#phase-5-android-app). Status: planned, no code yet (2026-11-10).
+Detail for [Phase 5 of the redesign plan](PLAN.md#phase-5-android-app). Status: PR 1 (scaffold, client, login, station list) in progress on branch `android/scaffold` (2026-11-10).
 
 ## Goal
 
@@ -28,7 +28,7 @@ Not in v1: offline downloads, registration and invites, admin pages, creating or
 | HTTP | One OkHttp client with an auth interceptor, shared by Retrofit, ExoPlayer (`OkHttpDataSource`), Coil and the artwork provider. |
 | Token storage | DataStore, with the token encrypted by an AES-GCM key held in the Android Keystore. This replaces EncryptedSharedPreferences from PLAN.md, because `androidx.security:security-crypto` is deprecated. |
 | Dependency injection | A small hand-written `AppContainer`, with no Hilt. The app has about ten collaborators. |
-| SDK levels | `minSdk` 28, `compileSdk` and `targetSdk` 36 (36 is installed here). |
+| SDK levels | `minSdk` 28, `compileSdk` and `targetSdk` 37. Current AndroidX, Coil and Media3 releases require compileSdk 37. |
 | Build | Gradle wrapper committed in `apps/android`, version catalog `gradle/libs.versions.toml`, and the newest stable AGP, Kotlin and Media3 when the project is scaffolded. |
 
 ## Blocker: getting past the Authentik gate
@@ -125,7 +125,7 @@ The login screen asks for a server URL (normalized to https, no trailing slash),
 
 ## Risks and open questions
 
-- **Generator and OpenAPI 3.1.** openapi-generator's 3.1 support is partial. Risky spots are `type: [string, "null"]` unions, `allOf` (`QueueTrack`, `SearchHit`) and inline `allOf` request bodies (`loginDevice`, `register`). The fix order is: `openapiNormalizer` rules first, then turning the inline schemas into named components in the spec (this also gives the web client nicer types), and hand-written models only if both fail. Generation can be limited to the operations the app uses.
+- **Generator and OpenAPI 3.1.** Checked on 2026-11-10: openapi-generator 7.26.0 (`kotlin`, `jvm-retrofit2`, `kotlinx_serialization`) generates the whole spec as it is, including the nullable unions, `QueueTrack` and the inline `loginDevice` body, and it compiles. The only addition was OkHttp's logging interceptor. If a later spec change breaks generation, the fix order is `openapiNormalizer` rules first, then named components in the spec, and hand-written models last.
 - **Rate limits.** Streams are limited to 60 per minute per IP. Seeks on a cached file are new Range requests, and skipping fast in the car adds more. This is probably fine (⚠ not measured). If it is not, raise the limit for Bearer clients.
 - **Exported artwork provider.** Any app on the phone could read cover images through it. This is acceptable for personal use. The stricter option is `grantUriPermission` to the Auto packages only.
 - **Play Store.** It is only needed if a head unit blocks sideloaded apps. It needs a privacy policy and Auto review, and is deferred.

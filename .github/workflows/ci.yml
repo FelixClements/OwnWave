@@ -94,6 +94,36 @@ jobs:
           DOWNLOAD_GENRE_MODELS: "false"
         run: docker compose build
 
+  android:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/android
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      # The Kotlin API client is generated from services/go-api-server/openapi.yaml,
+      # so a spec change that breaks the app fails here.
+      - name: Build, test and lint
+        run: ./gradlew :app:assembleDebug :app:testDebugUnitTest :app:lintDebug
+
+      - name: Upload debug APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: ownwave-debug-apk
+          path: apps/android/app/build/outputs/apk/debug/*.apk
+          retention-days: 14
+
   publish:
     if: github.ref == 'refs/heads/main'
     needs: lint-and-test

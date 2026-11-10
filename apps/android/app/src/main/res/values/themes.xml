@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="ow_base">#FF0D0D0F</color>
+    <style name="Theme.OwnWave" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@color/ow_base</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+    </style>
+</resources>

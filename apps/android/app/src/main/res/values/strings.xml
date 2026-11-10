@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">OwnWave</string>
+
+    <string name="login_subtitle">Sign in to your OwnWave server</string>
+    <string name="login_server">Server</string>
+    <string name="login_username">Username</string>
+    <string name="login_password">Password</string>
+    <string name="login_submit">Sign in</string>
+    <string name="login_error_invalid_url">That is not a valid server address.</string>
+    <string name="login_error_insecure_url">The server address must start with https://.</string>
+    <string name="login_error_credentials">Wrong username or password.</string>
+    <string name="login_error_rate_limited">Too many sign-in attempts. Wait a minute and try again.</string>
+    <string name="login_error_not_ownwave">The server did not answer like OwnWave. A login gate in front of it may block apps.</string>
+    <string name="login_error_server">The server had a problem.</string>
+    <string name="login_error_network">Could not reach the server.</string>
+
+    <string name="menu">Menu</string>
+    <string name="sign_out_user">Sign out %1$s</string>
+    <string name="section_your_stations">Stations</string>
+    <string name="section_genre_stations">Genre stations</string>
+    <string name="stations_error">Could not load stations.</string>
+    <string name="stations_empty">No stations yet. Create one in the OwnWave web app.</string>
+    <string name="retry">Retry</string>
+    <plurals name="song_count">
+        <item quantity="one">%d song</item>
+        <item quantity="other">%d songs</item>
+    </plurals>
+</resources>
