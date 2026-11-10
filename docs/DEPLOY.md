@@ -49,6 +49,8 @@ Caddy will automatically obtain and renew a TLS certificate for `OWNWAVE_DOMAIN`
 
 Lower qualities (Opus 160/96/64 kbps, AAC 128 kbps) are transcoded once per track and kept in the `transcode_cache` volume, mounted at `/cache` in the `go` container. `TRANSCODE_CACHE_MB` (default 10240) caps its size; the least recently played files are deleted first. Deleting the volume only costs re-transcoding.
 
+Cover art is extracted from each song once, shrunk to at most 512 px, and kept in the same volume under `/cache/covers` (`COVER_CACHE_DIR`), so pages don't read the music storage for covers after the first view, even across restarts. It is not size-capped (thumbnails are tens of KB each); deleting it only costs re-extraction.
+
 ## 3. Reverse proxy and routing
 
 Caddy (`Caddyfile`) proxies everything on `https://<OWNWAVE_DOMAIN>` to Go, which serves:

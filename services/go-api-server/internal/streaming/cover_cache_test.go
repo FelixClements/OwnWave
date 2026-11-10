@@ -15,7 +15,7 @@ func TestCoverCacheHit(t *testing.T) {
 	ff := testffmpeg.New(t)
 	song := filepath.Join(t.TempDir(), "a.flac")
 	testffmpeg.WriteFile(t, song, "cover")
-	cache := NewCoverCache(10, 2)
+	cache := NewCoverCache("", 10, 2)
 
 	for i := 0; i < 3; i++ {
 		data, err := cache.GetOrExtract(context.Background(), ff.Path, song)
@@ -35,7 +35,7 @@ func TestCoverCacheMissIsCached(t *testing.T) {
 	ff := testffmpeg.New(t)
 	song := filepath.Join(t.TempDir(), "a.flac")
 	testffmpeg.WriteFile(t, song, "no art")
-	cache := NewCoverCache(10, 2)
+	cache := NewCoverCache("", 10, 2)
 
 	for i := 0; i < 3; i++ {
 		data, err := cache.GetOrExtract(context.Background(), ff.Path, song)
@@ -52,7 +52,7 @@ func TestCoverCacheMissInvalidatedWhenFileChanges(t *testing.T) {
 	ff := testffmpeg.New(t)
 	song := filepath.Join(t.TempDir(), "a.flac")
 	testffmpeg.WriteFile(t, song, "no art")
-	cache := NewCoverCache(10, 2)
+	cache := NewCoverCache("", 10, 2)
 
 	if _, err := cache.GetOrExtract(context.Background(), ff.Path, song); !errors.Is(err, ErrNoCover) {
 		t.Fatalf("want ErrNoCover, got %v", err)
@@ -79,7 +79,7 @@ func TestCoverCacheCancelledIsNotCached(t *testing.T) {
 	ff := testffmpeg.New(t)
 	song := filepath.Join(t.TempDir(), "a.flac")
 	testffmpeg.WriteFile(t, song, "slow")
-	cache := NewCoverCache(10, 2)
+	cache := NewCoverCache("", 10, 2)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
@@ -109,7 +109,7 @@ func TestCoverCacheContextCancel(t *testing.T) {
 	ff := testffmpeg.New(t)
 	song := filepath.Join(t.TempDir(), "a.flac")
 	testffmpeg.WriteFile(t, song, "cover")
-	cache := NewCoverCache(10, 1)
+	cache := NewCoverCache("", 10, 1)
 	// Saturate semaphore
 	cache.sem <- struct{}{}
 
@@ -128,7 +128,7 @@ func TestCoverCacheContextCancel(t *testing.T) {
 func TestCoverCacheMissingFFmpegIsAnError(t *testing.T) {
 	song := filepath.Join(t.TempDir(), "a.flac")
 	testffmpeg.WriteFile(t, song, "cover")
-	cache := NewCoverCache(10, 1)
+	cache := NewCoverCache("", 10, 1)
 
 	_, err := cache.GetOrExtract(context.Background(), filepath.Join(t.TempDir(), "no-ffmpeg"), song)
 	if err == nil || errors.Is(err, ErrNoCover) {
@@ -141,7 +141,7 @@ func TestCoverCacheMissingFFmpegIsAnError(t *testing.T) {
 
 func TestCoverCacheMissingFileIsNoCover(t *testing.T) {
 	ff := testffmpeg.New(t)
-	cache := NewCoverCache(10, 1)
+	cache := NewCoverCache("", 10, 1)
 
 	_, err := cache.GetOrExtract(context.Background(), ff.Path, filepath.Join(t.TempDir(), "gone.flac"))
 	if !errors.Is(err, ErrNoCover) {
@@ -155,7 +155,7 @@ func TestCoverCacheMissingFileIsNoCover(t *testing.T) {
 func TestCoverCacheMissLimit(t *testing.T) {
 	ff := testffmpeg.New(t)
 	dir := t.TempDir()
-	cache := NewCoverCache(10, 1)
+	cache := NewCoverCache("", 10, 1)
 	cache.maxMisses = 2
 
 	for _, name := range []string{"a", "b", "c"} {
@@ -167,5 +167,68 @@ func TestCoverCacheMissLimit(t *testing.T) {
 	}
 	if cache.misses != 2 || len(cache.cache) != 2 {
 		t.Fatalf("misses=%d entries=%d, want 2", cache.misses, len(cache.cache))
+	}
+}
+
+func TestCoverCachePersistsOnDisk(t *testing.T) {
+	ff := testffmpeg.New(t)
+	dir := t.TempDir()
+	music := t.TempDir()
+	withArt := filepath.Join(music, "a.flac")
+	noArt := filepath.Join(music, "b.flac")
+	testffmpeg.WriteFile(t, withArt, "cover")
+	testffmpeg.WriteFile(t, noArt, "no art")
+
+	first := NewCoverCache(dir, 10, 2)
+	if data, err := first.GetOrExtract(context.Background(), ff.Path, withArt); err != nil || string(data) != testffmpeg.JPEG {
+		t.Fatalf("got %q, %v", data, err)
+	}
+	if _, err := first.GetOrExtract(context.Background(), ff.Path, noArt); !errors.Is(err, ErrNoCover) {
+		t.Fatalf("want ErrNoCover, got %v", err)
+	}
+
+	// A fresh cache (a restart) answers both from disk without ffmpeg.
+	second := NewCoverCache(dir, 10, 2)
+	if data, err := second.GetOrExtract(context.Background(), ff.Path, withArt); err != nil || string(data) != testffmpeg.JPEG {
+		t.Fatalf("after restart got %q, %v", data, err)
+	}
+	if _, err := second.GetOrExtract(context.Background(), ff.Path, noArt); !errors.Is(err, ErrNoCover) {
+		t.Fatalf("after restart want ErrNoCover, got %v", err)
+	}
+	if n := ff.Runs(t); n != 2 {
+		t.Fatalf("ffmpeg ran %d times, want 2 (restart served from disk)", n)
+	}
+	leftovers, _ := filepath.Glob(filepath.Join(dir, "*", ".tmp-*"))
+	if len(leftovers) != 0 {
+		t.Fatalf("temp files left behind: %v", leftovers)
+	}
+
+	// Re-tagging gives the file a new key: the old disk entry is not used.
+	testffmpeg.WriteFile(t, noArt, "cover")
+	later := time.Now().Add(time.Minute)
+	if err := os.Chtimes(noArt, later, later); err != nil {
+		t.Fatal(err)
+	}
+	third := NewCoverCache(dir, 10, 2)
+	if data, err := third.GetOrExtract(context.Background(), ff.Path, noArt); err != nil || string(data) != testffmpeg.JPEG {
+		t.Fatalf("after re-tag got %q, %v; want the new cover", data, err)
+	}
+	if n := ff.Runs(t); n != 3 {
+		t.Fatalf("ffmpeg ran %d times, want 3", n)
+	}
+}
+
+func TestCoverCacheUnwritableDirStillServes(t *testing.T) {
+	ff := testffmpeg.New(t)
+	song := filepath.Join(t.TempDir(), "a.flac")
+	testffmpeg.WriteFile(t, song, "cover")
+	// A file where the cache dir should be: every disk write fails.
+	blocker := filepath.Join(t.TempDir(), "covers")
+	testffmpeg.WriteFile(t, blocker, "not a dir")
+	cache := NewCoverCache(blocker, 10, 2)
+
+	data, err := cache.GetOrExtract(context.Background(), ff.Path, song)
+	if err != nil || string(data) != testffmpeg.JPEG {
+		t.Fatalf("got %q, %v", data, err)
 	}
 }

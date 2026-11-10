@@ -3,10 +3,15 @@ package streaming
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
+	"fmt"
 	"io/fs"
+	"log/slog"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"sync"
 	"time"
 )
@@ -18,6 +23,15 @@ var ErrNoCover = errors.New("no cover art")
 // defaultMaxMisses bounds remembered "no cover" files. A miss holds no image
 // bytes (~100 B per entry), so the limit is much higher than for hits.
 const defaultMaxMisses = 5000
+
+// coverMaxPx bounds a cover's width and height. Embedded art is often 1000-3000
+// px and over 1 MB; the largest place the UI shows a cover is the full-screen
+// player, and the OS media session asks for 512x512.
+const coverMaxPx = 512
+
+// coverVersion is part of every on-disk key. Change it whenever the extraction
+// output changes (size, quality), so old files are no longer read.
+const coverVersion = "v1-512"
 
 // coverEntry is a cached result for one file. data == nil records a miss.
 // The entry is valid only while the file's mtime and size are unchanged, so
@@ -35,6 +49,12 @@ func (e coverEntry) matches(info fs.FileInfo) bool {
 
 // CoverCache caches extracted cover art bytes, and files without cover art,
 // and limits concurrent ffmpeg extraction processes.
+//
+// Results live in memory and, when dir is set, on disk, so they survive
+// restarts and a song on slow storage is read for its cover only once per
+// file version. Disk files are keyed by path, size and mtime; a re-tagged file
+// gets a new key and its old file is left behind. Covers are small thumbnails,
+// so the dir is not size-capped; deleting it only costs re-extraction.
 type CoverCache struct {
 	mu        sync.RWMutex
 	cache     map[string]coverEntry
@@ -44,9 +64,12 @@ type CoverCache struct {
 	maxSize   int
 	maxMisses int
 	stat      func(string) (fs.FileInfo, error)
+	dir       string // "" = memory only
 }
 
-func NewCoverCache(maxEntries int, maxConcurrent int) *CoverCache {
+// NewCoverCache returns a cache that also persists covers under dir, if dir is
+// non-empty. Disk errors are logged and fall back to extraction.
+func NewCoverCache(dir string, maxEntries int, maxConcurrent int) *CoverCache {
 	if maxEntries <= 0 {
 		maxEntries = 500
 	}
@@ -59,6 +82,7 @@ func NewCoverCache(maxEntries int, maxConcurrent int) *CoverCache {
 		maxSize:   maxEntries,
 		maxMisses: defaultMaxMisses,
 		stat:      os.Stat,
+		dir:       dir,
 	}
 }
 
@@ -78,6 +102,10 @@ func (c *CoverCache) GetOrExtract(ctx context.Context, ffmpegPath, filePath stri
 	if data, ok := c.lookup(filePath, info); ok {
 		return coverResult(data)
 	}
+	if data, ok := c.readDisk(filePath, info); ok {
+		c.store(filePath, coverEntry{modTime: info.ModTime(), size: info.Size(), data: data})
+		return coverResult(data)
+	}
 
 	select {
 	case c.sem <- struct{}{}:
@@ -91,7 +119,10 @@ func (c *CoverCache) GetOrExtract(ctx context.Context, ffmpegPath, filePath stri
 		return coverResult(data)
 	}
 
-	cmd := exec.CommandContext(ctx, ffmpegPath, "-i", filePath, "-an", "-vcodec", "mjpeg", "-f", "image2", "-", "-v", "0")
+	cmd := exec.CommandContext(ctx, ffmpegPath, "-i", filePath, "-an",
+		"-vf", fmt.Sprintf("scale='min(%d,iw)':'min(%d,ih)':force_original_aspect_ratio=decrease", coverMaxPx, coverMaxPx),
+		"-frames:v", "1", "-q:v", "4",
+		"-vcodec", "mjpeg", "-f", "image2", "-", "-v", "0")
 	var out bytes.Buffer
 	cmd.Stdout = &out
 	runErr := cmd.Run()
@@ -112,7 +143,72 @@ func (c *CoverCache) GetOrExtract(ctx context.Context, ffmpegPath, filePath stri
 		data = out.Bytes()
 	}
 	c.store(filePath, coverEntry{modTime: info.ModTime(), size: info.Size(), data: data})
+	c.writeDisk(filePath, info, data)
 	return coverResult(data)
+}
+
+// diskKey returns the on-disk path prefix for one version of filePath.
+// "<key>.jpg" holds a cover; an empty "<key>.none" records a file without one.
+func (c *CoverCache) diskKey(filePath string, info fs.FileInfo) string {
+	sum := sha256.Sum256([]byte(fmt.Sprintf("%s\x00%s\x00%d\x00%d", coverVersion, filePath, info.Size(), info.ModTime().UnixNano())))
+	key := hex.EncodeToString(sum[:16])
+	return filepath.Join(c.dir, key[:2], key)
+}
+
+// readDisk returns a persisted result: (data, true) for a cover, (nil, true)
+// for a known miss, (nil, false) when nothing is stored.
+func (c *CoverCache) readDisk(filePath string, info fs.FileInfo) ([]byte, bool) {
+	if c.dir == "" {
+		return nil, false
+	}
+	key := c.diskKey(filePath, info)
+	data, err := os.ReadFile(key + ".jpg")
+	if err == nil && len(data) > 0 {
+		return data, true
+	}
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
+		slog.Warn("read cached cover", "path", key+".jpg", "error", err)
+	}
+	if _, err := os.Stat(key + ".none"); err == nil {
+		return nil, true
+	}
+	return nil, false
+}
+
+// writeDisk persists a result. It writes a temp file and renames it, so a
+// concurrent reader never sees a partial cover. Failures are only logged.
+func (c *CoverCache) writeDisk(filePath string, info fs.FileInfo, data []byte) {
+	if c.dir == "" {
+		return
+	}
+	key := c.diskKey(filePath, info)
+	target := key + ".none"
+	if data != nil {
+		target = key + ".jpg"
+	}
+	if err := writeFileAtomic(target, data); err != nil {
+		slog.Warn("cache cover on disk", "path", target, "error", err)
+	}
+}
+
+func writeFileAtomic(path string, data []byte) error {
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return err
+	}
+	tmp, err := os.CreateTemp(dir, ".tmp-*")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(tmp.Name()) // no-op after a successful rename
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	return os.Rename(tmp.Name(), path)
 }
 
 func coverResult(data []byte) ([]byte, error) {
