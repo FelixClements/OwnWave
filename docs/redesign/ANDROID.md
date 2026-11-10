@@ -1,6 +1,29 @@
 # Android app: implementation plan
 
-Detail for [Phase 5 of the redesign plan](PLAN.md#phase-5-android-app). Status: PR 1 (scaffold, client, login, station list) in progress on branch `android/scaffold` (2026-11-10).
+Detail for [Phase 5 of the redesign plan](PLAN.md#phase-5-android-app).
+
+## Status (2026-11-10)
+
+| Step | State |
+| --- | --- |
+| Plan and decisions | ✅ Done (this file). |
+| Authentik gate bypass for app API calls (Caddy) | ✅ Done and checked live. See [the blocker section](#blocker-getting-past-the-authentik-gate). |
+| PR 1: scaffold, client, sign-in, station list | ✅ Built: [PR #87](https://github.com/FelixClements/OwnWave/pull/87), branch `android/scaffold`, CI green. A real account signed in from the emulator and the station list with covers loaded. Merge pending at the time of writing. |
+| PR 2: playback | ⏭ Next. Branch from `main` after #87 is merged (do not stack it on `android/scaffold`). |
+| PR 3: Android Auto | ⬜ Not started. |
+| PR 4: signed release | ⬜ Not started. |
+
+### Picking this up later
+
+- **Build:** `cd apps/android && ./gradlew :app:assembleDebug :app:testDebugUnitTest :app:lintDebug`. You need JDK 21 and the SDK platform `android-37.0`. On the dev box, the toolchain is in `~/Android`: JDK, Gradle and an SDK with platforms 36 and 37.0.
+- **Emulator:** the AVD `t3_pixel` (Android 16), opened through the T3 Device panel. Install with `ANDROID_SERIAL=emulator-5554 ./gradlew :app:installDebug`. The DHU for Android Auto is not installed yet (SDK extras `extras;google;auto`); PR 3 needs it.
+- **Versions:** they are pinned in `apps/android/gradle/libs.versions.toml`. Notes from the scaffold:
+  - `kotlinx-coroutines` is 1.10.2 because 1.12.0 could not be resolved from Maven Central.
+  - openapi-generator is 7.26.0 because 7.27.0 was too new.
+  - Current Coil and AndroidX releases need compileSdk 37.
+- **Open infra items** (wiki `todo/backlog`):
+  - A CrowdSec parser for OwnWave app traffic (see Risks).
+  - An OwnWave fix so it trusts only `X-Real-IP`. Caddy strips `True-Client-IP` in the meantime.
 
 ## Goal
 
@@ -33,6 +56,19 @@ Not in v1: offline downloads, registration and invites, admin pages, creating or
 
 ## Blocker: getting past the Authentik gate
 
+**✅ Resolved on 2026-11-10 with option 1.** The `ownwave.silver-sand.com` block in the edge VPS's `/etc/caddy/Caddyfile` skips `forward_auth` in two cases:
+- the path starts with `/api/` (an exact, case-sensitive check) and the request has an `Authorization: Bearer …` header;
+- the request is `POST /api/auth/device`.
+
+Those requests still go through `edge` (AppSec). Client-sent `X-Authentik-*` and `True-Client-IP` headers are stripped from them. `True-Client-IP` is stripped because chi's `RealIP` trusts it, and that would make the sign-in rate limit spoofable. Caddy's `path()` matcher was not used, because it ignores case: `/API/me` slipped past the gate.
+
+Checked live:
+- Without a token, `/` and `/api/me` get 302 to Authentik.
+- `/api/me` with `Bearer x` gets OwnWave's own 401.
+- A real device token works.
+
+Details, backups and the CrowdSec analysis are on the wiki (`infrastructure/vps`, `apps/ownwave`, changelog). The original analysis follows.
+
 `https://ownwave.silver-sand.com` is behind Caddy `forward_auth` to Authentik (`silver-sand-admin`, MFA), and the API is not on the LAN (only `10.200.200.2:8090` on wg0). An app request with `Authorization: Bearer` gets a 302 to the Authentik login. Android Auto runs on mobile data, so the app has to use the public URL.
 
 This has to be fixed before PR 1 can be tested on a real phone. Options:
@@ -47,16 +83,23 @@ Once the Caddy change is made, it goes in the infra wiki (`apps/ownwave`, `infra
 
 ## Project layout
 
+✅ = exists since PR 1. Everything else is planned.
+
 ```
 apps/android/
-  settings.gradle.kts, build.gradle.kts, gradle/libs.versions.toml, gradlew
-  api/                       generated client only (kotlin library module)
-    build.gradle.kts         openApiGenerate from ../../../services/go-api-server/openapi.yaml
+  ✅ settings.gradle.kts, build.gradle.kts, gradle/libs.versions.toml, gradlew
+  ✅ api/                    generated client only (kotlin library module)
+  ✅   build.gradle.kts      openApiGenerate from ../../../services/go-api-server/openapi.yaml
   app/src/main/kotlin/io/github/felixclements/ownwave/
-    OwnWaveApp.kt            Application, builds AppContainer
-    AppContainer.kt          OkHttp, Retrofit APIs, stores, repositories
-    auth/                    SessionStore (DataStore + Keystore), AuthInterceptor, LoginRepository
-    data/                    StationRepository, FeedbackRepository, SettingsStore
+  ✅ OwnWaveApp.kt           Application, builds AppContainer, Coil ImageLoader on the shared OkHttp
+  ✅ AppContainer.kt         OkHttp (no redirects, 50 MB cache), APIs, stores, repositories
+  ✅ MainActivity.kt         Loading / login / home by SessionState
+  ✅ auth/                   Session, SessionStore (DataStore + TokenCipher/Keystore), AuthInterceptor,
+                             AccountRepository (login/logout), ServerUrl (parse + same-origin check)
+  ✅ data/                   ApiFactory (Retrofit per server), StationRepository
+     data/                   FeedbackRepository, SettingsStore (PR 2)
+  ✅ ui/                     theme, login, home
+     ui/                     nowplaying, settings (PR 2)
     playback/
       PlaybackService.kt     MediaLibraryService + MediaLibrarySession.Callback
       StationQueue.kt        fetch, refill, dedupe; pure Kotlin
@@ -66,16 +109,23 @@ apps/android/
       Commands.kt            LIKE / BAN session commands
       BrowseTree.kt          /api/browse -> MediaItems (Auto)
     artwork/ArtworkProvider.kt  content:// proxy for covers (Auto)
-    ui/                      login, home, nowplaying, settings, theme
 ```
 
 There are two modules because generated code is large and compiles slowly. Keeping it in `:api` keeps `:app` builds incremental.
 
 ## How it works
 
-### Sign in
+### Sign in (✅ PR 1)
 
-The login screen asks for a server URL (normalized to https, no trailing slash), a username and a password. It calls `POST /api/auth/device` with `device_name = Build.MODEL` and stores `{serverUrl, token, user}`. `AuthInterceptor` adds the Bearer header only to requests for the stored host. On a 401 it clears the session, stops the player and shows the login screen. Sign out calls `POST /api/logout`, then clears the session.
+The login screen asks for a server URL, a username and a password.
+
+- **Server URL:** reduced to its origin. `https://` is added when no scheme is given. `http://` is allowed only in debug builds, for a dev server such as `http://10.0.2.2:8080`. The release network security config is HTTPS only.
+- **Sign-in:** calls `POST /api/auth/device` with `device_name = Build.MODEL` and stores `{server, token, user}`.
+- **Bearer header:** `AuthInterceptor` adds it only to requests with the stored scheme, host and port.
+- **401:** the app clears the session and shows the login screen. PR 2 also has to stop the player.
+- **Sign out:** calls `POST /api/logout`, then clears the session.
+- **Redirects:** OkHttp does not follow them. A 3xx, or a non-JSON 200, shows "The server did not answer like OwnWave" (a login gate in front of the server).
+- **Backups:** off (`allowBackup=false`, data extraction rules exclude everything), because the token is bound to this device's Keystore key.
 
 ### Playing a station
 
@@ -99,8 +149,10 @@ The login screen asks for a server URL (normalized to https, no trailing slash),
 
 ### Phone UI
 
-- **Login.**
-- **Home:** Jump back in (`browse?node=recent`), Genre stations, Your stations. Each card shows the cover and the track count, and a tap plays it.
+- **Login.** ✅
+- **Home:** Jump back in (`browse?node=recent`), Genre stations, Your stations. Each card shows the cover and the track count, and a tap plays it. ✅ Partly done in PR 1:
+  - Done: a grid with "Stations" (custom) and "Genre stations", covers from `/api/stations/{id}/cover`, song counts, pull-to-refresh, and sign out in the menu.
+  - Still to do: "Jump back in" and tap to play (PR 2).
 - **Mini player and now playing:** cover, title and artist, like and ban, progress, the next items in the queue.
 - **Settings:** quality on Wi-Fi and on mobile data, signed-in devices (`GET/DELETE /api/me/devices`, with the current one marked), sign out.
 - The UI talks to the service through `MediaController`. It never holds its own player.
@@ -108,24 +160,32 @@ The login screen asks for a server URL (normalized to https, no trailing slash),
 ## Testing
 
 - **JVM unit tests:** `StationQueue` (refill, dedupe), `PlayReporter` (30 s and half-track thresholds, once per item), `QualityPolicy`, `StreamResolver`, `AuthInterceptor` (host check, 401 handling), and the repositories against OkHttp `MockWebServer` with recorded JSON shaped by the spec.
+  - ✅ PR 1 has 13 tests:
+    - `ServerUrlTest`: parsing and the same-origin check.
+    - `AccountRepositoryTest`: success, 401, 429, a 302 gate, an HTML page, 503, and Bearer only for the signed-in server with sign-out on 401.
 - **Manual:** emulator or phone through the T3 device panel. Android Auto through the Desktop Head Unit (DHU, in the SDK extras) with "unknown sources" turned on in Auto's developer settings.
 - `openapi_test.go` already keeps the spec complete. The Android build checks that the spec still generates and compiles against the app.
 
 ## CI and release
 
-- A new `android` job in `.github/workflows/ci.yml`: Temurin 21, `gradle/actions/setup-gradle`, then in `apps/android` run `./gradlew :app:assembleDebug :app:testDebugUnitTest :app:lintDebug`. It runs when `apps/android/**` or `openapi.yaml` changes.
+- A new `android` job in `.github/workflows/ci.yml`: Temurin 21, `gradle/actions/setup-gradle`, then in `apps/android` run `./gradlew :app:assembleDebug :app:testDebugUnitTest :app:lintDebug`.
+  - ✅ Done in PR 1. It runs on every push and PR (no path filter; about 3.5 minutes) and uploads the debug APK as the `ownwave-debug-apk` artifact (kept 14 days).
 - **Release** (last PR): on a tag `android-v*`, build `assembleRelease`, signed with a keystore from repository secrets (base64 keystore plus passwords; it never touches the repo or the wiki), and attach the APK to the GitHub Release. `versionName` comes from the tag and `versionCode` from the run number.
 
 ## PR sequence
 
-1. **Scaffold, client and login.** Gradle project, `:api` generation (spike this first; see Risks), theme, `AppContainer`, `SessionStore`, the login screen, a Home that lists stations (with no playback), and the CI build job. Done when a debug APK signs in against the real server and lists stations. This needs the Caddy fix.
-2. **Playback.** `PlaybackService`, `StreamResolver`, `StationQueue` refill, `QualityPolicy`, `PlayReporter`, like and ban, the mini player and now playing screen, and the Settings quality options. Done when a station plays for an hour with the screen off, controls work from the lock screen and Bluetooth, and plays show up in web history.
+1. ✅ **Scaffold, client and login.** Gradle project, `:api` generation (spike this first; see Risks), theme, `AppContainer`, `SessionStore`, the login screen, a Home that lists stations (with no playback), and the CI build job. Done when a debug APK signs in against the real server and lists stations. This needs the Caddy fix. **Done:** [PR #87](https://github.com/FelixClements/OwnWave/pull/87). The acceptance check passed on 2026-11-10 (emulator, real account).
+2. ⏭ **Playback.** `PlaybackService`, `StreamResolver`, `StationQueue` refill, `QualityPolicy`, `PlayReporter`, like and ban, the mini player and now playing screen, and the Settings quality options. Done when a station plays for an hour with the screen off, controls work from the lock screen and Bluetooth, and plays show up in web history.
 3. **Android Auto.** `BrowseTree`, `ArtworkProvider`, voice search, resume, and the Auto manifest bits. Done when the DHU browses all 4 tabs with covers, "play techno on OwnWave" starts a station, and thumbs work.
 4. **Release.** Signed release build, the GitHub Release on tag, the devices screen, README install steps, and an infra wiki entry.
 
 ## Risks and open questions
 
 - **Generator and OpenAPI 3.1.** Checked on 2026-11-10: openapi-generator 7.26.0 (`kotlin`, `jvm-retrofit2`, `kotlinx_serialization`) generates the whole spec as it is, including the nullable unions, `QueueTrack` and the inline `loginDevice` body, and it compiles. The only addition was OkHttp's logging interceptor. If a later spec change breaks generation, the fix order is `openapiNormalizer` rules first, then named components in the spec, and hand-written models last.
+- **CrowdSec and app traffic.** Requests that skip Authentik have no `authentik_user` tag, so the `local/authentik-user-ok` whitelist does not cover them.
+  - Fast browsing (Auto's grids, cover loads, skipping) could trip `http-crawl-non_statics` (about 40 distinct paths in a burst), and 404s add to `http-probing`.
+  - Failed sign-ins trip `http-generic-401-bf` after about 6 quick failures, which is intended.
+  - The proposed fix, not applied yet, is a parser `local/ownwave-app-ok` that skips 2xx/3xx responses on `/api/` when the request has an `Authorization` header. Watch for bans during PR 2 and PR 3 testing.
 - **Rate limits.** Streams are limited to 60 per minute per IP. Seeks on a cached file are new Range requests, and skipping fast in the car adds more. This is probably fine (⚠ not measured). If it is not, raise the limit for Bearer clients.
 - **Exported artwork provider.** Any app on the phone could read cover images through it. This is acceptable for personal use. The stricter option is `grantUriPermission` to the Auto packages only.
 - **Play Store.** It is only needed if a head unit blocks sideloaded apps. It needs a privacy policy and Auto review, and is deferred.
