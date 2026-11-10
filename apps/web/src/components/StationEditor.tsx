@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { Sparkles } from 'lucide-react';
 import type { Station } from '@/api/types';
 import { plural } from '@/lib/format';
 import { usePlaylists, usePoolGenres, useSaveStation } from '@/lib/queries';
@@ -7,7 +8,8 @@ import { Button, Chip, ErrorText, Input, Modal } from './ui';
 /**
  * Create or edit a station: a name, the playlists it draws from (picked
  * ones, or every playlist including ones added later), and optionally the
- * genres it keeps (counts are for those playlists). A genre station keeps
+ * genres it keeps (counts are for those playlists), and Enhance, which mixes
+ * in library songs that sound like the playlists. A genre station keeps
  * itself up to date, so only its name changes here.
  */
 export function StationEditor({
@@ -22,7 +24,7 @@ export function StationEditor({
   /** The station to edit; without it the editor creates one. */
   station?: Station;
   /** Prefill for a new station. */
-  initial?: { name?: string; playlist_ids?: string[]; genres?: string[]; all_playlists?: boolean };
+  initial?: { name?: string; playlist_ids?: string[]; genres?: string[]; all_playlists?: boolean; enhance?: boolean };
   onSaved?: (s: Station) => void;
 }) {
   const { data: playlists = [] } = usePlaylists();
@@ -31,6 +33,7 @@ export function StationEditor({
   const [playlistIds, setPlaylistIds] = useState<string[]>([]);
   const [allPlaylists, setAllPlaylists] = useState(false);
   const [genres, setGenres] = useState<string[]>([]);
+  const [enhance, setEnhance] = useState(false);
   const genreStation = station?.kind === 'genre';
   const pool = usePoolGenres(genreStation ? [] : allPlaylists ? 'all' : playlistIds);
 
@@ -41,6 +44,7 @@ export function StationEditor({
     setAllPlaylists(from?.all_playlists ?? false);
     setPlaylistIds(from?.all_playlists ? [] : (from?.playlist_ids ?? []));
     setGenres(from?.genres ?? []);
+    setEnhance(from?.enhance ?? false);
     save.reset();
   }, [open, station?.id]);
 
@@ -55,8 +59,8 @@ export function StationEditor({
   const body = genreStation
     ? { name: name.trim() }
     : allPlaylists
-      ? { name: name.trim(), all_playlists: true, playlist_ids: [], genres }
-      : { name: name.trim(), all_playlists: false, playlist_ids: playlistIds, genres };
+      ? { name: name.trim(), all_playlists: true, playlist_ids: [], genres, enhance }
+      : { name: name.trim(), all_playlists: false, playlist_ids: playlistIds, genres, enhance };
 
   const submit = () =>
     save.mutate(
@@ -160,9 +164,22 @@ export function StationEditor({
                 )}
                 <p className="mt-3 text-[13px] text-muted">
                   Plays {genres.length ? 'up to ' : ''}
-                  {plural(plays, 'track')} of {plural(pool.data?.tracks ?? 0, 'track')}.
+                  {plural(plays, 'track')} of {plural(pool.data?.tracks ?? 0, 'track')}
+                  {enhance ? ', plus similar songs from your library' : ''}.
                 </p>
               </fieldset>
+            )}
+
+            {hasPool && (
+              <label className="flex cursor-pointer items-center gap-3 rounded-md px-3 py-2 hover:bg-card">
+                <input type="checkbox" checked={enhance} onChange={() => setEnhance(!enhance)} className="h-4 w-4 accent-[#2dd4bf]" />
+                <span className="min-w-0 flex-1">
+                  <span className="flex items-center gap-1.5 font-medium">
+                    <Sparkles className="h-4 w-4" /> Enhance
+                  </span>
+                  <span className="block text-[12px] text-muted">Mix in songs from your library that sound like these playlists</span>
+                </span>
+              </label>
             )}
           </>
         )}

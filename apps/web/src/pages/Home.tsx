@@ -48,7 +48,7 @@ function SuggestionCard({ s }: { s: StationSuggestion }) {
       <div className="min-w-0">
         <div className="truncate font-semibold">{s.name}</div>
         <div className="line-clamp-2 text-[13px] text-muted">
-          {s.genre_name ?? 'All genres'} · {plural(s.track_count, 'track')}
+          Playlist · {plural(s.track_count, 'track')}
         </div>
       </div>
       <Button
@@ -57,7 +57,7 @@ function SuggestionCard({ s }: { s: StationSuggestion }) {
         loading={save.isPending}
         onClick={() =>
           save.mutate(
-            { body: { name: s.name, playlist_ids: s.playlist_ids, genres: s.genre ? [s.genre] : [] } },
+            { body: { name: s.name, playlist_ids: s.playlist_ids, genres: [] } },
             { onSuccess: (st) => navigate(`/station/${st.id}`) },
           )
         }
@@ -124,13 +124,13 @@ export function HomePage() {
           title="Suggested stations"
           action={
             <span className="flex items-center gap-1 text-[13px] text-muted">
-              <Sparkles className="h-4 w-4" /> From single playlists and their genres
+              <Sparkles className="h-4 w-4" /> One per playlist
             </span>
           }
         >
           <CardGrid>
             {sugg.slice(0, 12).map((s) => (
-              <SuggestionCard key={`${s.playlist_ids.join(',')}|${s.genre}`} s={s} />
+              <SuggestionCard key={s.playlist_ids.join(',')} s={s} />
             ))}
           </CardGrid>
         </Section>

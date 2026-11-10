@@ -59,6 +59,9 @@ type Definition struct {
 	PlaylistIDs  []string `json:"playlist_ids"`
 	// Genres limits the pool to these station genres; empty means all.
 	Genres []string `json:"genres"`
+	// Enhance mixes in the playlists' library picks: songs from the
+	// library that sound like them.
+	Enhance bool `json:"enhance"`
 }
 
 // Station is a station as clients see it.
@@ -73,13 +76,14 @@ type Station struct {
 	// stations, every playlist right now.
 	PlaylistIDs []string  `json:"playlist_ids"`
 	Genres      []string  `json:"genres"`
+	Enhance     bool      `json:"enhance"`
 	TrackCount  int       `json:"track_count"`
 	UpdatedAt   time.Time `json:"updated_at"`
 }
 
 // Definition returns what the station plays.
 func (s Station) Definition() Definition {
-	return Definition{Library: s.Kind == KindGenre, AllPlaylists: s.AllPlaylists, PlaylistIDs: s.PlaylistIDs, Genres: s.Genres}
+	return Definition{Library: s.Kind == KindGenre, AllPlaylists: s.AllPlaylists, PlaylistIDs: s.PlaylistIDs, Genres: s.Genres, Enhance: s.Enhance}
 }
 
 // Request is the create/update body. On update, nil fields keep their
@@ -89,12 +93,13 @@ type Request struct {
 	AllPlaylists *bool    `json:"all_playlists"`
 	PlaylistIDs  []string `json:"playlist_ids"`
 	Genres       []string `json:"genres"`
+	Enhance      *bool    `json:"enhance"`
 }
 
 // Normalize trims, dedupes and sorts the definition and checks its shape.
 // Whether the playlists and genres exist is checked against the database.
 func (d Definition) Normalize() (Definition, error) {
-	out := Definition{AllPlaylists: d.AllPlaylists, PlaylistIDs: []string{}}
+	out := Definition{AllPlaylists: d.AllPlaylists, PlaylistIDs: []string{}, Enhance: d.Enhance}
 	seen := map[string]bool{}
 	for _, id := range d.PlaylistIDs {
 		if d.AllPlaylists {

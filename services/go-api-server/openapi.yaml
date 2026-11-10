@@ -747,7 +747,6 @@ paths:
               required: [playlist_ids]
               properties:
                 playlist_ids: { type: array, items: { type: string }, minItems: 1, maxItems: 1 }
-                genre: { type: string, description: "'' = the all-genres suggestion" }
       responses:
         "204": { description: Dismissed }
         "400": { $ref: "#/components/responses/Error" }
@@ -1126,7 +1125,7 @@ components:
       properties: { id: { type: string }, name: { type: string } }
     Station:
       type: object
-      required: [id, name, shared, kind, all_playlists, playlist_ids, genres, track_count, updated_at]
+      required: [id, name, shared, kind, all_playlists, playlist_ids, genres, enhance, track_count, updated_at]
       properties:
         id: { type: string }
         name: { type: string }
@@ -1138,6 +1137,7 @@ components:
         all_playlists: { type: boolean, description: "Plays every playlist, including ones added later" }
         playlist_ids: { type: array, items: { type: string }, description: "For all_playlists stations, every playlist now" }
         genres: { type: array, items: { type: string }, description: "Station genre ids; empty = every genre" }
+        enhance: { type: boolean, description: "Also plays library songs that sound like its playlists; off = only the playlists' tracks" }
         track_count: { type: integer, description: Tracks it plays for this user (bans excluded) }
         updated_at: { type: string, format: date-time }
     StationRequest:
@@ -1147,11 +1147,12 @@ components:
         all_playlists: { type: boolean, description: "Every playlist, including ones added later; playlist_ids is then ignored" }
         playlist_ids: { type: array, items: { type: string }, description: "At least one unless all_playlists" }
         genres: { type: array, items: { type: string } }
+        enhance: { type: boolean, description: "Mix in library songs that sound like the playlists" }
     PoolGenres:
       type: object
       required: [tracks, genres]
       properties:
-        tracks: { type: integer, description: Matched tracks in the pool }
+        tracks: { type: integer, description: "Matched tracks in the pool, without library picks" }
         genres:
           type: array
           items:
@@ -1160,13 +1161,12 @@ components:
             properties: { id: { type: string }, name: { type: string }, tracks: { type: integer } }
     StationSuggestion:
       type: object
-      required: [playlist_ids, playlist_names, genre, track_count, name]
+      description: A station that plays one whole playlist
+      required: [playlist_ids, playlist_names, track_count, name]
       properties:
         playlist_ids: { type: array, items: { type: string } }
         playlist_names: { type: array, items: { type: string } }
-        genre: { type: string, description: "'' = every genre of the pool" }
-        genre_name: { type: string }
-        track_count: { type: integer }
+        track_count: { type: integer, description: "The playlist's matched tracks" }
         name: { type: string, description: Suggested station name }
     GenreStation:
       type: object

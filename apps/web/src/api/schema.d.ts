@@ -1294,6 +1294,8 @@ export interface components {
             playlist_ids: string[];
             /** @description Station genre ids; empty = every genre */
             genres: string[];
+            /** @description Also plays library songs that sound like its playlists; off = only the playlists' tracks */
+            enhance: boolean;
             /** @description Tracks it plays for this user (bans excluded) */
             track_count: number;
             /** Format: date-time */
@@ -1306,9 +1308,11 @@ export interface components {
             /** @description At least one unless all_playlists */
             playlist_ids?: string[];
             genres?: string[];
+            /** @description Mix in library songs that sound like the playlists */
+            enhance?: boolean;
         };
         PoolGenres: {
-            /** @description Matched tracks in the pool */
+            /** @description Matched tracks in the pool, without library picks */
             tracks: number;
             genres: {
                 id: string;
@@ -1316,12 +1320,11 @@ export interface components {
                 tracks: number;
             }[];
         };
+        /** @description A station that plays one whole playlist */
         StationSuggestion: {
             playlist_ids: string[];
             playlist_names: string[];
-            /** @description '' = every genre of the pool */
-            genre: string;
-            genre_name?: string;
+            /** @description The playlist's matched tracks */
             track_count: number;
             /** @description Suggested station name */
             name: string;
@@ -2721,8 +2724,6 @@ export interface operations {
             content: {
                 "application/json": {
                     playlist_ids: string[];
-                    /** @description '' = the all-genres suggestion */
-                    genre?: string;
                 };
             };
         };

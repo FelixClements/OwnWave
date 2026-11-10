@@ -11,19 +11,13 @@ import (
 // MinSuggestionTracks is the smallest pool a suggestion may have.
 const MinSuggestionTracks = 25
 
-// redundantShare: a genre suggestion covering at least this share of its
-// pool would play almost the same tracks as the all-genres station.
-const redundantShare = 0.9
-
 // Suggestion is a custom station OwnWave proposes for one playlist.
-// Accepting it creates a station with that playlist and (unless Genre is
-// empty) this one genre. Genres across the library are covered by genre
-// stations, which need no accepting.
+// Accepting it creates a station that plays just that playlist. Genres
+// across the library are covered by genre stations, which need no
+// accepting.
 type Suggestion struct {
 	PlaylistIDs   []string `json:"playlist_ids"`
 	PlaylistNames []string `json:"playlist_names"`
-	Genre         string   `json:"genre"` // "" = all genres of the pool
-	GenreName     string   `json:"genre_name,omitempty"`
 	TrackCount    int      `json:"track_count"`
 	Name          string   `json:"name"`
 }
@@ -34,7 +28,7 @@ type playlistRef struct{ id, name string }
 // the library is small enough (thousands of songs) to count in memory.
 type poolData struct {
 	playlists   []playlistRef
-	matched     map[string]map[string]bool // playlist id -> songs it plays: matches and picks, by best copy
+	matched     map[string]map[string]bool // playlist id -> its matched songs, by best copy (no library picks)
 	trackGenres map[string]map[string]bool // track id -> station genres
 	genres      []Genre                    // station genres, display order
 	stations    map[string]bool            // pool key + "|" + genres key of existing custom stations
@@ -74,9 +68,7 @@ func (s *Service) loadPools(ctx context.Context) (*poolData, error) {
 		}},
 		{`SELECT pi.playlist_id::text, COALESCE(mt.copy_of, mt.id)::text FROM playlist_items pi
 		  JOIN spotify_track_matches m ON m.spotify_track_id = pi.spotify_track_id
-		  JOIN tracks mt ON mt.id = m.track_id
-		  UNION
-		  SELECT lp.playlist_id::text, lp.track_id::text FROM playlist_library_picks lp`, func(p, t string) {
+		  JOIN tracks mt ON mt.id = m.track_id`, func(p, t string) {
 			if d.matched[p] == nil {
 				d.matched[p] = map[string]bool{}
 			}
@@ -130,11 +122,10 @@ func (d *poolData) countGenre(tracks map[string]bool, genre string) int {
 	return n
 }
 
-// Suggestions proposes custom stations, one playlist at a time: the
-// whole playlist and each station genre with at least MinSuggestionTracks
-// tracks in it. Skipped: pools that already have such a station,
-// dismissed suggestions and a genre covering almost the whole playlist.
-// Largest first.
+// Suggestions proposes custom stations, one per playlist with at least
+// MinSuggestionTracks matched tracks: the whole playlist, nothing else.
+// Skipped: playlists that already have such a station (no genre filter)
+// and dismissed suggestions. Largest first.
 //
 // Pool keys of one playlist never change, so a dismissal stays valid when
 // playlists are added.
@@ -146,28 +137,15 @@ func (s *Service) Suggestions(ctx context.Context) ([]Suggestion, error) {
 
 	out := []Suggestion{}
 	for _, p := range d.playlists {
-		ids, names := []string{p.id}, []string{p.name}
+		ids := []string{p.id}
 		key := PoolKey(ids)
 		tracks := d.poolTracks(ids)
-		if len(tracks) < MinSuggestionTracks {
+		if len(tracks) < MinSuggestionTracks || d.stations[key+"|"] || d.dismissed[key+"|"] {
 			continue
 		}
-		if !d.stations[key+"|"] && !d.dismissed[key+"|"] {
-			out = append(out, Suggestion{
-				PlaylistIDs: ids, PlaylistNames: names, TrackCount: len(tracks), Name: p.name,
-			})
-		}
-		for _, g := range d.genres {
-			n := d.countGenre(tracks, g.ID)
-			if n < MinSuggestionTracks || float64(n) >= redundantShare*float64(len(tracks)) ||
-				d.stations[key+"|"+g.ID] || d.dismissed[key+"|"+g.ID] {
-				continue
-			}
-			out = append(out, Suggestion{
-				PlaylistIDs: ids, PlaylistNames: names, Genre: g.ID, GenreName: g.Name,
-				TrackCount: n, Name: g.Name + " · " + p.name,
-			})
-		}
+		out = append(out, Suggestion{
+			PlaylistIDs: ids, PlaylistNames: []string{p.name}, TrackCount: len(tracks), Name: p.name,
+		})
 	}
 	sort.SliceStable(out, func(i, j int) bool { return out[i].TrackCount > out[j].TrackCount })
 	return out, nil

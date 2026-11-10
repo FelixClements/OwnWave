@@ -158,29 +158,33 @@ func TestStationSuggestionsAndGenreCounts(t *testing.T) {
 	}
 	names := func() []string {
 		s := decode[suggestions](t, f.call(f.h.ListStationSuggestions, admin, http.MethodGet, "/s", "", ""))
-		var out []string
+		out := []string{}
 		for _, x := range s.Suggestions {
-			out = append(out, fmt.Sprintf("%s/%s/%d", x.Name, x.Genre, x.TrackCount))
+			out = append(out, fmt.Sprintf("%s/%d", x.Name, x.TrackCount))
 		}
 		return out
 	}
-	// One playlist at a time. "techno-list" is 100% techno, so its genre
-	// suggestion would be redundant; house (10) and "tiny" (3) are too
-	// small. Nothing for all playlists together: the genre stations cover it.
-	require.Equal(t, []string{"mixed-list//36", "techno-list//30", "Techno · mixed-list/techno/26"}, names())
+	// One whole playlist at a time, never split by genre; "tiny" (3) is
+	// too small. Nothing for all playlists together: the genre stations
+	// cover it.
+	require.Equal(t, []string{"mixed-list/36", "techno-list/30"}, names())
 
 	rec := f.call(f.h.DismissStationSuggestion, admin, http.MethodPost, "/d", "",
-		`{"playlist_ids":["`+techno+`"],"genre":""}`)
+		`{"playlist_ids":["`+techno+`"]}`)
 	require.Equal(t, http.StatusNoContent, rec.Code)
-	require.Equal(t, []string{"mixed-list//36", "Techno · mixed-list/techno/26"}, names())
+	require.Equal(t, []string{"mixed-list/36"}, names())
 	rec = f.call(f.h.DismissStationSuggestion, admin, http.MethodPost, "/d", "",
-		`{"playlist_ids":["`+techno+`","`+mixed+`"],"genre":""}`)
+		`{"playlist_ids":["`+techno+`","`+mixed+`"]}`)
 	require.Equal(t, http.StatusBadRequest, rec.Code, "suggestions are for one playlist")
 
-	// Accepting = creating the station; its suggestion disappears.
+	// A station of part of the playlist leaves the suggestion; one of the
+	// whole playlist accepts it.
 	rec = f.call(f.h.CreateStation, admin, http.MethodPost, "/stations", "", `{"name":"Mixed techno","playlist_ids":["`+mixed+`"],"genres":["techno"]}`)
 	require.Equal(t, http.StatusCreated, rec.Code, rec.Body.String())
-	require.Equal(t, []string{"mixed-list//36"}, names())
+	require.Equal(t, []string{"mixed-list/36"}, names())
+	rec = f.call(f.h.CreateStation, admin, http.MethodPost, "/stations", "", `{"name":"Mixed","playlist_ids":["`+mixed+`"]}`)
+	require.Equal(t, http.StatusCreated, rec.Code, rec.Body.String())
+	require.Equal(t, []string{}, names())
 
 	counts := decode[stations.PoolGenres](t, f.call(f.h.ListStationGenres, admin, http.MethodGet,
 		"/stations/genres?playlist_ids="+techno+","+mixed, "", ""))
@@ -195,25 +199,46 @@ func TestStationSuggestionsAndGenreCounts(t *testing.T) {
 	require.Equal(t, http.StatusBadRequest, f.call(f.h.ListStationGenres, admin, http.MethodGet, "/stations/genres", "", "").Code)
 }
 
-func TestSuggestionsOfferAGenreOfAPlaylist(t *testing.T) {
+func TestEnhanceMixesInLibraryPicks(t *testing.T) {
 	f := newStationsFixture(t)
 	admin := f.user("admin", true)
-	mixed := f.playlist("mixed-list", 26, "techno")
-	f.addTracks(mixed, "mixed-house", 10, "house")
-	f.playlist("house-list", 30, "house")
-	_, err := f.h.pipeline.Run(f.ctx, "test", true)
-	require.NoError(t, err)
+	list := f.playlist("list", 30, "techno")
+	// Five library songs that sound like the playlist, outside it.
+	for i := 0; i < 5; i++ {
+		track := f.one(`INSERT INTO tracks (path, title) VALUES ($1, $1) RETURNING id::text`, fmt.Sprintf("/m/pick/%d", i))
+		f.exec(`INSERT INTO playlist_library_picks (playlist_id, track_id, hits, similarity) VALUES ($1::uuid, $2::uuid, 1, 0.9)`, list, track)
+	}
 
+	// Picks never count towards a suggestion or the editor's pool.
 	s := decode[struct {
 		Suggestions []stations.Suggestion `json:"suggestions"`
 	}](t, f.call(f.h.ListStationSuggestions, admin, http.MethodGet, "/s", "", ""))
-	var names []string
-	for _, x := range s.Suggestions {
-		names = append(names, x.Name)
-	}
-	// "Techno · mixed-list" plays the playlist's techno; the Techno genre
-	// station plays the library's, so they are never the same station.
-	require.Equal(t, []string{"mixed-list", "house-list", "Techno · mixed-list"}, names)
+	require.Len(t, s.Suggestions, 1)
+	require.Equal(t, 30, s.Suggestions[0].TrackCount)
+	counts := decode[stations.PoolGenres](t, f.call(f.h.ListStationGenres, admin, http.MethodGet, "/stations/genres?playlist_ids="+list, "", ""))
+	require.Equal(t, 30, counts.Tracks)
+
+	// A playlist station plays just the playlist until Enhance is on.
+	rec := f.call(f.h.CreateStation, admin, http.MethodPost, "/stations", "", `{"name":"List","playlist_ids":["`+list+`"]}`)
+	require.Equal(t, http.StatusCreated, rec.Code, rec.Body.String())
+	st := decode[stations.Station](t, rec)
+	require.False(t, st.Enhance)
+	require.Equal(t, 30, st.TrackCount)
+
+	rec = f.call(f.h.UpdateStation, admin, http.MethodPut, "/stations/"+st.ID, st.ID, `{"enhance":true}`)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	st = decode[stations.Station](t, rec)
+	require.True(t, st.Enhance)
+	require.Equal(t, 35, st.TrackCount)
+
+	// Changing something else keeps Enhance.
+	rec = f.call(f.h.UpdateStation, admin, http.MethodPut, "/stations/"+st.ID, st.ID, `{"name":"Renamed"}`)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	require.True(t, decode[stations.Station](t, rec).Enhance)
+
+	rec = f.call(f.h.CreateStation, admin, http.MethodPost, "/stations", "", `{"name":"Enhanced","playlist_ids":["`+list+`"],"enhance":true}`)
+	require.Equal(t, http.StatusCreated, rec.Code, rec.Body.String())
+	require.Equal(t, 35, decode[stations.Station](t, rec).TrackCount)
 }
 
 func TestBrowseTreeAndVoiceSearch(t *testing.T) {

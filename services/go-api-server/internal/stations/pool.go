@@ -14,9 +14,9 @@ func (a *Args) Add(v any) string {
 // Where returns an SQL predicate on `tracks t` that holds for the songs the
 // definition plays, each by its best copy. A genre station plays every song
 // of the library whose main genre is its genre. Any other station plays the
-// local matches and library picks of its playlists (of every playlist for
-// AllPlaylists), and when it has genres, songs with one of them among their
-// station genres.
+// local matches of its playlists (of every playlist for AllPlaylists), with
+// Enhance also their library picks, and when it has genres, songs with one
+// of them among their station genres.
 func (d Definition) Where(args *Args) string {
 	if d.Library {
 		return `t.copy_of IS NULL AND EXISTS (
@@ -32,9 +32,13 @@ func (d Definition) Where(args *Args) string {
 	cond := `t.copy_of IS NULL AND t.id IN (
 		SELECT COALESCE(mt.copy_of, mt.id) FROM playlist_items pi
 		JOIN spotify_track_matches m ON m.spotify_track_id = pi.spotify_track_id
-		JOIN tracks mt ON mt.id = m.track_id` + matches + `
+		JOIN tracks mt ON mt.id = m.track_id` + matches
+	if d.Enhance {
+		cond += `
 		UNION
-		SELECT lp.track_id FROM playlist_library_picks lp` + picks + `)`
+		SELECT lp.track_id FROM playlist_library_picks lp` + picks
+	}
+	cond += `)`
 	if len(d.Genres) > 0 {
 		cond += ` AND EXISTS (
 		SELECT 1 FROM track_station_genres g
