@@ -11,7 +11,7 @@ Detail for [Phase 5 of the redesign plan](PLAN.md#phase-5-android-app).
 | PR 1: scaffold, client, sign-in, station list | ✅ Merged: [PR #87](https://github.com/FelixClements/OwnWave/pull/87). |
 | PR 2: playback | ✅ Merged: [PR #88](https://github.com/FelixClements/OwnWave/pull/88). On the emulator with a real account: stations play, the queue and covers load, and a play was recorded. Still to check on a phone: an hour with the screen off, lock screen and Bluetooth controls, the notification's like and ban buttons. |
 | PR 3: Android Auto | ✅ Merged: [PR #89](https://github.com/FelixClements/OwnWave/pull/89). Build, 52 unit tests and lint pass. The smoke test `AutoBrowseSmokeTest` (platform `MediaBrowser`, the same path as Auto) passed against the real server: 4 tabs with the Auto hints, stations with readable covers, genres and playlists, search, and voice. Still to check: the DHU or a car (it was not installed), thumbs in Auto, and resume after the app was stopped. |
-| PR 4: signed release | ✅ Merged: [PR #PR4](https://github.com/FelixClements/OwnWave/pull/PR4). The release workflow, signing from secrets, the devices list in Settings (7 tests, 59 in all) and the install steps. A signed `assembleRelease` with R8 was built and checked locally with a throwaway key. Still to do: create the real keystore and secrets, then push the first `android-v*` tag. |
+| PR 4: signed release | ✅ Merged: [PR #90](https://github.com/FelixClements/OwnWave/pull/90). The release workflow, signing from secrets, the devices list in Settings (7 tests, 59 in all) and the install steps. A signed `assembleRelease` with R8 was built and checked locally with a throwaway key. Still to do: create the real keystore and secrets, then push the first `android-v*` tag. |
 
 ### Picking this up later
 
@@ -214,7 +214,7 @@ The original plan:
 1. ✅ **Scaffold, client and login.** Gradle project, `:api` generation (spike this first; see Risks), theme, `AppContainer`, `SessionStore`, the login screen, a Home that lists stations (with no playback), and the CI build job. Done when a debug APK signs in against the real server and lists stations. This needs the Caddy fix. **Done:** [PR #87](https://github.com/FelixClements/OwnWave/pull/87). The acceptance check passed on 2026-11-10 (emulator, real account).
 2. ✅ **Playback.** Merged: [PR #88](https://github.com/FelixClements/OwnWave/pull/88); the phone checks are still open (see Status). `PlaybackService`, `StreamResolver`, `StationQueue` refill, `QualityPolicy`, `PlayReporter`, like and ban, the mini player and now playing screen, and the Settings quality options. Done when a station plays for an hour with the screen off, controls work from the lock screen and Bluetooth, and plays show up in web history.
 3. ✅ **Android Auto.** Merged: [PR #89](https://github.com/FelixClements/OwnWave/pull/89); the DHU, car and thumbs checks are still open (see Status). `BrowseTree`, `ArtworkProvider`, voice search, resume, and the Auto manifest bits. Done when the DHU browses all 4 tabs with covers, "play techno on OwnWave" starts a station, and thumbs work.
-4. ✅ **Release.** Merged: [PR #PR4](https://github.com/FelixClements/OwnWave/pull/PR4). Signed release build, the GitHub Release on tag, the devices screen, README install steps, and an infra wiki entry.
+4. ✅ **Release.** Merged: [PR #90](https://github.com/FelixClements/OwnWave/pull/90). Signed release build, the GitHub Release on tag, the devices screen, README install steps, and an infra wiki entry.
 
 ## Risks and open questions
 
