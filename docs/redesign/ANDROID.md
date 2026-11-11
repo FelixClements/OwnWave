@@ -2,14 +2,14 @@
 
 Detail for [Phase 5 of the redesign plan](PLAN.md#phase-5-android-app).
 
-## Status (2026-11-10)
+## Status (2026-11-11)
 
 | Step | State |
 | --- | --- |
 | Plan and decisions | ✅ Done (this file). |
 | Authentik gate bypass for app API calls (Caddy) | ✅ Done and checked live. See [the blocker section](#blocker-getting-past-the-authentik-gate). |
-| PR 1: scaffold, client, sign-in, station list | ✅ Built: [PR #87](https://github.com/FelixClements/OwnWave/pull/87), branch `android/scaffold`, CI green. A real account signed in from the emulator and the station list with covers loaded. Merge pending at the time of writing. |
-| PR 2: playback | ⏭ Next. Branch from `main` after #87 is merged (do not stack it on `android/scaffold`). |
+| PR 1: scaffold, client, sign-in, station list | ✅ Merged: [PR #87](https://github.com/FelixClements/OwnWave/pull/87). |
+| PR 2: playback | 🔄 Built on branch `android/playback` (from `main`). Build, 38 unit tests and lint pass. On the emulator with a real account: stations play, the queue and covers load, and a play was recorded (the station moved to the top of "Jump back in"). Still to check on a phone: an hour with the screen off, lock screen and Bluetooth controls, the notification's like and ban buttons. |
 | PR 3: Android Auto | ⬜ Not started. |
 | PR 4: signed release | ⬜ Not started. |
 
@@ -97,16 +97,16 @@ apps/android/
   ✅ auth/                   Session, SessionStore (DataStore + TokenCipher/Keystore), AuthInterceptor,
                              AccountRepository (login/logout), ServerUrl (parse + same-origin check)
   ✅ data/                   ApiFactory (Retrofit per server), StationRepository
-     data/                   FeedbackRepository, SettingsStore (PR 2)
-  ✅ ui/                     theme, login, home
-     ui/                     nowplaying, settings (PR 2)
-    playback/
-      PlaybackService.kt     MediaLibraryService + MediaLibrarySession.Callback
-      StationQueue.kt        fetch, refill, dedupe; pure Kotlin
-      PlayReporter.kt        30 s or half-track rule -> POST /played
-      QualityPolicy.kt       network -> Quality
-      StreamResolver.kt      ownwave://track/<id> -> https URL with current quality
-      Commands.kt            LIKE / BAN session commands
+  ✅ data/                   PlaybackRepository (queue, plays, like, ban), SettingsStore (PR 2)
+  ✅ ui/                     theme, login, home, SignedInApp, player (mini player, now playing), settings
+  ✅ playback/
+  ✅   PlaybackService.kt     MediaLibraryService + MediaLibrarySession.Callback
+  ✅   MediaIds.kt            station:/track: media ids, ownwave://track/<id> URIs
+  ✅   StationQueue.kt        refill, dedupe; pure Kotlin
+  ✅   PlayReporter.kt        30 s or half-track rule -> POST /played
+  ✅   QualityPolicy.kt       network -> Quality
+  ✅   StreamResolver.kt      ownwave://track/<id> -> https URL with current quality
+  ✅   Commands.kt            LIKE / BAN session commands
       BrowseTree.kt          /api/browse -> MediaItems (Auto)
     artwork/ArtworkProvider.kt  content:// proxy for covers (Auto)
 ```
@@ -127,7 +127,19 @@ The login screen asks for a server URL, a username and a password.
 - **Redirects:** OkHttp does not follow them. A 3xx, or a non-JSON 200, shows "The server did not answer like OwnWave" (a login gate in front of the server).
 - **Backups:** off (`allowBackup=false`, data extraction rules exclude everything), because the token is bound to this device's Keystore key.
 
-### Playing a station
+### Playing a station (✅ PR 2)
+
+How it was built, where it differs from the plan below:
+- The UI plays a station by setting one MediaItem with id `station:<id>`. `onSetMediaItems` in the service swaps it for the station queue, so Auto (PR 3) can use the same path.
+- **Like and ban:** the session publishes the current track's like state in its session extras, and the phone UI reads it from there. In the notification, like sits in the back-secondary slot and ban in the overflow.
+- **Unlike:** the generated `PlaybackApi.deleteFeedback` cannot work, because Retrofit refuses `@Body` on `@DELETE`. `ApiFactory.FeedbackApi` makes that one call with `@HTTP(method = "DELETE", hasBody = true)`. A unit test covers it.
+- **No retries on 4xx:** ExoPlayer's default load policy retries failed loads. `NoRetryOnClientErrors` stops that for 4xx responses.
+- **Errors:** a track the server cannot serve (4xx other than 401/429, or a file that cannot be parsed or decoded) is removed and skipped, at most 3 in a row. Network errors, 401 and 429 pause playback instead.
+- **Sign-out:** the service watches the session. Signing out, or a 401 (which signs out), stops the player and clears the queue.
+- **Length while transcoding:** the first play of a track in a new quality has no known length. The UI then shows the queue's `duration_seconds` and disables seeking.
+- **Settings:** Wi-Fi offers original, high, normal and low. Mobile data offers high, normal and low. `aac` is not offered.
+
+The plan:
 
 - Playing a station calls `GET /api/stations/{id}/queue` (up to 200 tracks) and sets them as the player's MediaItems.
 - A MediaItem's id is `track:<trackId>|station:<stationId>` and its URI is `ownwave://track/<trackId>`. A `ResolvingDataSource` turns that URI into `<server>/api/stream/<id>?quality=<q>` when the track loads. The quality therefore follows the network at load time, and saved items never contain the host or the token.
@@ -152,9 +164,9 @@ The login screen asks for a server URL, a username and a password.
 - **Login.** ✅
 - **Home:** Jump back in (`browse?node=recent`), Genre stations, Your stations. Each card shows the cover and the track count, and a tap plays it. ✅ Partly done in PR 1:
   - Done: a grid with "Stations" (custom) and "Genre stations", covers from `/api/stations/{id}/cover`, song counts, pull-to-refresh, and sign out in the menu.
-  - Still to do: "Jump back in" and tap to play (PR 2).
-- **Mini player and now playing:** cover, title and artist, like and ban, progress, the next items in the queue.
-- **Settings:** quality on Wi-Fi and on mobile data, signed-in devices (`GET/DELETE /api/me/devices`, with the current one marked), sign out.
+  - ✅ PR 2: "Jump back in" (up to 6 recent stations) and tap to play.
+- **Mini player and now playing:** cover, title and artist, like and ban, progress, the next items in the queue. ✅ PR 2 (the next 5 items).
+- **Settings:** quality on Wi-Fi and on mobile data, signed-in devices (`GET/DELETE /api/me/devices`, with the current one marked), sign out. ✅ PR 2: quality and sign out. The devices list is in PR 4.
 - The UI talks to the service through `MediaController`. It never holds its own player.
 
 ## Testing
@@ -163,6 +175,7 @@ The login screen asks for a server URL, a username and a password.
   - ✅ PR 1 has 13 tests:
     - `ServerUrlTest`: parsing and the same-origin check.
     - `AccountRepositoryTest`: success, 401, 429, a 302 gate, an HTML page, 503, and Bearer only for the signed-in server with sign-out on 401.
+  - ✅ PR 2 adds 25 tests, for 38 in all: `MediaIdsTest`, `StationQueueTest`, `PlayReporterTest`, `QualityPolicyTest`, `StreamResolverTest`, and `PlaybackRepositoryTest` (MockWebServer: queue, a failure that is not retried, ids that are not UUIDs are never sent, play body, like POST and unlike DELETE with body, ban).
 - **Manual:** emulator or phone through the T3 device panel. Android Auto through the Desktop Head Unit (DHU, in the SDK extras) with "unknown sources" turned on in Auto's developer settings.
 - `openapi_test.go` already keeps the spec complete. The Android build checks that the spec still generates and compiles against the app.
 
@@ -175,7 +188,7 @@ The login screen asks for a server URL, a username and a password.
 ## PR sequence
 
 1. ✅ **Scaffold, client and login.** Gradle project, `:api` generation (spike this first; see Risks), theme, `AppContainer`, `SessionStore`, the login screen, a Home that lists stations (with no playback), and the CI build job. Done when a debug APK signs in against the real server and lists stations. This needs the Caddy fix. **Done:** [PR #87](https://github.com/FelixClements/OwnWave/pull/87). The acceptance check passed on 2026-11-10 (emulator, real account).
-2. ⏭ **Playback.** `PlaybackService`, `StreamResolver`, `StationQueue` refill, `QualityPolicy`, `PlayReporter`, like and ban, the mini player and now playing screen, and the Settings quality options. Done when a station plays for an hour with the screen off, controls work from the lock screen and Bluetooth, and plays show up in web history.
+2. 🔄 **Playback.** Built on `android/playback`; the phone checks are still open (see Status). `PlaybackService`, `StreamResolver`, `StationQueue` refill, `QualityPolicy`, `PlayReporter`, like and ban, the mini player and now playing screen, and the Settings quality options. Done when a station plays for an hour with the screen off, controls work from the lock screen and Bluetooth, and plays show up in web history.
 3. **Android Auto.** `BrowseTree`, `ArtworkProvider`, voice search, resume, and the Auto manifest bits. Done when the DHU browses all 4 tabs with covers, "play techno on OwnWave" starts a station, and thumbs work.
 4. **Release.** Signed release build, the GitHub Release on tag, the devices screen, README install steps, and an infra wiki entry.
 

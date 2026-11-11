@@ -6,7 +6,10 @@ import io.github.felixclements.ownwave.auth.AccountRepository
 import io.github.felixclements.ownwave.auth.AuthInterceptor
 import io.github.felixclements.ownwave.auth.SessionStore
 import io.github.felixclements.ownwave.auth.TokenCipher
+import io.github.felixclements.ownwave.auth.Session
 import io.github.felixclements.ownwave.data.ApiFactory
+import io.github.felixclements.ownwave.data.PlaybackRepository
+import io.github.felixclements.ownwave.data.SettingsStore
 import io.github.felixclements.ownwave.data.StationRepository
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -17,15 +20,17 @@ import okhttp3.OkHttpClient
 import java.io.File
 
 private val Context.sessionDataStore by preferencesDataStore(name = "session")
+private val Context.settingsDataStore by preferencesDataStore(name = "settings")
 
 /** The app's long-lived objects, built once in [OwnWaveApp]. */
 class AppContainer(context: Context) {
     val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
     val sessionStore = SessionStore(context.sessionDataStore, TokenCipher(), appScope)
+    val settingsStore = SettingsStore(context.settingsDataStore, appScope)
 
     /**
-     * Shared by Retrofit, Coil and (later) ExoPlayer and the artwork provider.
+     * Shared by Retrofit, Coil, ExoPlayer and the notification artwork loader (and later the artwork provider).
      * Redirects are not followed: a redirect means a login gate, not OwnWave.
      */
     val httpClient: OkHttpClient = OkHttpClient.Builder()
@@ -43,4 +48,11 @@ class AppContainer(context: Context) {
 
     val accountRepository = AccountRepository(apis, allowHttp = BuildConfig.DEBUG)
     val stationRepository = StationRepository(apis)
+    val playbackRepository = PlaybackRepository(apis)
+
+    /** Revokes the device token when the server is reachable, then forgets the session. The player stops itself. */
+    suspend fun signOut(session: Session) {
+        accountRepository.logout(session)
+        sessionStore.clear()
+    }
 }

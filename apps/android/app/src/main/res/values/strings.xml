@@ -17,11 +17,39 @@
 
     <string name="menu">Menu</string>
     <string name="sign_out_user">Sign out %1$s</string>
+    <string name="section_recent">Jump back in</string>
     <string name="section_your_stations">Stations</string>
     <string name="section_genre_stations">Genre stations</string>
     <string name="stations_error">Could not load stations.</string>
     <string name="stations_empty">No stations yet. Create one in the OwnWave web app.</string>
     <string name="retry">Retry</string>
+    <string name="settings">Settings</string>
+    <string name="back">Back</string>
+    <string name="sign_out">Sign out</string>
+
+    <string name="player_play">Play</string>
+    <string name="player_pause">Pause</string>
+    <string name="player_next">Next song</string>
+    <string name="player_like">Like</string>
+    <string name="player_unlike">Remove like</string>
+    <string name="player_ban">Never play this song</string>
+    <string name="player_up_next">Up next</string>
+
+    <string name="settings_quality_wifi">Quality on Wi-Fi</string>
+    <string name="settings_quality_mobile">Quality on mobile data</string>
+    <string name="settings_signed_in_as">Signed in as %1$s on %2$s</string>
+    <string name="settings_version">Version %1$s</string>
+    <string name="quality_original">Original</string>
+    <string name="quality_original_detail">The file as stored, not transcoded. Can be large.</string>
+    <string name="quality_high">High</string>
+    <string name="quality_high_detail">Opus 160 kbps</string>
+    <string name="quality_normal">Normal</string>
+    <string name="quality_normal_detail">Opus 96 kbps</string>
+    <string name="quality_low">Low</string>
+    <string name="quality_low_detail">Opus 64 kbps</string>
+    <string name="quality_aac">AAC</string>
+    <string name="quality_aac_detail">AAC 128 kbps</string>
+
     <plurals name="song_count">
         <item quantity="one">%d song</item>
         <item quantity="other">%d songs</item>
