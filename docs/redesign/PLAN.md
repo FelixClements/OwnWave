@@ -113,6 +113,8 @@ Spotify-inspired, dark-first, responsive:
 
 ## Phase 5: Android app
 
+Implementation plan and progress: [ANDROID.md](ANDROID.md). Status (2026-11-10): PR 1 (scaffold, sign-in, station list) is [#87](https://github.com/FelixClements/OwnWave/pull/87), and playback is next.
+
 - Kotlin, Jetpack Compose, Material 3 with a dark theme matching the web UI.
 - Media3 `MediaLibraryService` + ExoPlayer. The same service powers the phone notification, lock screen, Bluetooth controls and Android Auto.
 - Android Auto: browsable tree (Stations, Genres, Playlists, Recent), voice search ("play techno on OwnWave"), thumbs up/down mapped to like/ban, resume last station on connect.
