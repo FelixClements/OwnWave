@@ -10,8 +10,8 @@ Detail for [Phase 5 of the redesign plan](PLAN.md#phase-5-android-app).
 | Authentik gate bypass for app API calls (Caddy) | ✅ Done and checked live. See [the blocker section](#blocker-getting-past-the-authentik-gate). |
 | PR 1: scaffold, client, sign-in, station list | ✅ Merged: [PR #87](https://github.com/FelixClements/OwnWave/pull/87). |
 | PR 2: playback | ✅ Merged: [PR #88](https://github.com/FelixClements/OwnWave/pull/88). On the emulator with a real account: stations play, the queue and covers load, and a play was recorded. Still to check on a phone: an hour with the screen off, lock screen and Bluetooth controls, the notification's like and ban buttons. |
-| PR 3: Android Auto | 🔄 Built on branch `android/auto`. Build, 52 unit tests and lint pass. The smoke test `AutoBrowseSmokeTest` (platform `MediaBrowser`, the same path as Auto) passed against the real server: 4 tabs with the Auto hints, stations with readable covers, genres and playlists, search, and voice. Still to check: the DHU or a car (it was not installed), thumbs in Auto, and resume after the app was stopped. |
-| PR 4: signed release | ⬜ Not started. |
+| PR 3: Android Auto | ✅ Merged: [PR #89](https://github.com/FelixClements/OwnWave/pull/89). Build, 52 unit tests and lint pass. The smoke test `AutoBrowseSmokeTest` (platform `MediaBrowser`, the same path as Auto) passed against the real server: 4 tabs with the Auto hints, stations with readable covers, genres and playlists, search, and voice. Still to check: the DHU or a car (it was not installed), thumbs in Auto, and resume after the app was stopped. |
+| PR 4: signed release | ✅ Merged: [PR #PR4](https://github.com/FelixClements/OwnWave/pull/PR4). The release workflow, signing from secrets, the devices list in Settings (7 tests, 59 in all) and the install steps. A signed `assembleRelease` with R8 was built and checked locally with a throwaway key. Still to do: create the real keystore and secrets, then push the first `android-v*` tag. |
 
 ### Picking this up later
 
@@ -154,7 +154,7 @@ The plan:
 - **Buffering:** `DefaultLoadControl` with a modest buffer (about 30 s minimum, 120 s maximum). It is enough for tunnels in the car without fetching a whole track over mobile data. The first play of a track in a new quality streams while the server transcodes it (no Content-Length), so the seek bar may be unknown until the transcode is cached.
 - **Audio focus and noisy audio:** `setAudioAttributes(..., handleAudioFocus = true)` and `setHandleAudioBecomingNoisy(true)`.
 
-### Android Auto (🔄 PR 3)
+### Android Auto (✅ PR 3)
 
 How it was built:
 
@@ -183,7 +183,7 @@ The original plan:
   - Done: a grid with "Stations" (custom) and "Genre stations", covers from `/api/stations/{id}/cover`, song counts, pull-to-refresh, and sign out in the menu.
   - ✅ PR 2: "Jump back in" (up to 6 recent stations) and tap to play.
 - **Mini player and now playing:** cover, title and artist, like and ban, progress, the next items in the queue. ✅ PR 2 (the next 5 items).
-- **Settings:** quality on Wi-Fi and on mobile data, signed-in devices (`GET/DELETE /api/me/devices`, with the current one marked), sign out. ✅ PR 2: quality and sign out. The devices list is in PR 4.
+- **Settings:** quality on Wi-Fi and on mobile data, signed-in devices (`GET/DELETE /api/me/devices`, with the current one marked), sign out. ✅ PR 2: quality and sign out. ✅ PR 4: the devices list. This device comes first and is marked; the others can be signed out after a confirm. A 404 counts as already signed out.
 - The UI talks to the service through `MediaController`. It never holds its own player.
 
 ## Testing
@@ -197,6 +197,7 @@ The original plan:
     - `ArtworkUrisTest`: the mapping and what is refused (other paths, traversal, other hosts).
     - `BrowseTreeTest`: entries, known nodes only, the cache and its TTL with failures not cached, paging without overflow, the voice pick, search dedupe.
     - `StationRepositoryTest`: browse node, a failure that is not retried, the search query trimmed, a blank search sends nothing.
+  - ✅ PR 4 adds 7 tests, for 59 in all: `DeviceRepositoryTest` (this device first, failures not retried, an HTML page, DELETE path, 404 counts as done, never revokes this device or a non-UUID id).
 - **Smoke test (manual):** `AutoBrowseSmokeTest`, 5 tests against a signed-in device (see "Picking this up later"). It is not run in CI.
 - **Manual:** emulator or phone through the T3 device panel. Android Auto through the Desktop Head Unit (DHU, in the SDK extras) with "unknown sources" turned on in Auto's developer settings.
 - `openapi_test.go` already keeps the spec complete. The Android build checks that the spec still generates and compiles against the app.
@@ -206,13 +207,14 @@ The original plan:
 - A new `android` job in `.github/workflows/ci.yml`: Temurin 21, `gradle/actions/setup-gradle`, then in `apps/android` run `./gradlew :app:assembleDebug :app:testDebugUnitTest :app:lintDebug`.
   - ✅ Done in PR 1. It runs on every push and PR (no path filter; about 3.5 minutes) and uploads the debug APK as the `ownwave-debug-apk` artifact (kept 14 days).
 - **Release** (last PR): on a tag `android-v*`, build `assembleRelease`, signed with a keystore from repository secrets (base64 keystore plus passwords; it never touches the repo or the wiki), and attach the APK to the GitHub Release. `versionName` comes from the tag and `versionCode` from the run number.
+  - ✅ Done in PR 4: `.github/workflows/android-release.yml`. It checks the tag is `android-vX.Y.Z`, runs the unit tests, builds and signs with the secrets `ANDROID_KEYSTORE_BASE64`, `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS` and `ANDROID_KEY_PASSWORD`, and attaches `ownwave-X.Y.Z.apk` plus `SHA256SUMS`. `app/build.gradle.kts` reads `OWNWAVE_KEYSTORE_*` from the environment and `-Pownwave.versionName`/`-Pownwave.versionCode`; without a keystore the release APK is unsigned. Steps: [apps/android/README.md](../../apps/android/README.md#release).
 
 ## PR sequence
 
 1. ✅ **Scaffold, client and login.** Gradle project, `:api` generation (spike this first; see Risks), theme, `AppContainer`, `SessionStore`, the login screen, a Home that lists stations (with no playback), and the CI build job. Done when a debug APK signs in against the real server and lists stations. This needs the Caddy fix. **Done:** [PR #87](https://github.com/FelixClements/OwnWave/pull/87). The acceptance check passed on 2026-11-10 (emulator, real account).
-2. 🔄 **Playback.** Built on `android/playback`; the phone checks are still open (see Status). `PlaybackService`, `StreamResolver`, `StationQueue` refill, `QualityPolicy`, `PlayReporter`, like and ban, the mini player and now playing screen, and the Settings quality options. Done when a station plays for an hour with the screen off, controls work from the lock screen and Bluetooth, and plays show up in web history.
-3. 🔄 **Android Auto.** Built on `android/auto`; the DHU and car checks are still open (see Status). `BrowseTree`, `ArtworkProvider`, voice search, resume, and the Auto manifest bits. Done when the DHU browses all 4 tabs with covers, "play techno on OwnWave" starts a station, and thumbs work.
-4. **Release.** Signed release build, the GitHub Release on tag, the devices screen, README install steps, and an infra wiki entry.
+2. ✅ **Playback.** Merged: [PR #88](https://github.com/FelixClements/OwnWave/pull/88); the phone checks are still open (see Status). `PlaybackService`, `StreamResolver`, `StationQueue` refill, `QualityPolicy`, `PlayReporter`, like and ban, the mini player and now playing screen, and the Settings quality options. Done when a station plays for an hour with the screen off, controls work from the lock screen and Bluetooth, and plays show up in web history.
+3. ✅ **Android Auto.** Merged: [PR #89](https://github.com/FelixClements/OwnWave/pull/89); the DHU, car and thumbs checks are still open (see Status). `BrowseTree`, `ArtworkProvider`, voice search, resume, and the Auto manifest bits. Done when the DHU browses all 4 tabs with covers, "play techno on OwnWave" starts a station, and thumbs work.
+4. ✅ **Release.** Merged: [PR #PR4](https://github.com/FelixClements/OwnWave/pull/PR4). Signed release build, the GitHub Release on tag, the devices screen, README install steps, and an infra wiki entry.
 
 ## Risks and open questions
 

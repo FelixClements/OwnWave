@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.datastore.preferences.preferencesDataStore
 import io.github.felixclements.ownwave.auth.AccountRepository
 import io.github.felixclements.ownwave.auth.AuthInterceptor
+import io.github.felixclements.ownwave.auth.DeviceRepository
 import io.github.felixclements.ownwave.auth.SessionStore
 import io.github.felixclements.ownwave.auth.TokenCipher
 import io.github.felixclements.ownwave.auth.Session
@@ -50,6 +51,7 @@ class AppContainer(context: Context) {
     private val apis = ApiFactory(httpClient)
 
     val accountRepository = AccountRepository(apis, allowHttp = BuildConfig.DEBUG)
+    val deviceRepository = DeviceRepository(apis)
     val stationRepository = StationRepository(apis)
     val playbackRepository = PlaybackRepository(apis)
 

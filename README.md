@@ -22,6 +22,10 @@ An open-source, self-hosted smart radio. Turn a local library of lossless audio 
 | `services/python-analytics` | Python, FastAPI, Essentia, librosa | Internal API plus a worker that scans the library, extracts audio features and scores station genres |
 | `database` | Postgres + pgvector | Data and the worker's task queue |
 
+## Android app
+
+A native app for phones and Android Auto lives in [`apps/android`](apps/android). Download the signed APK from the [Releases](https://github.com/FelixClements/OwnWave/releases) page (tags `android-v…`); install steps, including Android Auto, are in [`apps/android/README.md`](apps/android/README.md#install).
+
 ## Quick start
 
 Requires Docker and a folder of audio files.

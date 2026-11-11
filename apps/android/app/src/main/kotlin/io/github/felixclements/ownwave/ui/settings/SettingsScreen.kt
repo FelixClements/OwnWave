@@ -68,6 +68,8 @@ fun SettingsScreen(session: Session, onBack: () -> Unit) {
                 scope.launch { app.settingsStore.setMobileQuality(it) }
             }
             HorizontalDivider()
+            DevicesSection(session)
+            HorizontalDivider()
             Column(Modifier.padding(16.dp)) {
                 Text(
                     stringResource(R.string.settings_signed_in_as, session.username, session.server.host),
