@@ -9,14 +9,15 @@ Detail for [Phase 5 of the redesign plan](PLAN.md#phase-5-android-app).
 | Plan and decisions | ✅ Done (this file). |
 | Authentik gate bypass for app API calls (Caddy) | ✅ Done and checked live. See [the blocker section](#blocker-getting-past-the-authentik-gate). |
 | PR 1: scaffold, client, sign-in, station list | ✅ Merged: [PR #87](https://github.com/FelixClements/OwnWave/pull/87). |
-| PR 2: playback | 🔄 Built on branch `android/playback` (from `main`). Build, 38 unit tests and lint pass. On the emulator with a real account: stations play, the queue and covers load, and a play was recorded (the station moved to the top of "Jump back in"). Still to check on a phone: an hour with the screen off, lock screen and Bluetooth controls, the notification's like and ban buttons. |
-| PR 3: Android Auto | ⬜ Not started. |
+| PR 2: playback | ✅ Merged: [PR #88](https://github.com/FelixClements/OwnWave/pull/88). On the emulator with a real account: stations play, the queue and covers load, and a play was recorded. Still to check on a phone: an hour with the screen off, lock screen and Bluetooth controls, the notification's like and ban buttons. |
+| PR 3: Android Auto | 🔄 Built on branch `android/auto`. Build, 52 unit tests and lint pass. The smoke test `AutoBrowseSmokeTest` (platform `MediaBrowser`, the same path as Auto) passed against the real server: 4 tabs with the Auto hints, stations with readable covers, genres and playlists, search, and voice. Still to check: the DHU or a car (it was not installed), thumbs in Auto, and resume after the app was stopped. |
 | PR 4: signed release | ⬜ Not started. |
 
 ### Picking this up later
 
 - **Build:** `cd apps/android && ./gradlew :app:assembleDebug :app:testDebugUnitTest :app:lintDebug`. You need JDK 21 and the SDK platform `android-37.0`. On the dev box, the toolchain is in `~/Android`: JDK, Gradle and an SDK with platforms 36 and 37.0.
-- **Emulator:** the AVD `t3_pixel` (Android 16), opened through the T3 Device panel. Install with `ANDROID_SERIAL=emulator-5554 ./gradlew :app:installDebug`. The DHU for Android Auto is not installed yet (SDK extras `extras;google;auto`); PR 3 needs it.
+- **Emulator:** the AVD `t3_pixel` (Android 16), opened through the T3 Device panel. Install with `ANDROID_SERIAL=emulator-5554 ./gradlew :app:installDebug`. The DHU for Android Auto is not installed (SDK extras `extras;google;auto`, and it needs a desktop window).
+- **Auto smoke test:** sign in on the emulator, then `./gradlew :app:installDebug :app:installDebugAndroidTest` and `adb shell am instrument -w io.github.felixclements.ownwave.test/androidx.test.runner.AndroidJUnitRunner`. Do not use `connectedDebugAndroidTest`: it uninstalls the app afterwards and so deletes the sign-in (this happened once, which left an unused device token on the server).
 - **Versions:** they are pinned in `apps/android/gradle/libs.versions.toml`. Notes from the scaffold:
   - `kotlinx-coroutines` is 1.10.2 because 1.12.0 could not be resolved from Maven Central.
   - openapi-generator is 7.26.0 because 7.27.0 was too new.
@@ -83,7 +84,7 @@ Once the Caddy change is made, it goes in the infra wiki (`apps/ownwave`, `infra
 
 ## Project layout
 
-✅ = exists since PR 1. Everything else is planned.
+✅ = exists.
 
 ```
 apps/android/
@@ -107,8 +108,11 @@ apps/android/
   ✅   QualityPolicy.kt       network -> Quality
   ✅   StreamResolver.kt      ownwave://track/<id> -> https URL with current quality
   ✅   Commands.kt            LIKE / BAN session commands
-      BrowseTree.kt          /api/browse -> MediaItems (Auto)
-    artwork/ArtworkProvider.kt  content:// proxy for covers (Auto)
+  ✅   BrowseTree.kt          /api/browse -> browse entries (Auto): node check, 60 s cache, paging, search picks
+  ✅ artwork/ArtworkUris.kt   content://…artwork/<stations|playlists|tracks>/<id> <-> api/<kind>/<id>/cover
+  ✅ artwork/ArtworkProvider.kt  content:// proxy for covers (Auto, notification, phone UI)
+  ✅ data/ResumeStore.kt     last station, track and position (DataStore "resume")
+  app/src/androidTest/…/AutoBrowseSmokeTest.kt  manual smoke test against a signed-in device
 ```
 
 There are two modules because generated code is large and compiles slowly. Keeping it in `:api` keeps `:app` builds incremental.
@@ -150,7 +154,20 @@ The plan:
 - **Buffering:** `DefaultLoadControl` with a modest buffer (about 30 s minimum, 120 s maximum). It is enough for tunnels in the car without fetching a whole track over mobile data. The first play of a track in a new quality streams while the server transcodes it (no Content-Length), so the seek bar may be unknown until the transcode is cached.
 - **Audio focus and noisy audio:** `setAudioAttributes(..., handleAudioFocus = true)` and `setHandleAudioBecomingNoisy(true)`.
 
-### Android Auto
+### Android Auto (🔄 PR 3)
+
+How it was built:
+
+- **Browse:** `onGetChildren` passes the node id to `/api/browse` unchanged. `BrowseTree` refuses unknown node ids locally, so they never reach the server as 404s (CrowdSec counts 404s). It caches each node for 60 s, because Auto asks again on every screen change, and failures are not cached. Folders are browsable, and stations are playable `station:<id>` items. Paging is done locally and cannot overflow when Auto asks for `Int.MAX_VALUE` items.
+- **Root hints:** folders show as lists and stations as a grid. `android.media.browse.SEARCH_SUPPORTED` turns on Auto's search button. The server root has 4 tabs (Stations, Recently played, Genres, Playlists).
+- **Signed out:** browse and search return `ERROR_SESSION_AUTHENTICATION_EXPIRED` with "Sign in to OwnWave on your phone", which Auto shows.
+- **Voice:** a `searchQuery` in `onSetMediaItems` plays the first playable hit of `/api/search/stations`. An empty query ("play OwnWave") resumes the last station, or plays the most recent one. The activity also has the `MEDIA_PLAY_FROM_SEARCH` filter (lint requires it) and sends the query to the service through a `MediaController`.
+- **Resume:** a `ResumePoint` (station, track and its metadata, position) is saved on every track change and pause. `onPlaybackResumption` puts that track first at its position. When `isForPlayback` is true, the rest of the station's queue follows. When it is false, nothing is fetched. A `MediaButtonReceiver` lets a Bluetooth play button start it. Sign-out clears the point.
+- **Artwork:** every cover, including track covers in the notification and the phone UI, is a `content://` URI from `ArtworkProvider`. The provider allows 4 fetches at a time, so a grid of covers does not burst the server. Only `stations`, `playlists` and `tracks` with plain ids are allowed. It serves only `image/*` responses. A 204 or 404 gets a generated placeholder PNG. The session's bitmap loader reads `content://` through `DefaultDataSource`.
+- **Thumbs:** the like and ban `CommandButton`s from PR 2 are the custom actions Auto shows. Not yet checked in Auto.
+
+The original plan:
+
 
 - `onGetLibraryRoot` and `onGetChildren` map `GET /api/browse?node=…` one to one. A `BrowseItem` becomes a MediaItem with `isBrowsable` and `isPlayable` set. The root has 4 tabs at most (Stations, Recent, Genres, Playlists), which fits Auto's tab limit.
 - Selecting a playable `station:<id>` goes through `onSetMediaItems`, which loads the station queue as above.
@@ -176,6 +193,11 @@ The plan:
     - `ServerUrlTest`: parsing and the same-origin check.
     - `AccountRepositoryTest`: success, 401, 429, a 302 gate, an HTML page, 503, and Bearer only for the signed-in server with sign-out on 401.
   - ✅ PR 2 adds 25 tests, for 38 in all: `MediaIdsTest`, `StationQueueTest`, `PlayReporterTest`, `QualityPolicyTest`, `StreamResolverTest`, and `PlaybackRepositoryTest` (MockWebServer: queue, a failure that is not retried, ids that are not UUIDs are never sent, play body, like POST and unlike DELETE with body, ban).
+  - ✅ PR 3 adds 14 tests, for 52 in all:
+    - `ArtworkUrisTest`: the mapping and what is refused (other paths, traversal, other hosts).
+    - `BrowseTreeTest`: entries, known nodes only, the cache and its TTL with failures not cached, paging without overflow, the voice pick, search dedupe.
+    - `StationRepositoryTest`: browse node, a failure that is not retried, the search query trimmed, a blank search sends nothing.
+- **Smoke test (manual):** `AutoBrowseSmokeTest`, 5 tests against a signed-in device (see "Picking this up later"). It is not run in CI.
 - **Manual:** emulator or phone through the T3 device panel. Android Auto through the Desktop Head Unit (DHU, in the SDK extras) with "unknown sources" turned on in Auto's developer settings.
 - `openapi_test.go` already keeps the spec complete. The Android build checks that the spec still generates and compiles against the app.
 
@@ -189,7 +211,7 @@ The plan:
 
 1. ✅ **Scaffold, client and login.** Gradle project, `:api` generation (spike this first; see Risks), theme, `AppContainer`, `SessionStore`, the login screen, a Home that lists stations (with no playback), and the CI build job. Done when a debug APK signs in against the real server and lists stations. This needs the Caddy fix. **Done:** [PR #87](https://github.com/FelixClements/OwnWave/pull/87). The acceptance check passed on 2026-11-10 (emulator, real account).
 2. 🔄 **Playback.** Built on `android/playback`; the phone checks are still open (see Status). `PlaybackService`, `StreamResolver`, `StationQueue` refill, `QualityPolicy`, `PlayReporter`, like and ban, the mini player and now playing screen, and the Settings quality options. Done when a station plays for an hour with the screen off, controls work from the lock screen and Bluetooth, and plays show up in web history.
-3. **Android Auto.** `BrowseTree`, `ArtworkProvider`, voice search, resume, and the Auto manifest bits. Done when the DHU browses all 4 tabs with covers, "play techno on OwnWave" starts a station, and thumbs work.
+3. 🔄 **Android Auto.** Built on `android/auto`; the DHU and car checks are still open (see Status). `BrowseTree`, `ArtworkProvider`, voice search, resume, and the Auto manifest bits. Done when the DHU browses all 4 tabs with covers, "play techno on OwnWave" starts a station, and thumbs work.
 4. **Release.** Signed release build, the GitHub Release on tag, the devices screen, README install steps, and an infra wiki entry.
 
 ## Risks and open questions

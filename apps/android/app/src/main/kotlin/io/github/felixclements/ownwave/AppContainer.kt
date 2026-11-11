@@ -9,6 +9,7 @@ import io.github.felixclements.ownwave.auth.TokenCipher
 import io.github.felixclements.ownwave.auth.Session
 import io.github.felixclements.ownwave.data.ApiFactory
 import io.github.felixclements.ownwave.data.PlaybackRepository
+import io.github.felixclements.ownwave.data.ResumeStore
 import io.github.felixclements.ownwave.data.SettingsStore
 import io.github.felixclements.ownwave.data.StationRepository
 import kotlinx.coroutines.CoroutineScope
@@ -21,6 +22,7 @@ import java.io.File
 
 private val Context.sessionDataStore by preferencesDataStore(name = "session")
 private val Context.settingsDataStore by preferencesDataStore(name = "settings")
+private val Context.resumeDataStore by preferencesDataStore(name = "resume")
 
 /** The app's long-lived objects, built once in [OwnWaveApp]. */
 class AppContainer(context: Context) {
@@ -28,9 +30,10 @@ class AppContainer(context: Context) {
 
     val sessionStore = SessionStore(context.sessionDataStore, TokenCipher(), appScope)
     val settingsStore = SettingsStore(context.settingsDataStore, appScope)
+    val resumeStore = ResumeStore(context.resumeDataStore)
 
     /**
-     * Shared by Retrofit, Coil, ExoPlayer and the notification artwork loader (and later the artwork provider).
+     * Shared by Retrofit, Coil, ExoPlayer and the artwork provider.
      * Redirects are not followed: a redirect means a login gate, not OwnWave.
      */
     val httpClient: OkHttpClient = OkHttpClient.Builder()

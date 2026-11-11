@@ -30,11 +30,21 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+            <!-- "Play techno on OwnWave" from the Assistant; Android Auto sends the same request to the service. -->
+            <intent-filter>
+                <action android:name="android.media.action.MEDIA_PLAY_FROM_SEARCH" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
         </activity>
 
-        <!-- Exported without a permission so the system UI, Bluetooth and (from PR 3) Android Auto can
-             connect: media controllers hold no common permission. The session only plays OwnWave
-             stations of the signed-in account. -->
+        <!-- Android Auto: this app is a media app; Auto talks to PlaybackService. -->
+        <meta-data
+            android:name="com.google.android.gms.car.application"
+            android:resource="@xml/automotive_app_desc" />
+
+        <!-- Exported without a permission so the system UI, Bluetooth and Android Auto can connect:
+             media controllers hold no common permission. The session only plays OwnWave stations of
+             the signed-in account. -->
         <service
             android:name=".playback.PlaybackService"
             android:exported="true"
@@ -45,5 +55,24 @@
                 <action android:name="android.media.browse.MediaBrowserService" />
             </intent-filter>
         </service>
+
+        <!-- A play button (Bluetooth, headset, the system's resume card) after the app stopped
+             starts the service, which resumes the saved station (onPlaybackResumption). -->
+        <receiver
+            android:name="androidx.media3.session.MediaButtonReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MEDIA_BUTTON" />
+            </intent-filter>
+        </receiver>
+
+        <!-- Covers for Android Auto, which cannot send the Bearer token. Read-only, images only, and
+             only station, playlist and track covers of the signed-in account (see ArtworkUris).
+             Exported because Auto runs in another app; any app on the phone could read covers. -->
+        <provider
+            android:name=".artwork.ArtworkProvider"
+            android:authorities="io.github.felixclements.ownwave.artwork"
+            android:exported="true"
+            tools:ignore="ExportedContentProvider" />
     </application>
 </manifest>
