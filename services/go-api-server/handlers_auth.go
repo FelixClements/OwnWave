@@ -41,24 +41,29 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 		Username string `json:"username"`
 		Password string `json:"password"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "invalid request", http.StatusBadRequest)
+	if !decodeJSON(w, r, &req) {
 		return
 	}
 	if req.Username == "" || req.Password == "" {
 		http.Error(w, "username and password required", http.StatusBadRequest)
 		return
 	}
+	if h.logins.Blocked(req.Username) {
+		tooManyLogins(w)
+		return
+	}
 
 	token, user, err := h.auth.Login(r.Context(), req.Username, req.Password)
 	if err != nil {
 		if errors.Is(err, auth.ErrInvalidCredentials) {
+			h.logins.Fail(req.Username)
 			http.Error(w, "invalid credentials", http.StatusUnauthorized)
 			return
 		}
 		writeInternalError(w, r, "login", err)
 		return
 	}
+	h.logins.Succeed(req.Username)
 
 	auth.WriteSessionCookie(w, token, h.cookieSecure)
 	writeAuthUser(w, user)
@@ -185,15 +190,21 @@ func (h *Handler) LoginDevice(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "username and password required", http.StatusBadRequest)
 		return
 	}
+	if h.logins.Blocked(req.Username) {
+		tooManyLogins(w)
+		return
+	}
 	token, user, device, err := h.auth.LoginDevice(r.Context(), req.Username, req.Password, req.DeviceName)
 	if err != nil {
 		if errors.Is(err, auth.ErrInvalidCredentials) {
+			h.logins.Fail(req.Username)
 			http.Error(w, "invalid credentials", http.StatusUnauthorized)
 			return
 		}
 		writeInternalError(w, r, "device login", err)
 		return
 	}
+	h.logins.Succeed(req.Username)
 	writeJSON(w, http.StatusOK, map[string]any{"token": token, "user": user, "device": device})
 }
 
@@ -228,4 +239,10 @@ func (h *Handler) RevokeDevice(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// tooManyLogins answers a login for a username that has failed too often.
+func tooManyLogins(w http.ResponseWriter) {
+	w.Header().Set("Retry-After", "900")
+	http.Error(w, "too many failed logins, try again later", http.StatusTooManyRequests)
 }

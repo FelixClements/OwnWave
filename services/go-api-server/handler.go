@@ -32,6 +32,7 @@ type Handler struct {
 	ffmpegPath   string
 	recentHours  int
 	cookieSecure bool
+	logins       *loginThrottle // nil: no per-username limit
 }
 
 // Config holds the environment-derived settings for NewHandler.
@@ -78,6 +79,7 @@ func NewHandler(pool *pgxpool.Pool, cfg Config) *Handler {
 		ffmpegPath:   cfg.FFmpegPath,
 		recentHours:  cfg.RecentHours,
 		cookieSecure: auth.CookieSecure(),
+		logins:       newLoginThrottle(10, 15*time.Minute),
 	}
 }
 

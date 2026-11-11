@@ -35,7 +35,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.25'
+          go-version: '1.26'
 
       - name: Set up Node
         uses: actions/setup-node@v4
@@ -54,6 +54,9 @@ jobs:
 
       - name: Test Go (unit)
         run: cd services/go-api-server && go test ./...
+
+      - name: Scan Go dependencies for known vulnerabilities
+        run: cd services/go-api-server && go run golang.org/x/vuln/cmd/govulncheck@v1.1.4 ./...
 
       - name: Test Go (integration)
         run: |

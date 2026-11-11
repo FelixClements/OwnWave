@@ -81,6 +81,8 @@ services:
       PUBLIC_APP_URL: ${PUBLIC_APP_URL:-http://localhost:8080}
       OWNWAVE_DOMAIN: ${OWNWAVE_DOMAIN:-localhost}
       OWNWAVE_COOKIE_SECURE: ${OWNWAVE_COOKIE_SECURE:-false}
+      # Proxies whose X-Forwarded-For is believed (empty = private networks).
+      TRUSTED_PROXIES: ${TRUSTED_PROXIES:-}
       FFMPEG_PATH: ffmpeg
       PYTHON_API_URL: http://python:8000
       # Transcoded files (Opus/AAC qualities), least recently played evicted first.
