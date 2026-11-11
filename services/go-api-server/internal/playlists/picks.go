@@ -89,7 +89,7 @@ func (s *Service) RebuildPicks(ctx context.Context, followLibrary bool) (int, er
 			FROM playlist_items pi
 			JOIN spotify_track_matches m ON m.spotify_track_id = pi.spotify_track_id
 			JOIN tracks mt ON mt.id = m.track_id
-			WHERE pi.playlist_id = p.id), ''))
+			WHERE pi.playlist_id = p.id AND NOT pi.hidden), ''))
 		FROM playlists p
 	`)
 	if err != nil {
@@ -130,7 +130,7 @@ func (s *Service) rebuildPlaylistPicks(ctx context.Context, playlistID, input st
 		FROM playlist_items pi
 		JOIN spotify_track_matches m ON m.spotify_track_id = pi.spotify_track_id
 		JOIN tracks mt ON mt.id = m.track_id
-		WHERE pi.playlist_id = $1::uuid`
+		WHERE pi.playlist_id = $1::uuid AND NOT pi.hidden`
 	rows, err := tx.Query(ctx, `
 		SELECT t.id::text, t.title, COALESCE(a.name, '')
 		FROM tracks t LEFT JOIN artists a ON a.id = t.artist_id

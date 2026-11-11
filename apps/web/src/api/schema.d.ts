@@ -1113,6 +1113,50 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/admin/playlists/{id}/items/{spotifyTrackId}/match": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Set by hand which local file a playlist track plays
+         * @description track_id picks a local track; null marks the track as having no local file, which also clears a wrong match. Matches are shared, so every playlist with this track follows. Syncs and the matcher never change it.
+         */
+        put: operations["setPlaylistMatch"];
+        post?: never;
+        /**
+         * Drop a match set by hand; the matcher tries again
+         * @description An automatic match is left as it is.
+         */
+        delete: operations["resetPlaylistMatch"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/playlists/{id}/items/{spotifyTrackId}/hidden": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Hide a song from this playlist's stations, or show it again
+         * @description Hidden songs leave the playlist's stations, picks and counts and stay hidden after syncs. Other playlists are not affected.
+         */
+        put: operations["setPlaylistItemHidden"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/admin/metrics": {
         parameters: {
             query?: never;
@@ -1412,10 +1456,12 @@ export interface components {
             id: string;
             spotify_id: string;
             name: string;
-            /** @description Every track it ever listed */
+            /** @description Every track it ever listed, except hidden ones */
             track_count: number;
             /** @description Of those, found in the library */
             matched_count: number;
+            /** @description Tracks an admin hid from its stations */
+            hidden_count: number;
             /** @description Library songs that sound like it; its stations play them too */
             pick_count: number;
             /** Format: date-time */
@@ -1477,7 +1523,11 @@ export interface components {
             local_title?: string;
             local_artist?: string;
             /** @enum {string} */
-            match_method?: "exact" | "fuzzy";
+            match_method?: "exact" | "fuzzy" | "manual";
+            /** @description An admin set the match: picked track_id, or marked it as having no local file when track_id is absent */
+            manual: boolean;
+            /** @description Left out of the playlist's stations and picks */
+            hidden: boolean;
         };
         GenreDistribution: {
             scored_tracks: number;
@@ -2510,8 +2560,8 @@ export interface operations {
     getPlaylist: {
         parameters: {
             query?: {
-                /** @description missing: only tracks with no local file; matched: only the others */
-                items?: "matched" | "missing";
+                /** @description missing: only shown tracks with no local file; matched: only shown tracks with one; hidden: only hidden tracks */
+                items?: "matched" | "missing" | "hidden";
             };
             header?: never;
             path: {
@@ -3032,6 +3082,88 @@ export interface operations {
         requestBody?: never;
         responses: {
             /** @description Removed */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    setPlaylistMatch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["id"];
+                spotifyTrackId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description Local track id, or null for no local file */
+                    track_id: string | null;
+                };
+            };
+        };
+        responses: {
+            /** @description Set */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    resetPlaylistMatch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["id"];
+                spotifyTrackId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Reset */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    setPlaylistItemHidden: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["id"];
+                spotifyTrackId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    hidden: boolean;
+                };
+            };
+        };
+        responses: {
+            /** @description Saved */
             204: {
                 headers: {
                     [name: string]: unknown;

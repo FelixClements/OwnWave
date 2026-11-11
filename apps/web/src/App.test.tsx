@@ -48,7 +48,7 @@ function renderAt(path: string) {
 }
 
 const admin = { id: 'u1', username: 'felix', is_admin: true };
-const playlist: Playlist = { id: 'p1', spotify_id: 'sp1', name: 'Techno Bunker', track_count: 100, matched_count: 40, pick_count: 12, has_cover: false };
+const playlist: Playlist = { id: 'p1', spotify_id: 'sp1', name: 'Techno Bunker', track_count: 100, matched_count: 40, hidden_count: 0, pick_count: 12, has_cover: false };
 const station: Station = {
   id: 's1',
   name: 'Bunker Techno',
@@ -337,6 +337,66 @@ describe('App', () => {
     await user.click(screen.getByRole('button', { name: /Remove Sounds Alike/ }));
     await waitFor(() => expect(calls.some((c) => c.method === 'DELETE' && c.path === '/api/admin/playlists/p1/picks/t9')).toBe(true));
     expect(await screen.findByText('No picks yet')).toBeInTheDocument();
+  });
+
+  it('lets an admin fix a playlist match and hide a song', async () => {
+    const base = { artists: ['Oxia'], first_seen_at: '2026-01-01T00:00:00Z', last_seen_at: '2099-01-01T00:00:00Z', manual: false, hidden: false };
+    let items = [
+      { ...base, spotify_track_id: 'sp1', title: 'Domino', track_id: 't1', local_title: 'Domino (Wrong Mix)', local_artist: 'Oxia', match_method: 'fuzzy' },
+      { ...base, spotify_track_id: 'sp2', title: 'Obsidian', artists: ['Kevin de Vries'] },
+    ];
+    const calls = signedIn({
+      'GET /api/playlists/{id}': () => ({
+        playlist: { ...playlist, track_count: items.filter((i) => !i.hidden).length, hidden_count: items.filter((i) => i.hidden).length },
+        items,
+      }),
+      'GET /api/playlists/{id}/picks': () => ({ picks: [] }),
+      'GET /api/tracks': () => ({ tracks: [{ id: 't7', title: 'Obsidian (Extended Mix)', artist: 'Kevin de Vries' }] }),
+      'PUT /api/admin/playlists/{id}/items/{spotifyTrackId}/match': (body, url) => {
+        const sp = url.pathname.split('/')[6];
+        const trackId = (body as { track_id: string | null }).track_id;
+        items = items.map((i) =>
+          i.spotify_track_id === sp
+            ? { ...i, manual: true, track_id: trackId ?? undefined, local_title: trackId ? 'Obsidian (Extended Mix)' : undefined, match_method: trackId ? 'manual' : undefined }
+            : i,
+        );
+        return undefined;
+      },
+      'PUT /api/admin/playlists/{id}/items/{spotifyTrackId}/hidden': (body, url) => {
+        const sp = url.pathname.split('/')[6];
+        items = items.map((i) => (i.spotify_track_id === sp ? { ...i, hidden: (body as { hidden: boolean }).hidden } : i));
+        return undefined;
+      },
+    });
+    renderAt('/playlist/p1');
+    const user = userEvent.setup();
+
+    // A wrong match is marked as not in the library.
+    await user.click(await screen.findByRole('button', { name: /Wrong match: mark Domino/ }));
+    await waitFor(() =>
+      expect(calls.find((c) => c.method === 'PUT' && c.path === '/api/admin/playlists/p1/items/sp1/match')?.body).toEqual({ track_id: null }),
+    );
+
+    // A missing song gets its file picked by hand.
+    await user.click(screen.getByRole('tab', { name: /Missing/ }));
+    expect(await screen.findByText('Marked missing')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Pick the file for Obsidian' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Pick the local file' });
+    await user.click(await within(dialog).findByText('Obsidian (Extended Mix)'));
+    await waitFor(() =>
+      expect(calls.find((c) => c.method === 'PUT' && c.path === '/api/admin/playlists/p1/items/sp2/match')?.body).toEqual({ track_id: 't7' }),
+    );
+    expect(calls.some((c) => c.path === '/api/tracks')).toBe(true);
+
+    // Hide it, then bring it back from the Hidden tab.
+    await user.click(screen.getByRole('tab', { name: /In your library/ }));
+    await user.click(await screen.findByRole('button', { name: /Hide Obsidian/ }));
+    await waitFor(() =>
+      expect(calls.find((c) => c.method === 'PUT' && c.path === '/api/admin/playlists/p1/items/sp2/hidden')?.body).toEqual({ hidden: true }),
+    );
+    await user.click(screen.getByRole('tab', { name: /Hidden/ }));
+    await user.click(await screen.findByRole('button', { name: 'Show Obsidian again' }));
+    await waitFor(() => expect(calls.filter((c) => c.path === '/api/admin/playlists/p1/items/sp2/hidden').at(-1)?.body).toEqual({ hidden: false }));
   });
 
   it('reviews and corrects genres from admin', async () => {

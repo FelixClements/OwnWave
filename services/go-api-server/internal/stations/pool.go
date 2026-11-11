@@ -26,13 +26,14 @@ func (d Definition) Where(args *Args) string {
 	matches, picks := "", ""
 	if !d.AllPlaylists {
 		ids := args.Add(d.PlaylistIDs)
-		matches = ` WHERE pi.playlist_id = ANY(` + ids + `::uuid[])`
+		matches = ` AND pi.playlist_id = ANY(` + ids + `::uuid[])`
 		picks = ` WHERE lp.playlist_id = ANY(` + ids + `::uuid[])`
 	}
 	cond := `t.copy_of IS NULL AND t.id IN (
 		SELECT COALESCE(mt.copy_of, mt.id) FROM playlist_items pi
 		JOIN spotify_track_matches m ON m.spotify_track_id = pi.spotify_track_id
-		JOIN tracks mt ON mt.id = m.track_id` + matches
+		JOIN tracks mt ON mt.id = m.track_id
+		WHERE NOT pi.hidden` + matches
 	if d.Enhance {
 		cond += `
 		UNION

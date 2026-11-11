@@ -7,6 +7,9 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/go-chi/chi/v5"
+	"github.com/google/uuid"
+
 	"ownwave/api/internal/pipeline"
 	"ownwave/api/internal/playlists"
 	"ownwave/api/internal/spotify"
@@ -22,8 +25,9 @@ func (h *Handler) ListPlaylists(w http.ResponseWriter, r *http.Request) {
 }
 
 // GetPlaylist returns a playlist with every track it has ever listed and
-// the local file each one matched. ?items=missing lists only the tracks
-// with no local file (the missing list), ?items=matched only the others.
+// the local file each one matched. ?items=missing lists only the shown
+// tracks with no local file (the missing list), ?items=matched only the
+// shown ones with a file, ?items=hidden only the hidden ones.
 func (h *Handler) GetPlaylist(w http.ResponseWriter, r *http.Request) {
 	id, ok := parseUUIDParam(w, r, "id")
 	if !ok {
@@ -31,9 +35,9 @@ func (h *Handler) GetPlaylist(w http.ResponseWriter, r *http.Request) {
 	}
 	filter := playlists.ItemFilter(r.URL.Query().Get("items"))
 	switch filter {
-	case playlists.AllItems, playlists.MatchedItems, playlists.MissingItems:
+	case playlists.AllItems, playlists.MatchedItems, playlists.MissingItems, playlists.HiddenItems:
 	default:
-		http.Error(w, "items must be matched or missing", http.StatusBadRequest)
+		http.Error(w, "items must be matched, missing or hidden", http.StatusBadRequest)
 		return
 	}
 	p, err := h.playlists.Get(r.Context(), id)
@@ -158,6 +162,91 @@ func (h *Handler) DeletePlaylist(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// SetPlaylistMatch sets by hand which local file a playlist track plays.
+// Body {"track_id": "<uuid>"} picks a file, {"track_id": null} marks it as
+// having none (which also clears a wrong match).
+func (h *Handler) SetPlaylistMatch(w http.ResponseWriter, r *http.Request) {
+	id, spotifyTrackID, ok := playlistItemParams(w, r)
+	if !ok {
+		return
+	}
+	var req map[string]*string
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<12)
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid request", http.StatusBadRequest)
+		return
+	}
+	trackID, present := req["track_id"]
+	if !present {
+		http.Error(w, "track_id is required (null for no local file)", http.StatusBadRequest)
+		return
+	}
+	local := ""
+	if trackID != nil {
+		if _, err := uuid.Parse(*trackID); err != nil {
+			http.Error(w, "invalid track_id", http.StatusBadRequest)
+			return
+		}
+		local = *trackID
+	}
+	if err := h.playlists.SetMatch(r.Context(), id, spotifyTrackID, local); err != nil {
+		writePlaylistError(w, r, "set playlist match", err)
+		return
+	}
+	h.refreshStations(r, pipeline.TriggerEdited)
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// ResetPlaylistMatch drops a match set by hand; the matcher tries again.
+func (h *Handler) ResetPlaylistMatch(w http.ResponseWriter, r *http.Request) {
+	id, spotifyTrackID, ok := playlistItemParams(w, r)
+	if !ok {
+		return
+	}
+	if err := h.playlists.ResetMatch(r.Context(), id, spotifyTrackID); err != nil {
+		writePlaylistError(w, r, "reset playlist match", err)
+		return
+	}
+	h.refreshStations(r, pipeline.TriggerEdited)
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// SetPlaylistItemHidden hides a song from this playlist's stations, or
+// shows it again. Body {"hidden": true|false}.
+func (h *Handler) SetPlaylistItemHidden(w http.ResponseWriter, r *http.Request) {
+	id, spotifyTrackID, ok := playlistItemParams(w, r)
+	if !ok {
+		return
+	}
+	var req struct {
+		Hidden *bool `json:"hidden"`
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<12)
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Hidden == nil {
+		http.Error(w, "invalid request: hidden is required", http.StatusBadRequest)
+		return
+	}
+	if err := h.playlists.SetHidden(r.Context(), id, spotifyTrackID, *req.Hidden); err != nil {
+		writePlaylistError(w, r, "hide playlist item", err)
+		return
+	}
+	h.refreshStations(r, pipeline.TriggerEdited)
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// playlistItemParams reads the playlist id and the Spotify track id.
+func playlistItemParams(w http.ResponseWriter, r *http.Request) (id, spotifyTrackID string, ok bool) {
+	if id, ok = parseUUIDParam(w, r, "id"); !ok {
+		return "", "", false
+	}
+	spotifyTrackID = chi.URLParam(r, "spotifyTrackId")
+	if spotifyTrackID == "" || len(spotifyTrackID) > 64 {
+		http.Error(w, "invalid spotifyTrackId", http.StatusBadRequest)
+		return "", "", false
+	}
+	return id, spotifyTrackID, true
+}
+
 // refreshStations brings the genre stations in line after a playlist
 // change. The change itself already matched its tracks and is done, so a
 // failed refresh is only logged (the hourly pass retries it).
@@ -174,8 +263,10 @@ func writePlaylistError(w http.ResponseWriter, r *http.Request, msg string, err 
 	switch {
 	case errors.Is(err, spotify.ErrInvalidURL):
 		http.Error(w, err.Error(), http.StatusBadRequest)
-	case errors.Is(err, playlists.ErrNotFound):
+	case errors.Is(err, playlists.ErrNotFound), errors.Is(err, playlists.ErrItemNotFound):
 		http.Error(w, err.Error(), http.StatusNotFound)
+	case errors.Is(err, playlists.ErrTrackNotFound):
+		http.Error(w, err.Error(), http.StatusBadRequest)
 	case errors.As(err, &fetchErr):
 		http.Error(w, "Spotify: "+fetchErr.Error(), http.StatusBadGateway)
 	default:
