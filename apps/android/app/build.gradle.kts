@@ -11,13 +11,29 @@ android {
         applicationId = "io.github.felixclements.ownwave"
         minSdk = 28
         targetSdk = 37
-        versionCode = 1
-        versionName = "0.1.0"
+        // Release builds get both from the tag (see .github/workflows/android-release.yml).
+        versionCode = providers.gradleProperty("ownwave.versionCode").orNull?.toInt() ?: 1
+        versionName = providers.gradleProperty("ownwave.versionName").orNull ?: "0.1.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+    }
+
+    // The release keystore comes from the environment (CI secrets) and is never in the repo.
+    // Without OWNWAVE_KEYSTORE_FILE, assembleRelease builds an unsigned APK.
+    val keystoreFile = providers.environmentVariable("OWNWAVE_KEYSTORE_FILE").orNull
+    signingConfigs {
+        if (keystoreFile != null) {
+            create("release") {
+                storeFile = file(keystoreFile)
+                storePassword = providers.environmentVariable("OWNWAVE_KEYSTORE_PASSWORD").get()
+                keyAlias = providers.environmentVariable("OWNWAVE_KEY_ALIAS").get()
+                keyPassword = providers.environmentVariable("OWNWAVE_KEY_PASSWORD").get()
+            }
+        }
     }
 
     buildTypes {
         release {
+            signingConfig = signingConfigs.findByName("release")
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
