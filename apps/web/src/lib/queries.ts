@@ -190,6 +190,47 @@ export function useRemovePick() {
   });
 }
 
+/** Admin fixes on one playlist track: pick its local file, mark it missing, hand it back to the matcher, hide it. */
+export function usePlaylistItemActions() {
+  const qc = useQueryClient();
+  const invalidate = () => {
+    void qc.invalidateQueries({ queryKey: keys.playlists });
+    // Matches are shared by every playlist with the track; stations follow.
+    void qc.invalidateQueries({ queryKey: keys.suggestions });
+    void qc.invalidateQueries({ queryKey: keys.stations });
+    void qc.invalidateQueries({ queryKey: ['browse'] });
+    void qc.invalidateQueries({ queryKey: keys.genreStations });
+  };
+  type Item = { playlistId: string; spotifyTrackId: string };
+  const path = ({ playlistId, spotifyTrackId }: Item) => ({ path: { id: playlistId, spotifyTrackId } });
+  return {
+    /** trackId null marks the track as having no local file (also clears a wrong match). */
+    setMatch: useMutation({
+      mutationFn: ({ trackId, ...item }: Item & { trackId: string | null }) =>
+        call(api.PUT('/api/admin/playlists/{id}/items/{spotifyTrackId}/match', { params: path(item), body: { track_id: trackId } })),
+      onSuccess: invalidate,
+    }),
+    resetMatch: useMutation({
+      mutationFn: (item: Item) => call(api.DELETE('/api/admin/playlists/{id}/items/{spotifyTrackId}/match', { params: path(item) })),
+      onSuccess: invalidate,
+    }),
+    setHidden: useMutation({
+      mutationFn: ({ hidden, ...item }: Item & { hidden: boolean }) =>
+        call(api.PUT('/api/admin/playlists/{id}/items/{spotifyTrackId}/hidden', { params: path(item), body: { hidden } })),
+      onSuccess: invalidate,
+    }),
+  };
+}
+
+/** Library tracks matching a query, for picking a playlist track's file by hand. */
+export const useTrackPicker = (q: string) =>
+  useQuery({
+    queryKey: [...keys.tracks(q), 'picker'],
+    queryFn: () => call(api.GET('/api/tracks', { params: { query: { limit: 20, offset: 0, q } } })).then((r) => r.tracks),
+    enabled: q.trim().length > 1,
+    placeholderData: keepPreviousData,
+  });
+
 export function usePlaylistActions() {
   const qc = useQueryClient();
   const invalidate = () => {

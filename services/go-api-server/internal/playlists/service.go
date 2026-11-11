@@ -18,6 +18,16 @@ import (
 // ErrNotFound is returned for an unknown playlist id.
 var ErrNotFound = errors.New("playlist not found")
 
+// ErrItemNotFound is returned when a playlist never listed a Spotify track.
+var ErrItemNotFound = errors.New("track not in this playlist")
+
+// ErrTrackNotFound is returned for a manual match to an unknown local track.
+var ErrTrackNotFound = errors.New("local track not found")
+
+// pinnedNoFile is true for match rows (alias m) an admin marked "no local
+// file". The matcher skips them; it retries every other row without a track.
+const pinnedNoFile = `COALESCE(m.manual AND m.method = 'none', FALSE)`
+
 // Fetcher loads a playlist's current tracks and its cover from Spotify.
 type Fetcher interface {
 	FetchPlaylist(ctx context.Context, spotifyID string) (spotify.Playlist, error)
@@ -34,11 +44,13 @@ func NewService(pool *pgxpool.Pool, fetcher Fetcher) *Service {
 }
 
 type Playlist struct {
-	ID           string `json:"id"`
-	SpotifyID    string `json:"spotify_id"`
-	Name         string `json:"name"`
-	TrackCount   int    `json:"track_count"`
-	MatchedCount int    `json:"matched_count"`
+	ID        string `json:"id"`
+	SpotifyID string `json:"spotify_id"`
+	Name      string `json:"name"`
+	// TrackCount and MatchedCount leave hidden songs out.
+	TrackCount   int `json:"track_count"`
+	MatchedCount int `json:"matched_count"`
+	HiddenCount  int `json:"hidden_count"`
 	// PickCount is how many library songs its stations play on top of the matches.
 	PickCount     int        `json:"pick_count"`
 	LastSyncedAt  *time.Time `json:"last_synced_at,omitempty"`
@@ -58,20 +70,26 @@ type Item struct {
 	LocalTitle     *string   `json:"local_title,omitempty"`
 	LocalArtist    *string   `json:"local_artist,omitempty"`
 	MatchMethod    *string   `json:"match_method,omitempty"`
+	// Manual is true when an admin set the match: picked the local file
+	// (with TrackID) or marked it as having none (without).
+	Manual bool `json:"manual"`
+	// Hidden songs are left out of the playlist's stations and picks.
+	Hidden bool `json:"hidden"`
 }
 
 const playlistColumns = `
 	p.id::text, p.spotify_id, p.name,
-	(SELECT COUNT(*) FROM playlist_items pi WHERE pi.playlist_id = p.id),
+	(SELECT COUNT(*) FROM playlist_items pi WHERE pi.playlist_id = p.id AND NOT pi.hidden),
 	(SELECT COUNT(*) FROM playlist_items pi
 	 JOIN spotify_track_matches m ON m.spotify_track_id = pi.spotify_track_id
-	 WHERE pi.playlist_id = p.id AND m.track_id IS NOT NULL),
+	 WHERE pi.playlist_id = p.id AND NOT pi.hidden AND m.track_id IS NOT NULL),
+	(SELECT COUNT(*) FROM playlist_items pi WHERE pi.playlist_id = p.id AND pi.hidden),
 	(SELECT COUNT(*) FROM playlist_library_picks lp WHERE lp.playlist_id = p.id),
 	p.last_synced_at, p.last_sync_error, p.cover_image IS NOT NULL`
 
 func scanPlaylist(row pgx.Row) (Playlist, error) {
 	var p Playlist
-	err := row.Scan(&p.ID, &p.SpotifyID, &p.Name, &p.TrackCount, &p.MatchedCount, &p.PickCount, &p.LastSyncedAt, &p.LastSyncError, &p.HasCover)
+	err := row.Scan(&p.ID, &p.SpotifyID, &p.Name, &p.TrackCount, &p.MatchedCount, &p.HiddenCount, &p.PickCount, &p.LastSyncedAt, &p.LastSyncError, &p.HasCover)
 	return p, err
 }
 
@@ -104,25 +122,30 @@ func (s *Service) Get(ctx context.Context, id string) (Playlist, error) {
 type ItemFilter string
 
 const (
-	AllItems     ItemFilter = ""
+	AllItems ItemFilter = ""
+	// MatchedItems are the shown tracks with a local file.
 	MatchedItems ItemFilter = "matched"
-	// MissingItems are the tracks with no local file: the playlist's missing list.
+	// MissingItems are the shown tracks with no local file: the playlist's missing list.
 	MissingItems ItemFilter = "missing"
+	// HiddenItems are the tracks an admin hid, matched or not.
+	HiddenItems ItemFilter = "hidden"
 )
 
 // Items lists every track the playlist has ever had, newest first,
-// optionally only the matched or only the missing ones.
+// optionally only the matched, the missing or the hidden ones.
 func (s *Service) Items(ctx context.Context, id string, filter ItemFilter) ([]Item, error) {
 	status := ""
 	switch filter {
 	case MatchedItems:
-		status = "AND m.track_id IS NOT NULL"
+		status = "AND NOT pi.hidden AND m.track_id IS NOT NULL"
 	case MissingItems:
-		status = "AND m.track_id IS NULL"
+		status = "AND NOT pi.hidden AND m.track_id IS NULL"
+	case HiddenItems:
+		status = "AND pi.hidden"
 	}
 	rows, err := s.pool.Query(ctx, `
 		SELECT pi.spotify_track_id, pi.title, pi.artists, pi.duration_ms, pi.first_seen_at, pi.last_seen_at,
-		       m.track_id::text, t.title, a.name, m.method
+		       m.track_id::text, t.title, a.name, m.method, COALESCE(m.manual, FALSE), pi.hidden
 		FROM playlist_items pi
 		LEFT JOIN spotify_track_matches m ON m.spotify_track_id = pi.spotify_track_id
 		LEFT JOIN tracks t ON t.id = m.track_id
@@ -138,7 +161,7 @@ func (s *Service) Items(ctx context.Context, id string, filter ItemFilter) ([]It
 	for rows.Next() {
 		var it Item
 		if err := rows.Scan(&it.SpotifyTrackID, &it.Title, &it.Artists, &it.DurationMS, &it.FirstSeenAt, &it.LastSeenAt,
-			&it.TrackID, &it.LocalTitle, &it.LocalArtist, &it.MatchMethod); err != nil {
+			&it.TrackID, &it.LocalTitle, &it.LocalArtist, &it.MatchMethod, &it.Manual, &it.Hidden); err != nil {
 			return nil, err
 		}
 		if it.TrackID == nil {
@@ -293,7 +316,7 @@ func (s *Service) MatchPending(ctx context.Context) (int, error) {
 		SELECT DISTINCT ON (pi.spotify_track_id) pi.spotify_track_id, pi.title, pi.artists, COALESCE(pi.duration_ms, 0)
 		FROM playlist_items pi
 		LEFT JOIN spotify_track_matches m ON m.spotify_track_id = pi.spotify_track_id
-		WHERE m.track_id IS NULL
+		WHERE m.track_id IS NULL AND NOT `+pinnedNoFile+`
 		ORDER BY pi.spotify_track_id, pi.last_seen_at DESC
 	`)
 	if err != nil {
@@ -321,17 +344,95 @@ func (s *Service) MatchPending(ctx context.Context) (int, error) {
 		if ok {
 			matched++
 		}
+		// The WHERE keeps a match an admin set in the meantime.
 		batch.Queue(`
-			INSERT INTO spotify_track_matches (spotify_track_id, track_id, method)
+			INSERT INTO spotify_track_matches AS m (spotify_track_id, track_id, method)
 			VALUES ($1, NULLIF($2, '')::uuid, $3)
 			ON CONFLICT (spotify_track_id) DO UPDATE SET
-				track_id = EXCLUDED.track_id, method = EXCLUDED.method, matched_at = NOW()
+				track_id = EXCLUDED.track_id, method = EXCLUDED.method, manual = FALSE, matched_at = NOW()
+			WHERE m.track_id IS NULL AND NOT `+pinnedNoFile+`
 		`, t.ID, trackID, method)
 	}
 	if err := s.pool.SendBatch(ctx, batch).Close(); err != nil {
 		return 0, err
 	}
 	return matched, nil
+}
+
+// SetMatch sets by hand which local file a playlist's Spotify track plays:
+// trackID, or with trackID "" none ("no local file", which also clears a
+// wrong match). Matches are shared, so every playlist listing the track
+// follows. The matcher never changes it; ResetMatch hands it back.
+func (s *Service) SetMatch(ctx context.Context, playlistID, spotifyTrackID, trackID string) error {
+	if err := s.checkItem(ctx, playlistID, spotifyTrackID); err != nil {
+		return err
+	}
+	method := "manual"
+	if trackID == "" {
+		method = "none"
+	} else {
+		var ok bool
+		if err := s.pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM tracks WHERE id = $1::uuid)`, trackID).Scan(&ok); err != nil {
+			return err
+		}
+		if !ok {
+			return ErrTrackNotFound
+		}
+	}
+	_, err := s.pool.Exec(ctx, `
+		INSERT INTO spotify_track_matches (spotify_track_id, track_id, method, manual)
+		VALUES ($1, NULLIF($2, '')::uuid, $3, TRUE)
+		ON CONFLICT (spotify_track_id) DO UPDATE SET
+			track_id = EXCLUDED.track_id, method = EXCLUDED.method, manual = TRUE, matched_at = NOW()
+	`, spotifyTrackID, trackID, method)
+	return err
+}
+
+// ResetMatch drops a match set by hand and lets the matcher try again right
+// away. An automatic match is left as it is.
+func (s *Service) ResetMatch(ctx context.Context, playlistID, spotifyTrackID string) error {
+	if err := s.checkItem(ctx, playlistID, spotifyTrackID); err != nil {
+		return err
+	}
+	if _, err := s.pool.Exec(ctx, `DELETE FROM spotify_track_matches WHERE spotify_track_id = $1 AND manual`, spotifyTrackID); err != nil {
+		return err
+	}
+	_, err := s.MatchPending(ctx)
+	return err
+}
+
+// SetHidden hides a song from this playlist's stations and picks, or shows
+// it again. Other playlists listing the song are not affected.
+func (s *Service) SetHidden(ctx context.Context, playlistID, spotifyTrackID string, hidden bool) error {
+	tag, err := s.pool.Exec(ctx, `
+		UPDATE playlist_items SET hidden = $3 WHERE playlist_id = $1::uuid AND spotify_track_id = $2
+	`, playlistID, spotifyTrackID, hidden)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return s.checkItem(ctx, playlistID, spotifyTrackID)
+	}
+	return nil
+}
+
+// checkItem returns ErrNotFound for an unknown playlist and ErrItemNotFound
+// when the playlist never listed the track.
+func (s *Service) checkItem(ctx context.Context, playlistID, spotifyTrackID string) error {
+	var playlist, item bool
+	if err := s.pool.QueryRow(ctx, `
+		SELECT EXISTS (SELECT 1 FROM playlists WHERE id = $1::uuid),
+		       EXISTS (SELECT 1 FROM playlist_items WHERE playlist_id = $1::uuid AND spotify_track_id = $2)
+	`, playlistID, spotifyTrackID).Scan(&playlist, &item); err != nil {
+		return err
+	}
+	switch {
+	case !playlist:
+		return ErrNotFound
+	case !item:
+		return ErrItemNotFound
+	}
+	return nil
 }
 
 // SyncStale syncs every playlist not synced within maxAge, then matches

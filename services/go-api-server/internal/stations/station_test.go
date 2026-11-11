@@ -77,6 +77,7 @@ func TestWhereAllPlaylistsHasNoPlaylistFilter(t *testing.T) {
 	var args Args
 	where := Definition{AllPlaylists: true, Genres: []string{"house"}}.Where(&args)
 	require.NotContains(t, where, "playlist_id")
+	require.Contains(t, where, "NOT pi.hidden")
 	require.Len(t, args, 1, "only the genres")
 
 	args = nil
@@ -122,6 +123,7 @@ func TestWhereCustomStationPlaysMatchesOfBestCopies(t *testing.T) {
 	require.Contains(t, sql, "t.copy_of IS NULL")
 	require.Contains(t, sql, "COALESCE(mt.copy_of, mt.id)")
 	require.Contains(t, sql, "pi.playlist_id = ANY($1::uuid[])")
+	require.Contains(t, sql, "NOT pi.hidden", "hidden songs leave the station")
 	require.NotContains(t, sql, "playlist_library_picks", "picks only with Enhance")
 	require.Len(t, args, 1)
 }

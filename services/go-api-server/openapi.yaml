@@ -608,8 +608,8 @@ paths:
         - { $ref: "#/components/parameters/id" }
         - name: items
           in: query
-          description: "missing: only tracks with no local file; matched: only the others"
-          schema: { type: string, enum: [matched, missing] }
+          description: "missing: only shown tracks with no local file; matched: only shown tracks with one; hidden: only hidden tracks"
+          schema: { type: string, enum: [matched, missing, hidden] }
       responses:
         "200":
           description: Playlist
@@ -934,6 +934,63 @@ paths:
         "204": { description: Removed }
         "400": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
+  /api/admin/playlists/{id}/items/{spotifyTrackId}/match:
+    put:
+      operationId: setPlaylistMatch
+      tags: [admin]
+      summary: Set by hand which local file a playlist track plays
+      description: >-
+        track_id picks a local track; null marks the track as having no local file, which also clears a wrong match.
+        Matches are shared, so every playlist with this track follows. Syncs and the matcher never change it.
+      parameters:
+        - { $ref: "#/components/parameters/id" }
+        - { name: spotifyTrackId, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [track_id]
+              properties:
+                track_id: { type: [string, "null"], description: "Local track id, or null for no local file" }
+      responses:
+        "204": { description: Set }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+    delete:
+      operationId: resetPlaylistMatch
+      tags: [admin]
+      summary: Drop a match set by hand; the matcher tries again
+      description: An automatic match is left as it is.
+      parameters:
+        - { $ref: "#/components/parameters/id" }
+        - { name: spotifyTrackId, in: path, required: true, schema: { type: string } }
+      responses:
+        "204": { description: Reset }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /api/admin/playlists/{id}/items/{spotifyTrackId}/hidden:
+    put:
+      operationId: setPlaylistItemHidden
+      tags: [admin]
+      summary: Hide a song from this playlist's stations, or show it again
+      description: Hidden songs leave the playlist's stations, picks and counts and stay hidden after syncs. Other playlists are not affected.
+      parameters:
+        - { $ref: "#/components/parameters/id" }
+        - { name: spotifyTrackId, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [hidden]
+              properties: { hidden: { type: boolean } }
+      responses:
+        "204": { description: Saved }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
   /api/admin/metrics:
     get:
       operationId: getMetrics
@@ -1255,13 +1312,14 @@ components:
           properties: { reason: { type: string, enum: [station, genre, playlist, artist] } }
     Playlist:
       type: object
-      required: [id, spotify_id, name, track_count, matched_count, pick_count, has_cover]
+      required: [id, spotify_id, name, track_count, matched_count, hidden_count, pick_count, has_cover]
       properties:
         id: { type: string }
         spotify_id: { type: string }
         name: { type: string }
-        track_count: { type: integer, description: Every track it ever listed }
+        track_count: { type: integer, description: "Every track it ever listed, except hidden ones" }
         matched_count: { type: integer, description: "Of those, found in the library" }
+        hidden_count: { type: integer, description: Tracks an admin hid from its stations }
         pick_count: { type: integer, description: "Library songs that sound like it; its stations play them too" }
         last_synced_at: { type: string, format: date-time }
         last_sync_error: { type: string }
@@ -1307,7 +1365,7 @@ components:
         created_at: { type: string, format: date-time }
     PlaylistItem:
       type: object
-      required: [spotify_track_id, title, artists, first_seen_at, last_seen_at]
+      required: [spotify_track_id, title, artists, first_seen_at, last_seen_at, manual, hidden]
       properties:
         spotify_track_id: { type: string }
         title: { type: string }
@@ -1318,7 +1376,9 @@ components:
         track_id: { type: string, description: Local track; absent when missing }
         local_title: { type: string }
         local_artist: { type: string }
-        match_method: { type: string, enum: [exact, fuzzy] }
+        match_method: { type: string, enum: [exact, fuzzy, manual] }
+        manual: { type: boolean, description: "An admin set the match: picked track_id, or marked it as having no local file when track_id is absent" }
+        hidden: { type: boolean, description: Left out of the playlist's stations and picks }
     GenreDistribution:
       type: object
       required: [scored_tracks, genres, warnings]

@@ -37,6 +37,7 @@ const (
 	TriggerAdded     = "playlist_added"
 	TriggerSynced    = "playlist_synced"
 	TriggerDeleted   = "playlist_deleted"
+	TriggerEdited    = "playlist_edited"
 )
 
 // keepRuns bounds the run log. Runs that changed nothing are dropped
