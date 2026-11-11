@@ -14,6 +14,7 @@ import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DataSourceBitmapLoader
+import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.HttpDataSource
 import androidx.media3.datasource.ResolvingDataSource
 import androidx.media3.datasource.okhttp.OkHttpDataSource
@@ -25,6 +26,7 @@ import androidx.media3.exoplayer.upstream.LoadErrorHandlingPolicy
 import androidx.media3.session.CacheBitmapLoader
 import androidx.media3.session.CommandButton
 import androidx.media3.session.LibraryResult
+import androidx.media3.session.MediaConstants
 import androidx.media3.session.MediaLibraryService
 import androidx.media3.session.MediaSession
 import androidx.media3.session.SessionCommand
@@ -36,9 +38,11 @@ import com.google.common.util.concurrent.ListenableFuture
 import io.github.felixclements.ownwave.MainActivity
 import io.github.felixclements.ownwave.R
 import io.github.felixclements.ownwave.api.models.QueueTrack
+import io.github.felixclements.ownwave.artwork.ArtworkUris
 import io.github.felixclements.ownwave.auth.Session
 import io.github.felixclements.ownwave.auth.SessionState
 import io.github.felixclements.ownwave.container
+import io.github.felixclements.ownwave.data.ResumePoint
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -52,13 +56,15 @@ import java.io.IOException
 
 /**
  * The one player. It serves the phone UI (through a MediaController), the notification, the lock
- * screen, Bluetooth and (from PR 3) Android Auto.
+ * screen, Bluetooth and Android Auto.
  *
  * - A controller plays a station by setting one item with media id `station:<id>`; [Callback.onSetMediaItems]
- *   swaps it for the station's queue.
+ *   swaps it for the station's queue. A voice request ("play techno on OwnWave") plays the best search hit.
  * - Track URIs are `ownwave://track/<id>`; [StreamResolver] picks the URL and quality when each one loads.
  * - The queue refills itself near the end ([StationQueue]) and plays are reported after 30 s ([PlayReporter]).
- * - Signing out (or a 401, which signs out) stops playback and clears the queue.
+ * - Auto browses `/api/browse` through [BrowseTree]; covers are `content://` URIs served by the artwork provider.
+ * - The last station, track and position are saved ([ResumePoint]) so playback can resume after the app stopped.
+ * - Signing out (or a 401, which signs out) stops playback and clears the queue and the resume point.
  */
 @OptIn(UnstableApi::class)
 class PlaybackService : MediaLibraryService() {
@@ -69,6 +75,10 @@ class PlaybackService : MediaLibraryService() {
 
     private val stationQueue = StationQueue()
     private val playReporter = PlayReporter()
+    private val browseTree = BrowseTree()
+
+    /** The last search Auto ran, so paging through its results does not search again. */
+    private var lastSearch: Pair<String, List<BrowseEntry>>? = null
 
     /** Like state per track id, seeded from the queue and changed by the like button. */
     private val liked = mutableMapOf<String, Boolean>()
@@ -119,8 +129,12 @@ class PlaybackService : MediaLibraryService() {
         )
         librarySession = MediaLibrarySession.Builder(this, player, Callback())
             .setSessionActivity(openApp)
-            // Covers need the Bearer token, so the notification loads them through the app's OkHttp client.
-            .setBitmapLoader(CacheBitmapLoader(DataSourceBitmapLoader.Builder(this).setDataSourceFactory(http).build()))
+            // Covers are content:// URIs from the artwork provider; DefaultDataSource reads those (and http, through OkHttp).
+            .setBitmapLoader(
+                CacheBitmapLoader(
+                    DataSourceBitmapLoader.Builder(this).setDataSourceFactory(DefaultDataSource.Factory(this, http)).build(),
+                ),
+            )
             .setMediaButtonPreferences(buttons(liked = false))
             .build()
 
@@ -147,13 +161,43 @@ class PlaybackService : MediaLibraryService() {
         getSystemService(ConnectivityManager::class.java)?.isActiveNetworkMetered ?: true
 
     private fun stopAndClear() {
+        stationId = null // first, so stopping does not save a resume point
         player.stop()
         player.clearMediaItems()
-        stationId = null
         stationQueue.reset()
         liked.clear()
         banned.clear()
+        browseTree.clear()
+        lastSearch = null
+        scope.launch { container.resumeStore.clear() }
     }
+
+    private fun saveResumePoint() {
+        val station = stationId ?: return
+        val item = player.currentMediaItem ?: return
+        val track = MediaIds.parseTrack(item.mediaId) ?: return
+        val meta = item.mediaMetadata
+        val point = ResumePoint(
+            stationId = track.stationId ?: station,
+            trackId = track.trackId,
+            title = meta.title?.toString(),
+            artist = meta.artist?.toString(),
+            album = meta.albumTitle?.toString(),
+            durationMs = meta.durationMs,
+            positionMs = player.currentPosition.coerceAtLeast(0),
+        )
+        scope.launch { container.resumeStore.save(point) }
+    }
+
+    /** The saved track as a queue item, shown (and played first) when playback resumes. */
+    private fun ResumePoint.toMediaItem(): MediaItem =
+        MediaItem.Builder()
+            .setMediaId(MediaIds.track(trackId, stationId))
+            .setUri(MediaIds.trackUri(trackId))
+            .setMediaMetadata(
+                trackMetadata(title, artist, album, durationMs, ArtworkUris.track(trackId)),
+            )
+            .build()
 
     // --- Station queue ---------------------------------------------------------------------------
 
@@ -165,7 +209,7 @@ class PlaybackService : MediaLibraryService() {
         playReporter.reset()
         liked.clear()
         tracks.forEach { liked[it.id] = it.liked }
-        return tracks.filter { it.id !in banned }.map { it.toMediaItem(s, id) }
+        return tracks.filter { it.id !in banned }.map { it.toMediaItem(id) }
     }
 
     private fun maybeRefill() {
@@ -184,7 +228,7 @@ class PlaybackService : MediaLibraryService() {
                 if (fresh.isEmpty()) return@launch
                 fresh.forEach { liked.putIfAbsent(it.id, it.liked) }
                 val firstNew = player.mediaItemCount
-                player.addMediaItems(fresh.map { it.toMediaItem(s, station) })
+                player.addMediaItems(fresh.map { it.toMediaItem(station) })
                 if (player.playbackState == Player.STATE_ENDED) {
                     player.seekTo(firstNew, 0)
                     player.play()
@@ -195,20 +239,38 @@ class PlaybackService : MediaLibraryService() {
         }
     }
 
-    private fun QueueTrack.toMediaItem(session: Session, station: String): MediaItem =
+    private fun QueueTrack.toMediaItem(station: String): MediaItem =
         MediaItem.Builder()
             .setMediaId(MediaIds.track(id, station))
             .setUri(MediaIds.trackUri(id))
             .setMediaMetadata(
+                trackMetadata(title, artist, album, durationSeconds?.let { (it * 1000).toLong() }, ArtworkUris.track(id)),
+            )
+            .build()
+
+    private fun trackMetadata(title: String?, artist: String?, album: String?, durationMs: Long?, artwork: String?) =
+        MediaMetadata.Builder()
+            .setTitle(title)
+            .setArtist(artist)
+            .setAlbumTitle(album)
+            .setArtworkUri(artwork?.toUri())
+            .setDurationMs(durationMs)
+            .setIsBrowsable(false)
+            .setIsPlayable(true)
+            .setMediaType(MediaMetadata.MEDIA_TYPE_MUSIC)
+            .build()
+
+    private fun BrowseEntry.toMediaItem(): MediaItem =
+        MediaItem.Builder()
+            .setMediaId(mediaId)
+            .setMediaMetadata(
                 MediaMetadata.Builder()
                     .setTitle(title)
-                    .setArtist(artist)
-                    .setAlbumTitle(album)
-                    .setArtworkUri(container.stationRepository.trackCoverUrl(session, id).toUri())
-                    .setDurationMs(durationSeconds?.let { (it * 1000).toLong() })
-                    .setIsBrowsable(false)
-                    .setIsPlayable(true)
-                    .setMediaType(MediaMetadata.MEDIA_TYPE_MUSIC)
+                    .setSubtitle(subtitle)
+                    .setArtworkUri(artworkUri?.toUri())
+                    .setIsBrowsable(browsable)
+                    .setIsPlayable(playable)
+                    .setMediaType(if (playable) MediaMetadata.MEDIA_TYPE_RADIO_STATION else MediaMetadata.MEDIA_TYPE_FOLDER_MIXED)
                     .build(),
             )
             .build()
@@ -294,6 +356,7 @@ class PlaybackService : MediaLibraryService() {
             mediaItem?.mediaId?.let(MediaIds::parseTrack)?.let { stationQueue.markPlayed(it.trackId) }
             publishLikeState()
             maybeRefill()
+            saveResumePoint()
         }
 
         override fun onIsPlayingChanged(isPlaying: Boolean) {
@@ -303,6 +366,7 @@ class PlaybackService : MediaLibraryService() {
             } else {
                 progressJob?.cancel()
                 checkPlayReported()
+                saveResumePoint()
             }
         }
 
@@ -357,12 +421,40 @@ class PlaybackService : MediaLibraryService() {
             startIndex: Int,
             startPositionMs: Long,
         ): ListenableFuture<MediaSession.MediaItemsWithStartPosition> = scope.future {
-            val station = mediaItems.singleOrNull()?.mediaId?.let(MediaIds::parseStation)
+            val request = mediaItems.singleOrNull()
+            val query = request?.requestMetadata?.searchQuery
+            val station = request?.mediaId?.let(MediaIds::parseStation)
+                ?: query?.let { stationForVoice(it) ?: throw IOException("No station matches \"$it\"") }
             if (station != null) {
                 MediaSession.MediaItemsWithStartPosition(loadStation(station), 0, C.TIME_UNSET)
             } else {
                 MediaSession.MediaItemsWithStartPosition(resolveTracks(mediaItems), startIndex, startPositionMs)
             }
+        }
+
+        /**
+         * Resumes the saved station at the saved track and position. When the system only wants to show
+         * what would resume ([isForPlayback] false), the saved track is enough and nothing is fetched.
+         */
+        override fun onPlaybackResumption(
+            mediaSession: MediaSession,
+            controller: MediaSession.ControllerInfo,
+            isForPlayback: Boolean,
+        ): ListenableFuture<MediaSession.MediaItemsWithStartPosition> = scope.future {
+            val point = container.resumeStore.load() ?: throw UnsupportedOperationException("Nothing to resume")
+            if (session == null) throw IOException("Not signed in")
+            val rest = if (!isForPlayback) {
+                emptyList()
+            } else {
+                runCatching { loadStation(point.stationId) }
+                    .getOrElse {
+                        // Offline: play the saved track; the queue refills once the server answers.
+                        stationId = point.stationId
+                        emptyList()
+                    }
+                    .filter { MediaIds.parseTrack(it.mediaId)?.trackId != point.trackId }
+            }
+            MediaSession.MediaItemsWithStartPosition(listOf(point.toMediaItem()) + rest, 0, point.positionMs)
         }
 
         override fun onAddMediaItems(
@@ -371,31 +463,113 @@ class PlaybackService : MediaLibraryService() {
             mediaItems: MutableList<MediaItem>,
         ): ListenableFuture<MutableList<MediaItem>> = Futures.immediateFuture(resolveTracks(mediaItems).toMutableList())
 
+        /** The root, with hints for Auto: folders as lists, stations as a grid of covers, and search. */
         override fun onGetLibraryRoot(
-            session: MediaLibrarySession,
+            mediaSession: MediaLibrarySession,
             browser: MediaSession.ControllerInfo,
             params: LibraryParams?,
-        ): ListenableFuture<LibraryResult<MediaItem>> = Futures.immediateFuture(
-            LibraryResult.ofItem(
-                MediaItem.Builder()
-                    .setMediaId(MediaIds.ROOT)
-                    .setMediaMetadata(MediaMetadata.Builder().setIsBrowsable(true).setIsPlayable(false).build())
-                    .build(),
-                params,
-            ),
-        )
+        ): ListenableFuture<LibraryResult<MediaItem>> {
+            val extras = Bundle().apply {
+                putInt(MediaConstants.EXTRAS_KEY_CONTENT_STYLE_BROWSABLE, MediaConstants.EXTRAS_VALUE_CONTENT_STYLE_LIST_ITEM)
+                putInt(MediaConstants.EXTRAS_KEY_CONTENT_STYLE_PLAYABLE, MediaConstants.EXTRAS_VALUE_CONTENT_STYLE_GRID_ITEM)
+                putBoolean(EXTRAS_KEY_SEARCH_SUPPORTED, true)
+            }
+            return Futures.immediateFuture(
+                LibraryResult.ofItem(
+                    MediaItem.Builder()
+                        .setMediaId(MediaIds.ROOT)
+                        .setMediaMetadata(MediaMetadata.Builder().setIsBrowsable(true).setIsPlayable(false).build())
+                        .build(),
+                    LibraryParams.Builder().setExtras(extras).build(),
+                ),
+            )
+        }
 
-        // The browse tree for Android Auto comes in PR 3.
         override fun onGetChildren(
-            session: MediaLibrarySession,
+            mediaSession: MediaLibrarySession,
             browser: MediaSession.ControllerInfo,
             parentId: String,
             page: Int,
             pageSize: Int,
             params: LibraryParams?,
-        ): ListenableFuture<LibraryResult<ImmutableList<MediaItem>>> =
-            Futures.immediateFuture(LibraryResult.ofItemList(ImmutableList.of(), params))
+        ): ListenableFuture<LibraryResult<ImmutableList<MediaItem>>> = scope.future {
+            val s = session ?: return@future signedOut(params)
+            browseTree.children(parentId) { container.stationRepository.browse(s, it) }
+                .fold(
+                    onSuccess = { itemList(BrowseTree.page(it, page, pageSize), params) },
+                    onFailure = { loadFailed(params) },
+                )
+        }
+
+        override fun onSearch(
+            mediaSession: MediaLibrarySession,
+            browser: MediaSession.ControllerInfo,
+            query: String,
+            params: LibraryParams?,
+        ): ListenableFuture<LibraryResult<Void>> = scope.future {
+            if (session == null) return@future signedOut(params)
+            search(query).fold(
+                onSuccess = {
+                    mediaSession.notifySearchResultChanged(browser, query, it.size, params)
+                    LibraryResult.ofVoid(params)
+                },
+                onFailure = { loadFailed(params) },
+            )
+        }
+
+        override fun onGetSearchResult(
+            mediaSession: MediaLibrarySession,
+            browser: MediaSession.ControllerInfo,
+            query: String,
+            page: Int,
+            pageSize: Int,
+            params: LibraryParams?,
+        ): ListenableFuture<LibraryResult<ImmutableList<MediaItem>>> = scope.future {
+            if (session == null) return@future signedOut(params)
+            search(query).fold(
+                onSuccess = { itemList(BrowseTree.page(it, page, pageSize), params) },
+                onFailure = { loadFailed(params) },
+            )
+        }
     }
+
+    // --- Browse, search and voice ----------------------------------------------------------------
+
+    /** Station hits for [query]; the last search is reused while Auto pages through it. */
+    private suspend fun search(query: String): Result<List<BrowseEntry>> {
+        lastSearch?.let { (q, entries) -> if (q == query) return Result.success(entries) }
+        val s = session ?: return Result.failure(IOException("Not signed in"))
+        return container.stationRepository.searchStations(s, query)
+            .map(BrowseTree::searchEntries)
+            .onSuccess { lastSearch = query to it }
+    }
+
+    /**
+     * The station for a voice request. "Play techno on OwnWave" plays the best search hit; a bare
+     * "play OwnWave" resumes the last station, or else the most recently played one.
+     */
+    private suspend fun stationForVoice(query: String): String? {
+        val s = session ?: throw IOException("Not signed in")
+        if (query.isBlank()) {
+            return container.resumeStore.load()?.stationId
+                ?: container.stationRepository.recent(s).getOrNull()?.firstOrNull()?.stationId
+        }
+        val hits = container.stationRepository.searchStations(s, query).getOrThrow()
+        return BrowseTree.firstStation(hits)
+    }
+
+    private fun itemList(entries: List<BrowseEntry>, params: LibraryParams?): LibraryResult<ImmutableList<MediaItem>> =
+        LibraryResult.ofItemList(entries.map { it.toMediaItem() }, params)
+
+    /** Auto shows the message on its screen. */
+    private fun <V : Any> signedOut(params: LibraryParams?): LibraryResult<V> =
+        error(SessionError(SessionError.ERROR_SESSION_AUTHENTICATION_EXPIRED, getString(R.string.auto_sign_in)), params)
+
+    private fun <V : Any> loadFailed(params: LibraryParams?): LibraryResult<V> =
+        error(SessionError(SessionError.ERROR_UNKNOWN, getString(R.string.auto_load_failed)), params)
+
+    private fun <V : Any> error(error: SessionError, params: LibraryParams?): LibraryResult<V> =
+        if (params == null) LibraryResult.ofError<V>(error) else LibraryResult.ofError<V>(error, params)
 
     /** Items sent by a controller lose their URI; give OwnWave tracks theirs back and drop anything else. */
     private fun resolveTracks(items: List<MediaItem>): List<MediaItem> = items.mapNotNull { item ->
@@ -419,5 +593,8 @@ class PlaybackService : MediaLibraryService() {
         const val REBUFFER_MS = 5_000
         const val PROGRESS_CHECK_MS = 1_000L
         const val MAX_SKIPPED_ERRORS = 3
+
+        /** Tells Auto to show its search button (androidx.media's `BROWSER_SERVICE_EXTRAS_KEY_SEARCH_SUPPORTED`). */
+        const val EXTRAS_KEY_SEARCH_SUPPORTED = "android.media.browse.SEARCH_SUPPORTED"
     }
 }

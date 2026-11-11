@@ -54,4 +54,8 @@
         <item quantity="one">%d song</item>
         <item quantity="other">%d songs</item>
     </plurals>
+
+    <!-- Android Auto -->
+    <string name="auto_sign_in">Sign in to OwnWave on your phone</string>
+    <string name="auto_load_failed">Can\'t reach OwnWave right now</string>
 </resources>
