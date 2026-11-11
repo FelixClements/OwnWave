@@ -14,7 +14,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.github.felixclements.ownwave.auth.SessionState
-import io.github.felixclements.ownwave.ui.home.HomeScreen
+import io.github.felixclements.ownwave.ui.SignedInApp
 import io.github.felixclements.ownwave.ui.login.LoginScreen
 import io.github.felixclements.ownwave.ui.theme.OwnWaveTheme
 
@@ -32,7 +32,7 @@ class MainActivity : ComponentActivity() {
                             CircularProgressIndicator()
                         }
                         SessionState.SignedOut -> LoginScreen()
-                        is SessionState.SignedIn -> HomeScreen(session = s.session)
+                        is SessionState.SignedIn -> SignedInApp(session = s.session)
                     }
                 }
             }

@@ -2,6 +2,7 @@ package io.github.felixclements.ownwave.ui.home
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import io.github.felixclements.ownwave.api.models.BrowseItem
 import io.github.felixclements.ownwave.api.models.Station
 import io.github.felixclements.ownwave.auth.AccountRepository
 import io.github.felixclements.ownwave.auth.Session
@@ -16,6 +17,8 @@ import kotlinx.coroutines.launch
 data class HomeUiState(
     val loading: Boolean = true,
     val failed: Boolean = false,
+    /** "Jump back in": recently played stations. Empty when the call fails; the rest still shows. */
+    val recent: List<BrowseItem> = emptyList(),
     val yourStations: List<Station> = emptyList(),
     val genreStations: List<Station> = emptyList(),
 )
@@ -36,10 +39,11 @@ class HomeViewModel(
     fun refresh() {
         _state.update { it.copy(loading = true, failed = false) }
         viewModelScope.launch {
+            val recent = stations.recent(session).getOrDefault(emptyList()).take(RECENT_COUNT)
             stations.stations(session)
                 .onSuccess { list ->
                     val (genre, other) = list.partition { it.kind == Station.Kind.GENRE }
-                    _state.value = HomeUiState(loading = false, yourStations = other, genreStations = genre)
+                    _state.value = HomeUiState(loading = false, recent = recent, yourStations = other, genreStations = genre)
                 }
                 .onFailure { _state.update { it.copy(loading = false, failed = true) } }
         }
@@ -52,5 +56,9 @@ class HomeViewModel(
             account.logout(session)
             sessionStore.clear()
         }
+    }
+
+    private companion object {
+        const val RECENT_COUNT = 6
     }
 }
