@@ -36,6 +36,9 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version: '1.26'
+          # The runner's tool cache can lag behind the newest patch release;
+          # govulncheck fails on stdlib CVEs fixed only in that patch.
+          check-latest: true
 
       - name: Set up Node
         uses: actions/setup-node@v4
