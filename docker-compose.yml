@@ -1,6 +1,9 @@
 # go and python images are published to GHCR by CI on every push to main.
 # Deploy with `docker compose pull && docker compose up -d`; `--build` builds
 # them from source instead. OWNWAVE_IMAGE_TAG pins a commit SHA (rollback).
+#
+# Required (compose refuses to start without them; see .env.example):
+#   POSTGRES_PASSWORD, ANALYTICS_API_SECRET (generate: openssl rand -hex 32)
 
 # Shared by the python (API) and worker services (same image, same config).
 x-python: &python
@@ -12,8 +15,8 @@ x-python: &python
   platform: linux/amd64
   restart: unless-stopped
   environment:
-    DATABASE_URL: postgres://${POSTGRES_USER:-ownwave}:${POSTGRES_PASSWORD:-ownwave}@db:5432/${POSTGRES_DB:-ownwave}
-    ANALYTICS_API_SECRET: ${ANALYTICS_API_SECRET:-local-analytics-secret-change-me}
+    DATABASE_URL: postgres://${POSTGRES_USER:-ownwave}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-ownwave}
+    ANALYTICS_API_SECRET: ${ANALYTICS_API_SECRET:?set ANALYTICS_API_SECRET (openssl rand -hex 32)}
     MUSIC_DIR: /music
     ENABLE_GENRE_ANALYSIS: ${ENABLE_GENRE_ANALYSIS:-false}
     GENRE_MODEL_DIR: ${GENRE_MODEL_DIR:-/app/models}
@@ -38,12 +41,15 @@ services:
     restart: unless-stopped
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-ownwave}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-ownwave}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
       POSTGRES_DB: ${POSTGRES_DB:-ownwave}
     volumes:
       - db_data:/var/lib/postgresql/data
+    # Published for local tools only; services use the compose network.
+    # DB_HOST_PORT is a bare port. Published ports bypass ufw, so keep
+    # DB_BIND_ADDR on loopback unless you know you need otherwise.
     ports:
-      - "${DB_HOST_PORT:-127.0.0.1:5432}:5432"
+      - "${DB_BIND_ADDR:-127.0.0.1}:${DB_HOST_PORT:-5432}:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-ownwave} -d ${POSTGRES_DB:-ownwave}"]
       interval: 5s
@@ -74,13 +80,14 @@ services:
       dockerfile: services/go-api-server/Dockerfile
     restart: unless-stopped
     environment:
-      DATABASE_URL: postgres://${POSTGRES_USER:-ownwave}:${POSTGRES_PASSWORD:-ownwave}@db:5432/${POSTGRES_DB:-ownwave}
+      DATABASE_URL: postgres://${POSTGRES_USER:-ownwave}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-ownwave}
       MUSIC_DIR: /music
-      ANALYTICS_API_SECRET: ${ANALYTICS_API_SECRET:-local-analytics-secret-change-me}
+      ANALYTICS_API_SECRET: ${ANALYTICS_API_SECRET:?set ANALYTICS_API_SECRET (openssl rand -hex 32)}
       ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost:8080,http://127.0.0.1:8080}
       PUBLIC_APP_URL: ${PUBLIC_APP_URL:-http://localhost:8080}
       OWNWAVE_DOMAIN: ${OWNWAVE_DOMAIN:-localhost}
-      OWNWAVE_COOKIE_SECURE: ${OWNWAVE_COOKIE_SECURE:-false}
+      # Secure session cookie + HSTS. Empty = on when PUBLIC_APP_URL is https.
+      OWNWAVE_COOKIE_SECURE: ${OWNWAVE_COOKIE_SECURE:-}
       # Proxies whose X-Forwarded-For is believed (empty = private networks).
       TRUSTED_PROXIES: ${TRUSTED_PROXIES:-}
       FFMPEG_PATH: ffmpeg

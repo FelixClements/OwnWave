@@ -24,8 +24,10 @@ func (h *Handler) SetupStatus(w http.ResponseWriter, r *http.Request) {
 		"has_users":       hasUsers > 0,
 	}
 
-	// Only disclose track count during initial setup before completion
-	if !completed {
+	// This endpoint is public. Disclose the track count only before the
+	// first account exists; once an admin is registered, setup_completed may
+	// still be false but anyone could otherwise read the library size.
+	if hasUsers == 0 && !completed {
 		trackCount, err := h.db.CountTracks(ctx)
 		if err == nil {
 			resp["track_count"] = trackCount

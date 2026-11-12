@@ -4,8 +4,12 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"net/mail"
+	"regexp"
 	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -22,7 +26,9 @@ var (
 	ErrRegistrationClosed = errors.New("registration closed")
 	ErrWeakPassword       = errors.New("password must be at least 8 characters")
 	ErrPasswordTooLong    = errors.New("password must be at most 72 bytes")
-	ErrInvalidUsername    = errors.New("username required")
+	ErrInvalidUsername    = errors.New("username must be 1-32 characters: letters, digits, '.', '_' or '-', starting with a letter or digit")
+	ErrInvalidEmail       = errors.New("invalid email address")
+	ErrInvalidFullName    = errors.New("full name must be at most 100 characters without control characters")
 	ErrCannotDeleteSelf   = errors.New("cannot delete own account")
 )
 
@@ -30,7 +36,56 @@ const (
 	minPasswordLen = 8
 	maxPasswordLen = 72 // bcrypt input limit
 	registerLockID = int64(0x4F776E01)
+
+	maxUsernameLen = 32
+	// MaxLoginUsernameLen bounds the username a login may name. It is longer
+	// than maxUsernameLen so accounts created before that limit can sign in.
+	MaxLoginUsernameLen = 64
+	maxEmailLen         = 254
+	maxFullNameLen      = 100
 )
+
+var usernamePattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
+
+// NormalizeUsername trims surrounding whitespace, so "admin " and "admin"
+// name the same account.
+func NormalizeUsername(username string) string {
+	return strings.TrimSpace(username)
+}
+
+// ValidateUsername checks a normalized username for a new account: ASCII
+// letters, digits, '.', '_' and '-', at most 32 characters.
+func ValidateUsername(username string) error {
+	if username == "" || len(username) > maxUsernameLen || !usernamePattern.MatchString(username) {
+		return ErrInvalidUsername
+	}
+	return nil
+}
+
+// NormalizeProfile trims and checks the optional profile fields. Empty
+// values clear the field.
+func NormalizeProfile(email, fullName string) (string, string, error) {
+	email = strings.TrimSpace(email)
+	if email != "" {
+		if len(email) > maxEmailLen {
+			return "", "", ErrInvalidEmail
+		}
+		addr, err := mail.ParseAddress(email)
+		if err != nil || addr.Address != email {
+			return "", "", ErrInvalidEmail
+		}
+	}
+	fullName = strings.TrimSpace(fullName)
+	if !utf8.ValidString(fullName) || utf8.RuneCountInString(fullName) > maxFullNameLen {
+		return "", "", ErrInvalidFullName
+	}
+	for _, r := range fullName {
+		if unicode.IsControl(r) {
+			return "", "", ErrInvalidFullName
+		}
+	}
+	return email, fullName, nil
+}
 
 var dummyLoginHash []byte
 
@@ -76,8 +131,8 @@ func NewService(pool *pgxpool.Pool) *Service {
 }
 
 func validateCredentials(username, password string) error {
-	if strings.TrimSpace(username) == "" {
-		return ErrInvalidUsername
+	if err := ValidateUsername(username); err != nil {
+		return err
 	}
 	return validatePassword(password)
 }
@@ -93,6 +148,7 @@ func validatePassword(password string) error {
 }
 
 func (s *Service) Register(ctx context.Context, username, password, inviteToken string) (string, User, error) {
+	username = NormalizeUsername(username)
 	if err := validateCredentials(username, password); err != nil {
 		return "", User{}, err
 	}
@@ -136,7 +192,7 @@ func (s *Service) registerWithInvite(ctx context.Context, q querier, username, p
 	if err != nil {
 		return "", User{}, err
 	}
-	if presetUsername != "" && presetUsername != username {
+	if presetUsername != "" && NormalizeUsername(presetUsername) != username {
 		return "", User{}, ErrInvalidInvite
 	}
 	return s.registerUser(ctx, q, username, password, false)
@@ -165,6 +221,7 @@ func (s *Service) registerUser(ctx context.Context, q querier, username, passwor
 }
 
 func (s *Service) CreateUser(ctx context.Context, username, password string) (User, error) {
+	username = NormalizeUsername(username)
 	if err := validateCredentials(username, password); err != nil {
 		return User{}, err
 	}
@@ -185,6 +242,16 @@ func (s *Service) CreateUser(ctx context.Context, username, password string) (Us
 func (s *Service) CreateInvite(ctx context.Context, adminID string, username *string, ttl time.Duration) (string, Invite, error) {
 	if ttl <= 0 {
 		ttl = 7 * 24 * time.Hour
+	}
+	if username != nil {
+		preset := NormalizeUsername(*username)
+		if preset == "" {
+			username = nil
+		} else if err := ValidateUsername(preset); err != nil {
+			return "", Invite{}, err
+		} else {
+			username = &preset
+		}
 	}
 	token, err := GenerateToken()
 	if err != nil {
