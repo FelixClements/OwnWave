@@ -1,6 +1,8 @@
 package io.github.felixclements.ownwave.playback
 
+import androidx.annotation.OptIn
 import androidx.media3.common.Player
+import androidx.media3.common.util.UnstableApi
 
 /**
  * Which media controllers get the full session. The service is exported (it has to be, for the
@@ -42,6 +44,7 @@ internal object ControllerAccess {
     )
 
     /** [TRANSPORT_COMMANDS] as Media3 player commands (needs the Android runtime). */
+    @OptIn(UnstableApi::class)
     fun transportPlayerCommands(): Player.Commands =
         Player.Commands.Builder().addAll(*TRANSPORT_COMMANDS.toIntArray()).build()
 }
