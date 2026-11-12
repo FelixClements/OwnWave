@@ -94,6 +94,9 @@ services:
       PYTHON_API_URL: http://python:8000
       # Transcoded files (Opus/AAC qualities), least recently played evicted first.
       TRANSCODE_CACHE_MB: ${TRANSCODE_CACHE_MB:-10240}
+      # Optional: SoulLite follows the Spotify playlists added here (both or neither).
+      SOULLITE_URL: ${SOULLITE_URL:-}
+      SOULLITE_API_KEY: ${SOULLITE_API_KEY:-}
     volumes:
       - ${MUSIC_PATH:-./music}:/music:ro
       - transcode_cache:/cache

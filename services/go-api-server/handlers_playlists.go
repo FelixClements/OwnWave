@@ -127,6 +127,7 @@ func (h *Handler) AddPlaylist(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.refreshStations(r, pipeline.TriggerAdded)
+	h.followInSoulLite(p.SpotifyID, p.Name)
 	writeJSON(w, http.StatusOK, p)
 }
 
@@ -149,6 +150,13 @@ func (h *Handler) DeletePlaylist(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	// SoulLite knows the playlist by its Spotify id, which the row takes with it.
+	var spotifyID string
+	if h.soullite != nil {
+		if p, err := h.playlists.Get(r.Context(), id); err == nil {
+			spotifyID = p.SpotifyID
+		}
+	}
 	usedBy, err := h.playlists.Delete(r.Context(), id)
 	if err != nil {
 		writePlaylistError(w, r, "delete playlist", err)
@@ -159,6 +167,7 @@ func (h *Handler) DeletePlaylist(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.refreshStations(r, pipeline.TriggerDeleted)
+	h.unfollowInSoulLite(spotifyID)
 	w.WriteHeader(http.StatusNoContent)
 }
 

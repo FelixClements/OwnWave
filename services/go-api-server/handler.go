@@ -12,6 +12,7 @@ import (
 	"ownwave/api/internal/pipeline"
 	"ownwave/api/internal/playback"
 	"ownwave/api/internal/playlists"
+	"ownwave/api/internal/soullite"
 	"ownwave/api/internal/spotify"
 	"ownwave/api/internal/stations"
 	"ownwave/api/internal/streaming"
@@ -32,7 +33,8 @@ type Handler struct {
 	ffmpegPath   string
 	recentHours  int
 	cookieSecure bool
-	logins       *loginThrottle // nil: no per-username limit
+	logins       *loginThrottle   // nil: no per-username limit
+	soullite     *soullite.Client // nil: SoulLite integration off
 }
 
 // Config holds the environment-derived settings for NewHandler.
@@ -47,6 +49,8 @@ type Config struct {
 	TranscodeCacheMB int
 	// CoverCacheDir holds cover thumbnails across restarts ("" = memory only).
 	CoverCacheDir string
+	// SoulLite follows the Spotify playlists added here (nil = off).
+	SoulLite *soullite.Client
 }
 
 func NewHandler(pool *pgxpool.Pool, cfg Config) *Handler {
@@ -80,6 +84,7 @@ func NewHandler(pool *pgxpool.Pool, cfg Config) *Handler {
 		recentHours:  cfg.RecentHours,
 		cookieSecure: auth.CookieSecure(),
 		logins:       newLoginThrottle(10, 15*time.Minute),
+		soullite:     cfg.SoulLite,
 	}
 }
 

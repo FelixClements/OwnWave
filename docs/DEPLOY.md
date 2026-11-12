@@ -40,6 +40,25 @@ MUSIC_PATH=/path/to/music
 
 Postgres is published on `DB_BIND_ADDR:DB_HOST_PORT` (default `127.0.0.1:5432`) for local tools only. `DB_HOST_PORT` is a bare port number; a value with an address in it (the old `127.0.0.1:5433` form) makes `docker compose` fail with `invalid IP address`. Docker-published ports bypass ufw, so keep `DB_BIND_ADDR` on loopback. The prod overlay removes the port entirely.
 
+### Optional: SoulLite
+
+SoulLite, a separate self-hosted app, follows Spotify playlists. It downloads the tracks your library lacks into the shared music folder, then asks OwnWave to rescan. The link works in both directions:
+
+- **OwnWave → SoulLite.** Set both of these variables to turn it on (it stays off if neither is set):
+
+  ```env
+  SOULLITE_URL=http://soullite:8080
+  SOULLITE_API_KEY=sl_...
+  ```
+
+  - `SOULLITE_URL` is how the `go` container reaches SoulLite.
+  - `SOULLITE_API_KEY` is a SoulLite API Key with `admin` scope, made in SoulLite under Settings → API Keys. A `read` key gets 403 on every follow.
+  - Setting only one of the two, or a URL that is not http(s), stops `go` at startup.
+
+  Once it is on, SoulLite follows each Spotify playlist an admin adds in OwnWave, on a daily schedule, and starts its first Sync right away. Deleting the playlist in OwnWave unfollows it in SoulLite, which keeps the downloaded files. On every start, OwnWave also sends all its playlists to SoulLite again. This catches up on anything missed while SoulLite was down, and SoulLite ignores playlists it already follows. A playlist you unfollow only in SoulLite therefore comes back on the next OwnWave restart: delete it in OwnWave instead. SoulLite errors are logged by `go` (`soullite ... failed`) and never fail the admin request. See [ADR 0003](adr/0003-soullite-follows-playlists.md).
+
+- **SoulLite → OwnWave.** SoulLite calls `POST /api/admin/scan` with `Authorization: Bearer <token>`. The token must belong to an admin user. Use a device token from `POST /api/auth/device` (`{"username","password","device_name":"soullite"}`). It lasts 365 days and can be revoked under Settings → Devices. The scan only queues a job: while one is pending or running, a repeated call returns that same job.
+
 ## 2. Start the stack
 
 ```bash
