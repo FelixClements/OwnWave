@@ -172,6 +172,7 @@ func main() {
 		Handler:           r,
 		ReadHeaderTimeout: 10 * time.Second,
 		IdleTimeout:       2 * time.Minute,
+		MaxHeaderBytes:    64 << 10,
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -201,7 +202,8 @@ func main() {
 // newRouter serves the API under /api and, when webDir exists, the web UI at /.
 func newRouter(h *Handler, webDir string) http.Handler {
 	r := chi.NewRouter()
-	r.Use(middleware.RealIP)
+	r.Use(clientIP(loadTrustedProxies()))
+	r.Use(limitBody)
 	r.Use(securityHeaders(h.cookieSecure))
 	r.Use(httpAccessLog)
 	r.Use(middleware.Recoverer)

@@ -9,7 +9,7 @@ RUN npm ci
 COPY apps/web ./
 RUN npm run build
 
-FROM golang:1.25-alpine AS builder
+FROM golang:1.26-alpine AS builder
 
 WORKDIR /app
 
