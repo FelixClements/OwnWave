@@ -44,8 +44,13 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 	if !decodeJSON(w, r, &req) {
 		return
 	}
+	req.Username = auth.NormalizeUsername(req.Username)
 	if req.Username == "" || req.Password == "" {
 		http.Error(w, "username and password required", http.StatusBadRequest)
+		return
+	}
+	if len(req.Username) > auth.MaxLoginUsernameLen {
+		http.Error(w, "invalid credentials", http.StatusUnauthorized)
 		return
 	}
 	if h.logins.Blocked(req.Username) {
@@ -118,6 +123,11 @@ func (h *Handler) UpdateProfile(w http.ResponseWriter, r *http.Request) {
 	if req.FullName != nil {
 		fullName = *req.FullName
 	}
+	email, fullName, err := auth.NormalizeProfile(email, fullName)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
 
 	if err := h.db.UpdateUserProfile(r.Context(), user.ID, email, fullName); err != nil {
 		writeInternalError(w, r, "update profile", err)
@@ -186,8 +196,13 @@ func (h *Handler) LoginDevice(w http.ResponseWriter, r *http.Request) {
 	if !decodeJSON(w, r, &req) {
 		return
 	}
+	req.Username = auth.NormalizeUsername(req.Username)
 	if req.Username == "" || req.Password == "" {
 		http.Error(w, "username and password required", http.StatusBadRequest)
+		return
+	}
+	if len(req.Username) > auth.MaxLoginUsernameLen {
+		http.Error(w, "invalid credentials", http.StatusUnauthorized)
 		return
 	}
 	if h.logins.Blocked(req.Username) {

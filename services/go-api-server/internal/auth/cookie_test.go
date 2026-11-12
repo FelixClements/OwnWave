@@ -47,3 +47,24 @@ func TestWriteSessionCookieFlags(t *testing.T) {
 		t.Fatalf("Path = %q", cookie.Path)
 	}
 }
+
+func TestCookieSecure(t *testing.T) {
+	cases := []struct {
+		secure, appURL string
+		want           bool
+	}{
+		{"true", "", true},
+		{"1", "http://localhost:8080", true},
+		{"false", "https://music.example.com", false},
+		{"", "https://music.example.com", true},
+		{"", "http://localhost:8080", false},
+		{"", "", false},
+	}
+	for _, tc := range cases {
+		t.Setenv("OWNWAVE_COOKIE_SECURE", tc.secure)
+		t.Setenv("PUBLIC_APP_URL", tc.appURL)
+		if got := CookieSecure(); got != tc.want {
+			t.Errorf("CookieSecure(secure=%q, url=%q) = %v, want %v", tc.secure, tc.appURL, got, tc.want)
+		}
+	}
+}

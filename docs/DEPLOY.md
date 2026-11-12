@@ -29,13 +29,16 @@ Key variables:
 
 ```env
 OWNWAVE_DOMAIN=ownwave.example.com
-POSTGRES_PASSWORD=<generate-a-strong-password>
+POSTGRES_PASSWORD=<openssl rand -hex 24>
+ANALYTICS_API_SECRET=<openssl rand -hex 32>
 ALLOWED_ORIGINS=https://ownwave.example.com
 PUBLIC_APP_URL=https://ownwave.example.com
 MUSIC_PATH=/path/to/music
 ```
 
-Generate a strong `POSTGRES_PASSWORD` and unique `ANALYTICS_API_SECRET` before starting.
+`POSTGRES_PASSWORD` and `ANALYTICS_API_SECRET` are required: `docker compose` refuses to start without them. The `go` and `python` services also refuse an `ANALYTICS_API_SECRET` shorter than 16 characters or equal to one of the old example values (`local-analytics-secret-change-me`, `replace-me-generate-analytics-secret-32ch`).
+
+Postgres is published on `DB_BIND_ADDR:DB_HOST_PORT` (default `127.0.0.1:5432`) for local tools only. `DB_HOST_PORT` is a bare port number; a value with an address in it (the old `127.0.0.1:5433` form) makes `docker compose` fail with `invalid IP address`. Docker-published ports bypass ufw, so keep `DB_BIND_ADDR` on loopback. The prod overlay removes the port entirely.
 
 ## 2. Start the stack
 
@@ -72,7 +75,10 @@ Prometheus metrics are available to authenticated admins at `/api/admin/metrics`
 - Python analytics is an internal service. Go authenticates to it with `X-Internal-Token` (`ANALYTICS_API_SECRET`).
 - Registration is invite-only after the first admin account is created during setup.
 - Admin maintenance endpoints require `is_admin`.
-- Go sets standard security headers (CSP, frame denial, nosniff, etc.) on every response, so they apply behind any reverse proxy. HSTS is added when `OWNWAVE_COOKIE_SECURE=true`. CSP still includes `'unsafe-inline'` for Next.js.
+- Go sets standard security headers (CSP, frame denial, nosniff, etc.) on every response, so they apply behind any reverse proxy. HSTS is added when the session cookie is Secure (see below). CSP still includes `'unsafe-inline'` for Next.js.
+- Go rejects state-changing requests (`POST`, `PUT`, `PATCH`, `DELETE`) that a browser sends from another origin, including sibling subdomains that `SameSite=Lax` cookies don't stop (Go's `http.CrossOriginProtection`, based on `Sec-Fetch-Site`/`Origin`). Origins in `ALLOWED_ORIGINS` are trusted. Clients that send neither header, such as the Android app and scripts with a bearer token, are not affected.
+- New usernames are trimmed and must be 1–32 ASCII letters, digits, `.`, `_` or `-`, starting with a letter or digit. Logins trim the username too. Profile email and full name are trimmed and length-checked.
+- `/api/setup/status` is public; it shows the library's track count only until the first account exists.
 
 ### Post-deploy verification checklist
 
@@ -99,7 +105,7 @@ curl -s -o /dev/null -w "%{http_code}" "$DOMAIN/api/metrics"
 
 Expected status codes: `401`, `401`, `401` or `403`, `403`, and `404` respectively.
 
-Set `OWNWAVE_COOKIE_SECURE=true` in production (the prod compose overlay does this). It marks the session cookie Secure and enables HSTS. Generate a unique `ANALYTICS_API_SECRET` and `POSTGRES_PASSWORD`.
+`OWNWAVE_COOKIE_SECURE` marks the session cookie Secure and enables HSTS. When it is unset or empty, it is on whenever `PUBLIC_APP_URL` starts with `https://`; the prod compose overlay sets it to `true`. Set it to `false` only for plain-HTTP setups.
 
 Invite flow:
 

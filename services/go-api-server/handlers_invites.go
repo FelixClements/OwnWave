@@ -32,6 +32,10 @@ func (h *Handler) CreateInvite(w http.ResponseWriter, r *http.Request) {
 	}
 
 	token, invite, err := h.auth.CreateInvite(r.Context(), admin.ID, req.Username, ttl)
+	if errors.Is(err, auth.ErrInvalidUsername) {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
 	if err != nil {
 		writeInternalError(w, r, "create invite", err)
 		return

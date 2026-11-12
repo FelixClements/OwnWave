@@ -11,10 +11,13 @@ from pydantic import BaseModel
 import db
 import task_queue
 import tasks
-from config import ANALYTICS_API_SECRET, GENRE_MODEL_DIR, MUSIC_DIR
+from config import ANALYTICS_API_SECRET, GENRE_MODEL_DIR, MUSIC_DIR, analytics_secret_problem
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    problem = analytics_secret_problem(ANALYTICS_API_SECRET)
+    if problem:
+        raise RuntimeError(problem)
     db.wait_for_db()
     from genre_scoring import sync_catalog
 

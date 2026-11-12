@@ -20,6 +20,7 @@ import (
 	"github.com/joho/godotenv"
 	"github.com/rs/cors"
 
+	"ownwave/api/internal/analytics"
 	"ownwave/api/internal/pipeline"
 )
 
@@ -86,6 +87,9 @@ func main() {
 	dsn := os.Getenv("DATABASE_URL")
 	if dsn == "" {
 		log.Fatal("DATABASE_URL not set")
+	}
+	if err := analytics.CheckSecret(os.Getenv("ANALYTICS_API_SECRET")); err != nil {
+		log.Fatalf("config: %v", err)
 	}
 
 	ctx := context.Background()
@@ -208,12 +212,14 @@ func newRouter(h *Handler, webDir string) http.Handler {
 	r.Use(httpAccessLog)
 	r.Use(middleware.Recoverer)
 	r.Use(prometheusMiddleware)
+	origins := loadAllowedOrigins()
 	r.Use(cors.New(cors.Options{
-		AllowedOrigins:   loadAllowedOrigins(),
+		AllowedOrigins:   origins,
 		AllowedMethods:   []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
 		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type"},
 		AllowCredentials: true,
 	}).Handler)
+	r.Use(crossOriginProtection(origins))
 
 	r.Get("/health", h.Health)
 

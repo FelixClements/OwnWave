@@ -2,7 +2,7 @@ services:
   go:
     environment:
       PYTHON_API_URL: http://python:8000
-      ANALYTICS_API_SECRET: ${ANALYTICS_API_SECRET}
+      ANALYTICS_API_SECRET: ${ANALYTICS_API_SECRET:?set ANALYTICS_API_SECRET (openssl rand -hex 32)}
       OWNWAVE_COOKIE_SECURE: "true"
       ALLOWED_ORIGINS: https://${OWNWAVE_DOMAIN:-localhost}
       PUBLIC_APP_URL: https://${OWNWAVE_DOMAIN:-localhost}
@@ -18,8 +18,6 @@ services:
   caddy:
     image: caddy:2-alpine
     restart: unless-stopped
-    cap_add:
-      - NET_ADMIN
     ports:
       - "80:80"
       - "443:443"
