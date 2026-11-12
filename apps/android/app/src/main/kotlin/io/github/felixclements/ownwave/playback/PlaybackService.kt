@@ -5,6 +5,7 @@ import android.content.Intent
 import android.net.ConnectivityManager
 import androidx.core.net.toUri
 import android.os.Bundle
+import android.util.Log
 import androidx.annotation.OptIn
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
@@ -30,6 +31,7 @@ import androidx.media3.session.MediaConstants
 import androidx.media3.session.MediaLibraryService
 import androidx.media3.session.MediaSession
 import androidx.media3.session.SessionCommand
+import androidx.media3.session.SessionCommands
 import androidx.media3.session.SessionError
 import androidx.media3.session.SessionResult
 import com.google.common.collect.ImmutableList
@@ -387,18 +389,39 @@ class PlaybackService : MediaLibraryService() {
         }
     }
 
+    /** See [ControllerAccess]: this app, its notification, car hosts and system-trusted controllers. */
+    private fun isTrustedController(session: MediaSession, controller: MediaSession.ControllerInfo): Boolean =
+        ControllerAccess.isTrusted(
+            packageName = controller.packageName,
+            ownPackage = packageName,
+            systemTrusted = controller.isTrusted,
+            carHost = session.isMediaNotificationController(controller) ||
+                session.isAutoCompanionController(controller) ||
+                session.isAutomotiveController(controller),
+        )
+
     private inner class Callback : MediaLibrarySession.Callback {
         override fun onConnect(
             session: MediaSession,
             controller: MediaSession.ControllerInfo,
-        ): MediaSession.ConnectionResult = MediaSession.ConnectionResult.AcceptedResultBuilder(session)
-            .setAvailableSessionCommands(
-                MediaSession.ConnectionResult.DEFAULT_SESSION_AND_LIBRARY_COMMANDS.buildUpon()
-                    .add(Commands.LIKE)
-                    .add(Commands.BAN)
-                    .build(),
-            )
-            .build()
+        ): MediaSession.ConnectionResult {
+            if (isTrustedController(session, controller)) {
+                return MediaSession.ConnectionResult.AcceptedResultBuilder(session)
+                    .setAvailableSessionCommands(
+                        MediaSession.ConnectionResult.DEFAULT_SESSION_AND_LIBRARY_COMMANDS.buildUpon()
+                            .add(Commands.LIKE)
+                            .add(Commands.BAN)
+                            .build(),
+                    )
+                    .build()
+            }
+            // Any other app: transport controls only. No library browsing, queue, like or ban.
+            Log.i(TAG, "Media controller ${controller.packageName} gets transport controls only")
+            return MediaSession.ConnectionResult.AcceptedResultBuilder(session)
+                .setAvailableSessionCommands(SessionCommands.Builder().build())
+                .setAvailablePlayerCommands(ControllerAccess.TRANSPORT_PLAYER_COMMANDS)
+                .build()
+        }
 
         override fun onCustomCommand(
             session: MediaSession,
@@ -406,6 +429,10 @@ class PlaybackService : MediaLibraryService() {
             customCommand: SessionCommand,
             args: Bundle,
         ): ListenableFuture<SessionResult> {
+            // Media3 already drops commands a controller was not granted; check again for like and ban.
+            if (!isTrustedController(session, controller)) {
+                return Futures.immediateFuture(SessionResult(SessionError.ERROR_PERMISSION_DENIED))
+            }
             when (customCommand.customAction) {
                 Commands.ACTION_LIKE -> toggleLike()
                 Commands.ACTION_BAN -> ban()
@@ -593,6 +620,7 @@ class PlaybackService : MediaLibraryService() {
         const val REBUFFER_MS = 5_000
         const val PROGRESS_CHECK_MS = 1_000L
         const val MAX_SKIPPED_ERRORS = 3
+        const val TAG = "PlaybackService"
 
         /** Tells Auto to show its search button (androidx.media's `BROWSER_SERVICE_EXTRAS_KEY_SEARCH_SUPPORTED`). */
         const val EXTRAS_KEY_SEARCH_SUPPORTED = "android.media.browse.SEARCH_SUPPORTED"
