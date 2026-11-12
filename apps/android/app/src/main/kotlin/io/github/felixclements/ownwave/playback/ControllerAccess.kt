@@ -25,21 +25,23 @@ internal object ControllerAccess {
         systemTrusted || carHost || packageName == ownPackage || packageName in CAR_PACKAGES
 
     /** Play, pause, skip and seek, plus the current track's metadata. No queue, no library, no item changes. */
-    val TRANSPORT_PLAYER_COMMANDS: Player.Commands = Player.Commands.Builder()
-        .addAll(
-            Player.COMMAND_PLAY_PAUSE,
-            Player.COMMAND_PREPARE,
-            Player.COMMAND_STOP,
-            Player.COMMAND_SEEK_TO_DEFAULT_POSITION,
-            Player.COMMAND_SEEK_IN_CURRENT_MEDIA_ITEM,
-            Player.COMMAND_SEEK_TO_PREVIOUS_MEDIA_ITEM,
-            Player.COMMAND_SEEK_TO_PREVIOUS,
-            Player.COMMAND_SEEK_TO_NEXT_MEDIA_ITEM,
-            Player.COMMAND_SEEK_TO_NEXT,
-            Player.COMMAND_SEEK_BACK,
-            Player.COMMAND_SEEK_FORWARD,
-            Player.COMMAND_GET_CURRENT_MEDIA_ITEM,
-            Player.COMMAND_GET_METADATA,
-        )
-        .build()
+    val TRANSPORT_COMMANDS: List<Int> = listOf(
+        Player.COMMAND_PLAY_PAUSE,
+        Player.COMMAND_PREPARE,
+        Player.COMMAND_STOP,
+        Player.COMMAND_SEEK_TO_DEFAULT_POSITION,
+        Player.COMMAND_SEEK_IN_CURRENT_MEDIA_ITEM,
+        Player.COMMAND_SEEK_TO_PREVIOUS_MEDIA_ITEM,
+        Player.COMMAND_SEEK_TO_PREVIOUS,
+        Player.COMMAND_SEEK_TO_NEXT_MEDIA_ITEM,
+        Player.COMMAND_SEEK_TO_NEXT,
+        Player.COMMAND_SEEK_BACK,
+        Player.COMMAND_SEEK_FORWARD,
+        Player.COMMAND_GET_CURRENT_MEDIA_ITEM,
+        Player.COMMAND_GET_METADATA,
+    )
+
+    /** [TRANSPORT_COMMANDS] as Media3 player commands (needs the Android runtime). */
+    fun transportPlayerCommands(): Player.Commands =
+        Player.Commands.Builder().addAll(*TRANSPORT_COMMANDS.toIntArray()).build()
 }

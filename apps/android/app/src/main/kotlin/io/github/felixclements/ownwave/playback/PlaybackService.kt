@@ -419,7 +419,7 @@ class PlaybackService : MediaLibraryService() {
             Log.i(TAG, "Media controller ${controller.packageName} gets transport controls only")
             return MediaSession.ConnectionResult.AcceptedResultBuilder(session)
                 .setAvailableSessionCommands(SessionCommands.Builder().build())
-                .setAvailablePlayerCommands(ControllerAccess.TRANSPORT_PLAYER_COMMANDS)
+                .setAvailablePlayerCommands(ControllerAccess.transportPlayerCommands())
                 .build()
         }
 

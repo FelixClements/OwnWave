@@ -30,17 +30,17 @@ class ControllerAccessTest {
     }
 
     @Test fun `untrusted controllers get transport only`() {
-        val commands = ControllerAccess.TRANSPORT_PLAYER_COMMANDS
+        val commands = ControllerAccess.TRANSPORT_COMMANDS
         for (allowed in listOf(Player.COMMAND_PLAY_PAUSE, Player.COMMAND_SEEK_TO_NEXT, Player.COMMAND_GET_METADATA)) {
-            assertTrue("missing $allowed", commands.contains(allowed))
+            assertTrue("missing $allowed", allowed in commands)
         }
         for (denied in listOf(
             Player.COMMAND_GET_TIMELINE,
             Player.COMMAND_SET_MEDIA_ITEM,
             Player.COMMAND_CHANGE_MEDIA_ITEMS,
-            Player.COMMAND_GET_MEDIA_ITEMS_METADATA,
+            Player.COMMAND_SET_PLAYLIST_METADATA,
         )) {
-            assertFalse("should not allow $denied", commands.contains(denied))
+            assertFalse("should not allow $denied", denied in commands)
         }
     }
 }
