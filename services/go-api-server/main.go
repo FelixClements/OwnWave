@@ -22,6 +22,7 @@ import (
 
 	"ownwave/api/internal/analytics"
 	"ownwave/api/internal/pipeline"
+	"ownwave/api/internal/soullite"
 )
 
 func waitForDB(ctx context.Context, dsn string) (*pgxpool.Pool, error) {
@@ -118,6 +119,16 @@ func main() {
 		pythonURL = "http://localhost:8000"
 	}
 
+	// Optional: SoulLite follows the Spotify playlists added here and
+	// downloads the tracks they lack. Off unless both values are set.
+	soulLite, err := soullite.New(os.Getenv("SOULLITE_URL"), os.Getenv("SOULLITE_API_KEY"), &http.Client{Timeout: 15 * time.Second})
+	if err != nil {
+		log.Fatalf("config: %v", err)
+	}
+	if soulLite != nil {
+		slog.Info("soullite integration on", "url", soulLite.BaseURL())
+	}
+
 	h := NewHandler(db, Config{
 		MusicDir:          musicDir,
 		FFmpegPath:        ffmpegPath,
@@ -126,7 +137,11 @@ func main() {
 		TranscodeCacheDir: envString("TRANSCODE_CACHE_DIR", "/cache/transcodes"),
 		TranscodeCacheMB:  envInt("TRANSCODE_CACHE_MB", 10240),
 		CoverCacheDir:     envString("COVER_CACHE_DIR", "/cache/covers"),
+		SoulLite:          soulLite,
 	})
+
+	// Send every playlist to SoulLite once per start (no-op when it is off).
+	go h.followAllInSoulLite(context.Background())
 
 	go func() {
 		ticker := time.NewTicker(1 * time.Hour)
