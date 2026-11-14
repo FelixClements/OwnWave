@@ -1,9 +1,11 @@
-// Package spotify reads public Spotify playlists from their embed page.
+// Package spotify reads public Spotify playlists without a Spotify login.
 //
 // Spotify's Web API refuses Spotify-owned (editorial) playlists to new apps,
 // but the public embed page carries the playlist's current tracks (up to
-// about 100) as JSON. That page is not a documented API: when its shape
-// changes, Parse returns an error instead of an empty playlist.
+// about 100) as JSON, plus an anonymous access token that reads the rest (see
+// fullread.go). Neither is a documented API: when the embed page's shape
+// changes, Parse returns an error instead of an empty playlist, and when the
+// full read fails, FetchPlaylist keeps the embed page's tracks (a partial read).
 package spotify
 
 import (
@@ -12,6 +14,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -27,11 +30,14 @@ type FetchError struct{ Err error }
 func (e *FetchError) Error() string { return e.Err.Error() }
 func (e *FetchError) Unwrap() error { return e.Err }
 
-// Playlist is the playlist as the embed page shows it right now.
+// Playlist is the playlist as Spotify shows it right now.
 type Playlist struct {
 	ID     string
 	Name   string
 	Tracks []Track
+	// Partial is true when only the embed page's tracks (about the first 100)
+	// could be read.
+	Partial bool
 	// CoverURL is the playlist's cover image on Spotify's image CDN, or ""
 	// when the page lists none (or one on a host CoverURL may not point to).
 	CoverURL string
@@ -65,16 +71,20 @@ func ParsePlaylistID(input string) (string, error) {
 	return s, nil
 }
 
-// Client fetches embed pages.
+// Client reads playlists. NewClient makes one that caches the playlist query
+// hash; a zero Client scrapes it on every read.
 type Client struct {
-	HTTP    *http.Client
-	BaseURL string // defaults to https://open.spotify.com
+	HTTP       *http.Client
+	BaseURL    string // defaults to https://open.spotify.com
+	PartnerURL string // defaults to https://api-partner.spotify.com
+	hashes     *queryHashCache
 	// imageURLOK replaces IsImageURL in tests, which serve images over http.
 	imageURLOK func(string) bool
 }
 
-// FetchPlaylist downloads and parses the embed page of a public playlist.
-// Failures are *FetchError.
+// FetchPlaylist reads every track of a public playlist: the embed page first,
+// then the full read with its token. When the full read fails, it returns the
+// embed page's tracks with Partial set. Failures are *FetchError.
 func (c Client) FetchPlaylist(ctx context.Context, id string) (Playlist, error) {
 	if !playlistIDPattern.MatchString(id) {
 		return Playlist{}, ErrInvalidURL
@@ -87,43 +97,56 @@ func (c Client) FetchPlaylist(ctx context.Context, id string) (Playlist, error) 
 }
 
 func (c Client) fetch(ctx context.Context, id string) (Playlist, error) {
-	base := c.BaseURL
-	if base == "" {
-		base = "https://open.spotify.com"
+	page, err := c.get(ctx, c.base()+"/embed/playlist/"+id, 8<<20, nil)
+	if err != nil {
+		return Playlist{}, fmt.Errorf("fetch playlist: %w", err)
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, base+"/embed/playlist/"+id, nil)
+	p, token, err := parseEmbed(page)
 	if err != nil {
 		return Playlist{}, err
 	}
-	req.Header.Set("User-Agent", "Mozilla/5.0 (compatible; OwnWave playlist sync)")
-	req.Header.Set("Accept-Language", "en")
-	resp, err := c.HTTP.Do(req)
-	if err != nil {
-		return Playlist{}, fmt.Errorf("fetch playlist: %w", err)
+	if token == "" {
+		err = errors.New("embed page has no access token")
+	} else {
+		var tracks []Track
+		if tracks, err = c.readAllTracks(ctx, id, token); err == nil {
+			p.Tracks = tracks
+			return p, nil
+		}
+		if ctx.Err() != nil {
+			return Playlist{}, ctx.Err()
+		}
 	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return Playlist{}, fmt.Errorf("fetch playlist: spotify answered %s", resp.Status)
-	}
-	page, err := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
-	if err != nil {
-		return Playlist{}, fmt.Errorf("fetch playlist: %w", err)
-	}
-	return Parse(page)
+	p.Partial = true
+	slog.Warn("spotify full playlist read failed, using the embed page's tracks (about the first 100)",
+		"playlist_id", id, "tracks", len(p.Tracks), "error", err)
+	return p, nil
 }
 
 var nextDataPattern = regexp.MustCompile(`(?s)<script id="__NEXT_DATA__"[^>]*>(.*?)</script>`)
 
 // Parse extracts the playlist from an embed page.
 func Parse(page []byte) (Playlist, error) {
+	p, _, err := parseEmbed(page)
+	return p, err
+}
+
+// parseEmbed extracts the playlist and the anonymous access token ("" when the
+// page has none) from an embed page.
+func parseEmbed(page []byte) (Playlist, string, error) {
 	m := nextDataPattern.FindSubmatch(page)
 	if m == nil {
-		return Playlist{}, errors.New("embed page has no playlist data (page format changed?)")
+		return Playlist{}, "", errors.New("embed page has no playlist data (page format changed?)")
 	}
 	var data struct {
 		Props struct {
 			PageProps struct {
 				State struct {
+					Settings struct {
+						Session struct {
+							AccessToken string `json:"accessToken"`
+						} `json:"session"`
+					} `json:"settings"`
 					Data struct {
 						Entity struct {
 							Type     string `json:"type"`
@@ -149,11 +172,11 @@ func Parse(page []byte) (Playlist, error) {
 		} `json:"props"`
 	}
 	if err := json.Unmarshal(m[1], &data); err != nil {
-		return Playlist{}, fmt.Errorf("embed page data: %w", err)
+		return Playlist{}, "", fmt.Errorf("embed page data: %w", err)
 	}
 	e := data.Props.PageProps.State.Data.Entity
 	if e.Type != "playlist" || e.ID == "" {
-		return Playlist{}, errors.New("embed page holds no playlist (page format changed?)")
+		return Playlist{}, "", errors.New("embed page holds no playlist (page format changed?)")
 	}
 
 	p := Playlist{ID: e.ID, Name: strings.TrimSpace(e.Name)}
@@ -180,9 +203,9 @@ func Parse(page []byte) (Playlist, error) {
 		})
 	}
 	if len(p.Tracks) == 0 {
-		return Playlist{}, errors.New("embed page lists no tracks (page format changed?)")
+		return Playlist{}, "", errors.New("embed page lists no tracks (page format changed?)")
 	}
-	return p, nil
+	return p, strings.TrimSpace(data.Props.PageProps.State.Settings.Session.AccessToken), nil
 }
 
 // splitArtists splits the embed subtitle "A, B" into names.
@@ -224,7 +247,7 @@ func (c Client) FetchImage(ctx context.Context, imageURL string) ([]byte, string
 	if err != nil {
 		return nil, "", err
 	}
-	req.Header.Set("User-Agent", "Mozilla/5.0 (compatible; OwnWave playlist sync)")
+	req.Header.Set("User-Agent", userAgent)
 	resp, err := c.HTTP.Do(req)
 	if err != nil {
 		return nil, "", fmt.Errorf("fetch cover: %w", err)
