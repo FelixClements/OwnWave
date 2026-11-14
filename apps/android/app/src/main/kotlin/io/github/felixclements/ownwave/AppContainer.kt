@@ -48,7 +48,8 @@ class AppContainer(context: Context) {
         )
         .build()
 
-    private val apis = ApiFactory(httpClient)
+    val apiFactory = ApiFactory(httpClient)
+    private val apis = apiFactory
 
     val accountRepository = AccountRepository(apis, allowHttp = BuildConfig.DEBUG)
     val deviceRepository = DeviceRepository(apis)
