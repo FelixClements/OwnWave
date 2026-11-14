@@ -1,6 +1,7 @@
 package io.github.felixclements.ownwave.data
 
 import io.github.felixclements.ownwave.api.models.FeedbackRequest
+import io.github.felixclements.ownwave.api.models.HideTrackRequest
 import io.github.felixclements.ownwave.api.models.QueueTrack
 import io.github.felixclements.ownwave.api.models.RecordPlayRequest
 import io.github.felixclements.ownwave.auth.Session
@@ -40,6 +41,11 @@ class PlaybackRepository(private val apis: ApiFactory) {
             UUID.fromString(trackId),
             FeedbackRequest(FeedbackRequest.Feedback.BAN),
         )
+    }.isSuccess
+
+    /** Takes a track off one station: its queue never has it again. Other stations still play it. */
+    suspend fun hide(session: Session, stationId: String, trackId: String): Boolean = call {
+        apis.forServer(session.server).stations.hideTrack(UUID.fromString(stationId), HideTrackRequest(trackId = trackId))
     }.isSuccess
 
     private inline fun <T : Any> call(block: () -> Response<T>): Result<T?> = try {
