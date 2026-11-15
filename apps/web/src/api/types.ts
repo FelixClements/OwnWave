@@ -54,7 +54,14 @@ type ScanJob = {
 export type ScanStatus = ScanJob & { stats: ScanCounts & { failed_paths: { path: string; error: string }[] } };
 export type ScanSummary = ScanJob & { stats: ScanCounts & { failed_files: number } };
 
-export type SetupStatus = { setup_completed: boolean; has_users: boolean; track_count?: number };
+export type SetupStatus = {
+  setup_completed: boolean;
+  has_users: boolean;
+  /** The first account needs the token from the server log or OWNWAVE_SETUP_TOKEN. */
+  setup_token_required?: boolean;
+  /** Only for an admin, until setup is completed. */
+  track_count?: number;
+};
 export type AdminHealth = Record<string, string>;
 export type GenreReport = {
   tracks: number;

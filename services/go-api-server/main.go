@@ -138,7 +138,9 @@ func main() {
 		TranscodeCacheMB:  envInt("TRANSCODE_CACHE_MB", 10240),
 		CoverCacheDir:     envString("COVER_CACHE_DIR", "/cache/covers"),
 		SoulLite:          soulLite,
+		SetupToken:        os.Getenv("OWNWAVE_SETUP_TOKEN"),
 	})
+	h.announceSetupTokenIfOpen(ctx)
 
 	// Send every playlist to SoulLite once per start (no-op when it is off).
 	go h.followAllInSoulLite(context.Background())

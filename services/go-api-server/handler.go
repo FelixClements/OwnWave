@@ -35,6 +35,7 @@ type Handler struct {
 	cookieSecure bool
 	logins       *loginThrottle   // nil: no per-username limit
 	soullite     *soullite.Client // nil: SoulLite integration off
+	setup        *setupToken
 }
 
 // Config holds the environment-derived settings for NewHandler.
@@ -51,6 +52,9 @@ type Config struct {
 	CoverCacheDir string
 	// SoulLite follows the Spotify playlists added here (nil = off).
 	SoulLite *soullite.Client
+	// SetupToken is the secret that creates the first (admin) account
+	// ("" = a random one for this run, written to the log).
+	SetupToken string
 }
 
 func NewHandler(pool *pgxpool.Pool, cfg Config) *Handler {
@@ -68,10 +72,11 @@ func NewHandler(pool *pgxpool.Pool, cfg Config) *Handler {
 	}
 	playlistService := playlists.NewService(pool, spotify.NewClient(&http.Client{Timeout: 20 * time.Second}))
 	stationService := stations.NewService(pool)
+	setup := newSetupToken(cfg.SetupToken)
 	return &Handler{
 		transcodes:   transcodes,
 		db:           NewDB(pool),
-		auth:         auth.NewService(pool),
+		auth:         auth.NewService(pool, auth.WithSetupToken(setup.value)),
 		playback:     playback.NewService(pool),
 		playlists:    playlistService,
 		stations:     stationService,
@@ -85,6 +90,7 @@ func NewHandler(pool *pgxpool.Pool, cfg Config) *Handler {
 		cookieSecure: auth.CookieSecure(),
 		logins:       newLoginThrottle(10, 15*time.Minute),
 		soullite:     cfg.SoulLite,
+		setup:        setup,
 	}
 }
 

@@ -84,7 +84,10 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Create an account (first user, or with an invite token) */
+        /**
+         * Create an account (first user with the setup token, or with an invite token)
+         * @description While no account exists, `setup_token` must match OWNWAVE_SETUP_TOKEN or the token the server wrote to its log at startup; that account becomes the admin. Afterwards `invite_token` is required and `setup_token` is ignored.
+         */
         post: operations["register"];
         delete?: never;
         options?: never;
@@ -220,7 +223,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Mark setup as done (admin, or anyone before the first user) */
+        /** Mark setup as done (admin) */
         post: operations["completeSetup"];
         delete?: never;
         options?: never;
@@ -235,7 +238,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Library summary shown at the end of setup */
+        /** Library summary shown at the end of setup (admin) */
         get: operations["getSetupSummary"];
         put?: never;
         post?: never;
@@ -1753,6 +1756,7 @@ export interface operations {
             content: {
                 "application/json": components["schemas"]["Credentials"] & {
                     invite_token?: string;
+                    setup_token?: string;
                 };
             };
         };

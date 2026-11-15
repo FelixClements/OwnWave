@@ -13,15 +13,19 @@ func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
 		Username    string `json:"username"`
 		Password    string `json:"password"`
 		InviteToken string `json:"invite_token"`
+		SetupToken  string `json:"setup_token"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "invalid request", http.StatusBadRequest)
 		return
 	}
 
-	token, user, err := h.auth.Register(r.Context(), req.Username, req.Password, req.InviteToken)
+	token, user, err := h.auth.Register(r.Context(), req.Username, req.Password, req.InviteToken, req.SetupToken)
 	if err != nil {
 		switch {
+		case errors.Is(err, auth.ErrInvalidSetupToken):
+			h.setup.announceOnce()
+			http.Error(w, "invalid setup token: find it in the server log, or use the OWNWAVE_SETUP_TOKEN value", http.StatusForbidden)
 		case errors.Is(err, auth.ErrUsernameTaken), errors.Is(err, auth.ErrRegistrationClosed), errors.Is(err, auth.ErrInvalidInvite), errors.Is(err, auth.ErrForbidden):
 			http.Error(w, "forbidden", http.StatusForbidden)
 		case errors.Is(err, auth.ErrWeakPassword), errors.Is(err, auth.ErrPasswordTooLong), errors.Is(err, auth.ErrInvalidUsername):

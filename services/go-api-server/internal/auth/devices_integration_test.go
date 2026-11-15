@@ -15,9 +15,9 @@ import (
 
 func TestDeviceTokensLoginListSlideAndRevoke(t *testing.T) {
 	pool := setupAuthDB(t)
-	svc := auth.NewService(pool)
+	svc := auth.NewService(pool, auth.WithSetupToken(testSetupToken))
 	ctx := context.Background()
-	_, _, err := svc.Register(ctx, "alice", "password123", "")
+	_, _, err := svc.Register(ctx, "alice", "password123", "", testSetupToken)
 	require.NoError(t, err)
 
 	_, _, _, err = svc.LoginDevice(ctx, "alice", "wrong-password", "Pixel")

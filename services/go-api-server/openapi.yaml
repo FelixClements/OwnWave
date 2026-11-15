@@ -96,7 +96,11 @@ paths:
     post:
       operationId: register
       tags: [auth]
-      summary: Create an account (first user, or with an invite token)
+      summary: Create an account (first user with the setup token, or with an invite token)
+      description: >-
+        While no account exists, `setup_token` must match OWNWAVE_SETUP_TOKEN or the
+        token the server wrote to its log at startup; that account becomes the admin.
+        Afterwards `invite_token` is required and `setup_token` is ignored.
       security: []
       requestBody:
         required: true
@@ -106,7 +110,7 @@ paths:
               allOf:
                 - $ref: "#/components/schemas/Credentials"
                 - type: object
-                  properties: { invite_token: { type: string } }
+                  properties: { invite_token: { type: string }, setup_token: { type: string } }
       responses:
         "200": { description: Registered and signed in, content: { application/json: { schema: { $ref: "#/components/schemas/AuthResponse" } } } }
         "400": { $ref: "#/components/responses/Error" }
@@ -192,14 +196,14 @@ paths:
     post:
       operationId: completeSetup
       tags: [auth]
-      summary: Mark setup as done (admin, or anyone before the first user)
+      summary: Mark setup as done (admin)
       responses:
         "200": { $ref: "#/components/responses/Object" }
   /api/setup/summary:
     get:
       operationId: getSetupSummary
       tags: [auth]
-      summary: Library summary shown at the end of setup
+      summary: Library summary shown at the end of setup (admin)
       responses:
         "200":
           description: Summary

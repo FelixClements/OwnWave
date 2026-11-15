@@ -103,6 +103,35 @@ describe('App', () => {
     expect(screen.getByRole('button', { name: 'Create admin account' })).toBeInTheDocument();
   });
 
+  it('sends the setup token with the first account', async () => {
+    let signed = false;
+    const calls = fakeApi({
+      'GET /api/setup/status': () => ({ setup_completed: false, has_users: signed, setup_token_required: !signed }),
+      'GET /api/me': () => {
+        if (!signed) throw 401;
+        return admin;
+      },
+      'POST /api/register': () => {
+        signed = true;
+        return { user: admin };
+      },
+      'GET /api/admin/scans': () => ({ jobs: [] }),
+    });
+    renderAt('/setup');
+    const user = userEvent.setup();
+    await user.type(await screen.findByLabelText(/^Setup token/), ' tok-from-log ');
+    await user.type(screen.getByLabelText('Username'), 'felix');
+    await user.type(screen.getByLabelText(/^Password/), 'password123');
+    await user.click(screen.getByRole('button', { name: 'Create admin account' }));
+    await waitFor(() => expect(calls.some((c) => c.path === '/api/register')).toBe(true));
+    expect(calls.find((c) => c.path === '/api/register')?.body).toEqual({
+      username: 'felix',
+      password: 'password123',
+      invite_token: '',
+      setup_token: 'tok-from-log',
+    });
+  });
+
   it('sends a signed-out visitor to login and logs in', async () => {
     let signed = false;
     const calls = fakeApi({

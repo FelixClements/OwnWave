@@ -34,6 +34,8 @@ ANALYTICS_API_SECRET=<openssl rand -hex 32>
 ALLOWED_ORIGINS=https://ownwave.example.com
 PUBLIC_APP_URL=https://ownwave.example.com
 MUSIC_PATH=/path/to/music
+# Optional: the setup token for the first account (empty = random, in the go log)
+OWNWAVE_SETUP_TOKEN=<openssl rand -hex 16>
 ```
 
 `POSTGRES_PASSWORD` and `ANALYTICS_API_SECRET` are required: `docker compose` refuses to start without them. The `go` and `python` services also refuse an `ANALYTICS_API_SECRET` shorter than 16 characters or equal to one of the old example values (`local-analytics-secret-change-me`, `replace-me-generate-analytics-secret-32ch`).
@@ -67,6 +69,21 @@ docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
 
 Caddy will automatically obtain and renew a TLS certificate for `OWNWAVE_DOMAIN` using Let's Encrypt.
 
+### First account
+
+Open `https://<OWNWAVE_DOMAIN>/setup` to create the admin account. The form asks for a **setup token**, so whoever reaches a fresh install first cannot take it over:
+
+- If `OWNWAVE_SETUP_TOKEN` is set, enter that value. Use at least 16 random characters (`openssl rand -hex 16`); `go` logs a warning for a shorter one.
+- Otherwise `go` makes a random token at each start and, while no account exists, writes it to its log:
+
+  ```bash
+  docker compose logs go | grep "SETUP TOKEN"
+  ```
+
+  A restart makes a new one. If the database is emptied while `go` runs, the token is logged again the first time the setup page loads.
+
+The token only works while no account exists. After that, new accounts need an invite (see below), and you can remove `OWNWAVE_SETUP_TOKEN`.
+
 ## Transcode cache
 
 Lower qualities (Opus 160/96/64 kbps, AAC 128 kbps) are transcoded once per track and kept in the `transcode_cache` volume, mounted at `/cache` in the `go` container. `TRANSCODE_CACHE_MB` (default 10240) caps its size; the least recently played files are deleted first. Deleting the volume only costs re-transcoding.
@@ -92,12 +109,12 @@ Prometheus metrics are available to authenticated admins at `/api/admin/metrics`
 - The music catalog is shared, and so are playlists and playlist stations (only admins change them). Personal stations, listening history, and likes/bans are scoped to the signed-in user.
 - The Go service reads Spotify playlists without a login (hourly check, daily sync per playlist), so it needs outbound HTTPS to `open.spotify.com`, `open.spotifycdn.com` and `api-partner.spotify.com`. It reads the `open.spotify.com/embed/playlist/…` page, then pages through every track with the web player's playlist query, the same way SoulLite does (ADR 0004). None of this is a documented API. If the full read fails, the sync keeps the embed page's tracks (about the first 100) and logs a warning; a failed sync is shown on the Playlists page and keeps the stored tracks.
 - Python analytics is an internal service. Go authenticates to it with `X-Internal-Token` (`ANALYTICS_API_SECRET`).
-- Registration is invite-only after the first admin account is created during setup.
+- The first account (the admin) needs the setup token from `OWNWAVE_SETUP_TOKEN` or the `go` log, compared in constant time; see [First account](#first-account). After that, registration is invite-only.
 - Admin maintenance endpoints require `is_admin`.
 - Go sets standard security headers (CSP, frame denial, nosniff, etc.) on every response, so they apply behind any reverse proxy. HSTS is added when the session cookie is Secure (see below). CSP still includes `'unsafe-inline'` for Next.js.
 - Go rejects state-changing requests (`POST`, `PUT`, `PATCH`, `DELETE`) that a browser sends from another origin, including sibling subdomains that `SameSite=Lax` cookies don't stop (Go's `http.CrossOriginProtection`, based on `Sec-Fetch-Site`/`Origin`). Origins in `ALLOWED_ORIGINS` are trusted. Clients that send neither header, such as the Android app and scripts with a bearer token, are not affected.
 - New usernames are trimmed and must be 1–32 ASCII letters, digits, `.`, `_` or `-`, starting with a letter or digit. Logins trim the username too. Profile email and full name are trimmed and length-checked.
-- `/api/setup/status` is public; it shows the library's track count only until the first account exists.
+- `/api/setup/status` is public. It shows whether accounts exist (`has_users`, `setup_token_required`); only an admin who has not completed setup sees the library's track count. `/api/setup/summary` and `/api/setup/complete` need an admin.
 
 ### Post-deploy verification checklist
 
@@ -113,7 +130,8 @@ curl -s -o /dev/null -w "%{http_code}" "$DOMAIN/api/stream/00000000-0000-0000-00
 # Should return 401 or 403
 curl -s -o /dev/null -w "%{http_code}" -X POST "$DOMAIN/api/admin/scan"
 
-# Open registration should be forbidden once setup has users
+# Registration without an invite (or, before the first account, without the
+# setup token) should be forbidden
 curl -s -o /dev/null -w "%{http_code}" -X POST "$DOMAIN/api/register" \
   -H 'Content-Type: application/json' \
   -d '{"username":"intruder","password":"password123"}'
