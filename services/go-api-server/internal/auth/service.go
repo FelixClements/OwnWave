@@ -20,19 +20,20 @@ import (
 )
 
 var (
-	ErrUsernameTaken      = errors.New("username taken")
-	ErrInvalidCredentials = errors.New("invalid credentials")
-	ErrUnauthorized       = errors.New("unauthorized")
-	ErrForbidden          = errors.New("forbidden")
-	ErrInvalidInvite      = errors.New("invalid invite")
-	ErrRegistrationClosed = errors.New("registration closed")
-	ErrInvalidSetupToken  = errors.New("invalid setup token")
-	ErrWeakPassword       = errors.New("password must be at least 8 characters")
-	ErrPasswordTooLong    = errors.New("password must be at most 72 bytes")
-	ErrInvalidUsername    = errors.New("username must be 1-32 characters: letters, digits, '.', '_' or '-', starting with a letter or digit")
-	ErrInvalidEmail       = errors.New("invalid email address")
-	ErrInvalidFullName    = errors.New("full name must be at most 100 characters without control characters")
-	ErrCannotDeleteSelf   = errors.New("cannot delete own account")
+	ErrUsernameTaken        = errors.New("username taken")
+	ErrInvalidCredentials   = errors.New("invalid credentials")
+	ErrUnauthorized         = errors.New("unauthorized")
+	ErrForbidden            = errors.New("forbidden")
+	ErrInvalidInvite        = errors.New("invalid invite")
+	ErrRegistrationClosed   = errors.New("registration closed")
+	ErrInvalidSetupToken    = errors.New("invalid setup token")
+	ErrWeakPassword         = errors.New("password must be at least 8 characters")
+	ErrPasswordTooLong      = errors.New("password must be at most 72 bytes")
+	ErrInvalidUsername      = errors.New("username must be 1-32 characters: letters, digits, '.', '_' or '-', starting with a letter or digit")
+	ErrInvalidEmail         = errors.New("invalid email address")
+	ErrInvalidFullName      = errors.New("full name must be at most 100 characters without control characters")
+	ErrCannotDeleteSelf     = errors.New("cannot delete own account")
+	ErrCannotChangeOwnAdmin = errors.New("cannot change own admin rights")
 )
 
 const (
@@ -362,6 +363,19 @@ func (s *Service) DeleteUser(ctx context.Context, actorID, targetID string) erro
 		return pgx.ErrNoRows
 	}
 	return nil
+}
+
+// SetAdmin grants or removes admin rights. Admins cannot change their own,
+// so at least one admin always remains.
+func (s *Service) SetAdmin(ctx context.Context, actorID, targetID string, isAdmin bool) (User, error) {
+	if actorID == targetID {
+		return User{}, ErrCannotChangeOwnAdmin
+	}
+	var u User
+	err := s.pool.QueryRow(ctx,
+		`UPDATE users SET is_admin = $2 WHERE id = $1::uuid RETURNING id::text, username, email, full_name, is_admin`,
+		targetID, isAdmin).Scan(&u.ID, &u.Username, &u.Email, &u.FullName, &u.IsAdmin)
+	return u, err
 }
 
 func (s *Service) Login(ctx context.Context, username, password string) (string, User, error) {

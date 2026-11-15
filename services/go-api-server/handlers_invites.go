@@ -118,3 +118,31 @@ func (h *Handler) DeleteUser(w http.ResponseWriter, r *http.Request) {
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
+
+func (h *Handler) SetUserAdmin(w http.ResponseWriter, r *http.Request) {
+	admin, _ := auth.UserFromContext(r.Context())
+	targetID, ok := parseUUIDParam(w, r, "id")
+	if !ok {
+		return
+	}
+	var req struct {
+		IsAdmin *bool `json:"is_admin"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.IsAdmin == nil {
+		http.Error(w, "is_admin is required", http.StatusBadRequest)
+		return
+	}
+	user, err := h.auth.SetAdmin(r.Context(), admin.ID, targetID, *req.IsAdmin)
+	if err != nil {
+		switch {
+		case errors.Is(err, pgx.ErrNoRows):
+			http.Error(w, "user not found", http.StatusNotFound)
+		case errors.Is(err, auth.ErrCannotChangeOwnAdmin):
+			http.Error(w, err.Error(), http.StatusBadRequest)
+		default:
+			writeInternalError(w, r, "set admin", err)
+		}
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{"user": user})
+}

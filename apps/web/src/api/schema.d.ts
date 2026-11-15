@@ -1203,7 +1203,8 @@ export interface paths {
             cookie?: never;
         };
         get?: never;
-        put?: never;
+        /** Grant or remove admin rights (not your own) */
+        put: operations["setUserAdmin"];
         post?: never;
         /** Delete a user */
         delete: operations["deleteUser"];
@@ -3246,6 +3247,38 @@ export interface operations {
             };
             400: components["responses"]["Error"];
             409: components["responses"]["Error"];
+        };
+    };
+    setUserAdmin: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["id"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    is_admin: boolean;
+                };
+            };
+        };
+        responses: {
+            /** @description Updated */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        user?: components["schemas"]["User"];
+                    };
+                };
+            };
+            400: components["responses"]["Error"];
+            404: components["responses"]["Error"];
         };
     };
     deleteUser: {

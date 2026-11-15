@@ -67,7 +67,7 @@ function Sidebar() {
         {NAV.map((n) => (
           <NavItem key={n.to} {...n} />
         ))}
-        {user?.is_admin && <NavItem to="/admin" label="Admin" icon={Shield} />}
+        {user?.is_admin && <NavItem to="/settings/overview" label="Admin" icon={Shield} />}
       </nav>
       <section className="flex min-h-0 flex-1 flex-col rounded-lg bg-panel" aria-label="Your stations">
         <div className="flex items-center justify-between px-5 pb-2 pt-4">
@@ -147,7 +147,7 @@ function UserMenu() {
             <Settings className="h-4 w-4" /> Settings
           </button>
           {user.is_admin && (
-            <button role="menuitem" type="button" className={item} onClick={() => (setOpen(false), navigate('/admin'))}>
+            <button role="menuitem" type="button" className={item} onClick={() => (setOpen(false), navigate('/settings/overview'))}>
               <Shield className="h-4 w-4" /> Admin
             </button>
           )}
@@ -183,7 +183,7 @@ function TopBar({ scrolled }: { scrolled: boolean }) {
 
 function MobileNav() {
   const { user } = useAuth();
-  const items = [...NAV, ...(user?.is_admin ? [{ to: '/admin', label: 'Admin', icon: Shield }] : [])];
+  const items = [...NAV, ...(user?.is_admin ? [{ to: '/settings/overview', label: 'Admin', icon: Shield }] : [])];
   return (
     <nav aria-label="Main" className="grid h-14 md:hidden" style={{ gridTemplateColumns: `repeat(${items.length}, minmax(0, 1fr))` }}>
       {items.map(({ to, label, icon: Icon, ...rest }) => (
