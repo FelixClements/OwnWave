@@ -8,7 +8,7 @@ type AuthValue = {
   user: User | null;
   loading: boolean;
   login: (username: string, password: string) => Promise<void>;
-  register: (username: string, password: string, inviteToken?: string) => Promise<void>;
+  register: (username: string, password: string, inviteToken?: string, setupToken?: string) => Promise<void>;
   logout: () => Promise<void>;
 };
 
@@ -48,8 +48,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       await call(api.POST('/api/login', { body: { username, password } }));
       await refresh();
     },
-    register: async (username, password, inviteToken) => {
-      await call(api.POST('/api/register', { body: { username, password, invite_token: inviteToken ?? '' } }));
+    register: async (username, password, inviteToken, setupToken) => {
+      await call(
+        api.POST('/api/register', { body: { username, password, invite_token: inviteToken ?? '', setup_token: setupToken ?? '' } }),
+      );
       await refresh();
     },
     logout: async () => {

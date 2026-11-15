@@ -62,6 +62,7 @@ function AccountStep({ onDone }: { onDone: () => void }) {
   const { register } = useAuth();
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
+  const [setupToken, setSetupToken] = useState('');
   const [error, setError] = useState<unknown>(null);
   const [busy, setBusy] = useState(false);
   return (
@@ -72,7 +73,7 @@ function AccountStep({ onDone }: { onDone: () => void }) {
         setBusy(true);
         setError(null);
         try {
-          await register(username.trim(), password);
+          await register(username.trim(), password, undefined, setupToken.trim());
           onDone();
         } catch (err) {
           setError(err);
@@ -82,7 +83,17 @@ function AccountStep({ onDone }: { onDone: () => void }) {
       }}
     >
       <p className="text-sm text-muted">The first account is the admin: it adds playlists and manages users.</p>
-      <Input label="Username" autoComplete="username" value={username} onChange={(e) => setUsername(e.target.value)} required autoFocus />
+      <Input
+        label="Setup token"
+        autoComplete="off"
+        spellCheck={false}
+        hint="Printed in the server log at startup (look for “SETUP TOKEN”), or the OWNWAVE_SETUP_TOKEN value if you set one."
+        value={setupToken}
+        onChange={(e) => setSetupToken(e.target.value)}
+        required
+        autoFocus
+      />
+      <Input label="Username" autoComplete="username" value={username} onChange={(e) => setUsername(e.target.value)} required />
       <Input label="Password" type="password" autoComplete="new-password" minLength={8} hint="At least 8 characters." value={password} onChange={(e) => setPassword(e.target.value)} required />
       <ErrorText error={error} />
       <Button type="submit" variant="primary" className="w-full" loading={busy}>

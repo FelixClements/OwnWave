@@ -16,14 +16,17 @@ import (
 	"ownwave/api/internal/testdb"
 )
 
+// testSetupToken stands in for OWNWAVE_SETUP_TOKEN.
+const testSetupToken = "test-setup-token-0123456789"
+
 func setupAuthDB(t *testing.T) *pgxpool.Pool { return testdb.NewPool(t) }
 
 func TestFirstUserIsAdminThenInviteOnly(t *testing.T) {
 	pool := setupAuthDB(t)
-	svc := auth.NewService(pool)
+	svc := auth.NewService(pool, auth.WithSetupToken(testSetupToken))
 	ctx := context.Background()
 
-	_, _, err := svc.Register(ctx, "alice", "password123", "")
+	_, _, err := svc.Register(ctx, "alice", "password123", "", testSetupToken)
 	require.NoError(t, err)
 
 	users, err := svc.ListUsers(ctx)
@@ -31,46 +34,79 @@ func TestFirstUserIsAdminThenInviteOnly(t *testing.T) {
 	require.Len(t, users, 1)
 	require.True(t, users[0].IsAdmin)
 
-	_, _, err = svc.Register(ctx, "bob", "password123", "")
+	// Once an account exists the setup token opens nothing.
+	_, _, err = svc.Register(ctx, "bob", "password123", "", testSetupToken)
 	require.ErrorIs(t, err, auth.ErrRegistrationClosed)
 
 	rawInvite, _, err := svc.CreateInvite(ctx, users[0].ID, nil, 24*time.Hour)
 	require.NoError(t, err)
 
-	_, invited, err := svc.Register(ctx, "bob", "password123", rawInvite)
+	_, invited, err := svc.Register(ctx, "bob", "password123", rawInvite, "")
 	require.NoError(t, err)
 	require.False(t, invited.IsAdmin)
 
-	_, _, err = svc.Register(ctx, "carol", "password123", rawInvite)
+	_, _, err = svc.Register(ctx, "carol", "password123", rawInvite, "")
 	require.ErrorIs(t, err, auth.ErrInvalidInvite)
 }
 
-func TestInviteUsernameMismatchDoesNotBurnInvite(t *testing.T) {
+func TestFirstAccountNeedsSetupToken(t *testing.T) {
+	pool := setupAuthDB(t)
+	svc := auth.NewService(pool, auth.WithSetupToken(testSetupToken))
+	ctx := context.Background()
+
+	for name, given := range map[string]string{"missing": "", "wrong": "not-the-token", "prefix": testSetupToken[:10]} {
+		_, _, err := svc.Register(ctx, "alice", "password123", "", given)
+		require.ErrorIs(t, err, auth.ErrInvalidSetupToken, name)
+	}
+	// An invite token is no substitute while no account exists.
+	_, _, err := svc.Register(ctx, "alice", "password123", testSetupToken, "")
+	require.ErrorIs(t, err, auth.ErrInvalidSetupToken)
+
+	users, err := svc.ListUsers(ctx)
+	require.NoError(t, err)
+	require.Empty(t, users)
+
+	// Surrounding whitespace from a copy-paste is ignored.
+	_, admin, err := svc.Register(ctx, "alice", "password123", "", " "+testSetupToken+"\n")
+	require.NoError(t, err)
+	require.True(t, admin.IsAdmin)
+}
+
+func TestFirstAccountWithoutConfiguredSetupTokenIsRefused(t *testing.T) {
 	pool := setupAuthDB(t)
 	svc := auth.NewService(pool)
 	ctx := context.Background()
 
-	_, admin, err := svc.Register(ctx, "alice", "password123", "")
+	_, _, err := svc.Register(ctx, "alice", "password123", "", "")
+	require.ErrorIs(t, err, auth.ErrInvalidSetupToken)
+}
+
+func TestInviteUsernameMismatchDoesNotBurnInvite(t *testing.T) {
+	pool := setupAuthDB(t)
+	svc := auth.NewService(pool, auth.WithSetupToken(testSetupToken))
+	ctx := context.Background()
+
+	_, admin, err := svc.Register(ctx, "alice", "password123", "", testSetupToken)
 	require.NoError(t, err)
 
 	preset := "bob"
 	rawInvite, _, err := svc.CreateInvite(ctx, admin.ID, &preset, 24*time.Hour)
 	require.NoError(t, err)
 
-	_, _, err = svc.Register(ctx, "not-bob", "password123", rawInvite)
+	_, _, err = svc.Register(ctx, "not-bob", "password123", rawInvite, "")
 	require.ErrorIs(t, err, auth.ErrInvalidInvite)
 
-	_, invited, err := svc.Register(ctx, "bob", "password123", rawInvite)
+	_, invited, err := svc.Register(ctx, "bob", "password123", rawInvite, "")
 	require.NoError(t, err)
 	require.Equal(t, "bob", invited.Username)
 }
 
 func TestChangePasswordRevokesOtherSessions(t *testing.T) {
 	pool := setupAuthDB(t)
-	svc := auth.NewService(pool)
+	svc := auth.NewService(pool, auth.WithSetupToken(testSetupToken))
 	ctx := context.Background()
 
-	token1, user, err := svc.Register(ctx, "alice", "password123", "")
+	token1, user, err := svc.Register(ctx, "alice", "password123", "", testSetupToken)
 	require.NoError(t, err)
 
 	token2, _, err := svc.Login(ctx, "alice", "password123")
@@ -94,10 +130,10 @@ func TestChangePasswordRevokesOtherSessions(t *testing.T) {
 
 func TestPurgeExpired(t *testing.T) {
 	pool := setupAuthDB(t)
-	svc := auth.NewService(pool)
+	svc := auth.NewService(pool, auth.WithSetupToken(testSetupToken))
 	ctx := context.Background()
 
-	_, admin, err := svc.Register(ctx, "alice", "password123", "")
+	_, admin, err := svc.Register(ctx, "alice", "password123", "", testSetupToken)
 	require.NoError(t, err)
 
 	// Insert expired session
@@ -132,14 +168,14 @@ func requestWithBearer(token string) *http.Request {
 
 func TestRequireAdminRejectsNonAdminSession(t *testing.T) {
 	pool := setupAuthDB(t)
-	svc := auth.NewService(pool)
+	svc := auth.NewService(pool, auth.WithSetupToken(testSetupToken))
 	ctx := context.Background()
 
-	adminToken, admin, err := svc.Register(ctx, "alice", "password123", "")
+	adminToken, admin, err := svc.Register(ctx, "alice", "password123", "", testSetupToken)
 	require.NoError(t, err)
 	invite, _, err := svc.CreateInvite(ctx, admin.ID, nil, time.Hour)
 	require.NoError(t, err)
-	userToken, _, err := svc.Register(ctx, "bob", "password123", invite)
+	userToken, _, err := svc.Register(ctx, "bob", "password123", invite, "")
 	require.NoError(t, err)
 
 	handler := svc.RequireAdmin(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

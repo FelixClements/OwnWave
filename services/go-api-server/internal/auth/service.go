@@ -2,6 +2,8 @@ package auth
 
 import (
 	"context"
+	"crypto/sha256"
+	"crypto/subtle"
 	"errors"
 	"net/http"
 	"net/mail"
@@ -24,6 +26,7 @@ var (
 	ErrForbidden          = errors.New("forbidden")
 	ErrInvalidInvite      = errors.New("invalid invite")
 	ErrRegistrationClosed = errors.New("registration closed")
+	ErrInvalidSetupToken  = errors.New("invalid setup token")
 	ErrWeakPassword       = errors.New("password must be at least 8 characters")
 	ErrPasswordTooLong    = errors.New("password must be at most 72 bytes")
 	ErrInvalidUsername    = errors.New("username must be 1-32 characters: letters, digits, '.', '_' or '-', starting with a letter or digit")
@@ -123,11 +126,37 @@ type querier interface {
 
 // Service handles session auth (opaque tokens stored hashed in Postgres).
 type Service struct {
-	pool *pgxpool.Pool
+	pool       *pgxpool.Pool
+	setupToken string
 }
 
-func NewService(pool *pgxpool.Pool) *Service {
-	return &Service{pool: pool}
+// Option configures a Service.
+type Option func(*Service)
+
+// WithSetupToken sets the secret that creating the first (admin) account
+// requires. Without it no first account can be created.
+func WithSetupToken(token string) Option {
+	return func(s *Service) { s.setupToken = strings.TrimSpace(token) }
+}
+
+func NewService(pool *pgxpool.Pool, opts ...Option) *Service {
+	s := &Service{pool: pool}
+	for _, opt := range opts {
+		opt(s)
+	}
+	return s
+}
+
+// setupTokenMatches compares the given setup token with the configured one
+// in constant time. Hashing first keeps the comparison independent of the
+// tokens' lengths. No configured token matches nothing.
+func (s *Service) setupTokenMatches(given string) bool {
+	if s.setupToken == "" {
+		return false
+	}
+	want := sha256.Sum256([]byte(s.setupToken))
+	got := sha256.Sum256([]byte(strings.TrimSpace(given)))
+	return subtle.ConstantTimeCompare(want[:], got[:]) == 1
 }
 
 func validateCredentials(username, password string) error {
@@ -147,7 +176,10 @@ func validatePassword(password string) error {
 	return nil
 }
 
-func (s *Service) Register(ctx context.Context, username, password, inviteToken string) (string, User, error) {
+// Register creates an account and signs it in. While no account exists, the
+// setup token is required and the account becomes the admin; afterwards an
+// invite token is required.
+func (s *Service) Register(ctx context.Context, username, password, inviteToken, setupToken string) (string, User, error) {
 	username = NormalizeUsername(username)
 	if err := validateCredentials(username, password); err != nil {
 		return "", User{}, err
@@ -172,6 +204,9 @@ func (s *Service) Register(ctx context.Context, username, password, inviteToken 
 	var user User
 	switch {
 	case count == 0:
+		if !s.setupTokenMatches(setupToken) {
+			return "", User{}, ErrInvalidSetupToken
+		}
 		token, user, err = s.registerUser(ctx, tx, username, password, true)
 	case inviteToken == "":
 		return "", User{}, ErrRegistrationClosed

@@ -71,3 +71,16 @@ func TestValidateCredentialsNormalizesBeforeCheck(t *testing.T) {
 	require.ErrorIs(t, validateCredentials("admin ", "password1"), ErrInvalidUsername)
 	require.NoError(t, validateCredentials(NormalizeUsername("admin "), "password1"))
 }
+
+func TestSetupTokenMatches(t *testing.T) {
+	svc := NewService(nil, WithSetupToken("  s3cret-setup-token  "))
+	require.True(t, svc.setupTokenMatches("s3cret-setup-token"))
+	require.True(t, svc.setupTokenMatches("s3cret-setup-token\n"))
+	require.False(t, svc.setupTokenMatches(""))
+	require.False(t, svc.setupTokenMatches("s3cret-setup-toke"))
+	require.False(t, svc.setupTokenMatches("s3cret-setup-token-x"))
+
+	unset := NewService(nil)
+	require.False(t, unset.setupTokenMatches(""))
+	require.False(t, unset.setupTokenMatches("anything"))
+}

@@ -22,15 +22,22 @@ func (h *Handler) SetupStatus(w http.ResponseWriter, r *http.Request) {
 	resp := map[string]interface{}{
 		"setup_completed": completed,
 		"has_users":       hasUsers > 0,
+		// The first account needs the setup token from the server log or
+		// OWNWAVE_SETUP_TOKEN.
+		"setup_token_required": hasUsers == 0,
+	}
+	if hasUsers == 0 {
+		// The database may have been emptied since startup.
+		h.setup.announceOnce()
 	}
 
-	// This endpoint is public. Disclose the track count only before the
-	// first account exists; once an admin is registered, setup_completed may
-	// still be false but anyone could otherwise read the library size.
-	if hasUsers == 0 && !completed {
-		trackCount, err := h.db.CountTracks(ctx)
-		if err == nil {
-			resp["track_count"] = trackCount
+	// This endpoint is public: only an admin finishing setup sees the
+	// library size.
+	if !completed {
+		if user, ok := h.auth.UserFromRequest(r); ok && user.IsAdmin {
+			if trackCount, err := h.db.CountTracks(ctx); err == nil {
+				resp["track_count"] = trackCount
+			}
 		}
 	}
 

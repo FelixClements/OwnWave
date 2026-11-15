@@ -1,26 +1,16 @@
 package main
 
 import (
-	"context"
 	"net/http"
 
 	"ownwave/api/internal/auth"
 )
 
-func (h *Handler) setupOpen(ctx context.Context) bool {
-	count, err := h.db.CountUsers(ctx)
-	if err != nil {
-		return false
-	}
-	return count == 0
-}
-
+// requireSetupAccess admits admins only. The steps after the first account
+// (scan, summary, completing setup) all run as that admin, so nothing here
+// is open before an account exists.
 func (h *Handler) requireSetupAccess(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if h.setupOpen(r.Context()) {
-			next.ServeHTTP(w, r)
-			return
-		}
 		user, ok := auth.UserFromContext(r.Context())
 		if !ok {
 			user, ok = h.auth.UserFromRequest(r)
