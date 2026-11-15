@@ -90,7 +90,7 @@ Prometheus metrics are available to authenticated admins at `/api/admin/metrics`
 - Library, station, history, feedback, and stream endpoints require that cookie (or `Authorization: Bearer` for scripts).
 - Stream URLs are cookie-gated (`/api/stream/{id}`). Unauthenticated requests return 401.
 - The music catalog is shared, and so are playlists and playlist stations (only admins change them). Personal stations, listening history, and likes/bans are scoped to the signed-in user.
-- The Go service fetches `open.spotify.com/embed/playlist/…` pages to sync playlists (hourly check, daily sync per playlist), so it needs outbound HTTPS. Spotify's embed page is not a documented API and shows at most about 100 tracks; a failed sync is shown on the Playlists page and keeps the stored tracks.
+- The Go service reads Spotify playlists without a login (hourly check, daily sync per playlist), so it needs outbound HTTPS to `open.spotify.com`, `open.spotifycdn.com` and `api-partner.spotify.com`. It reads the `open.spotify.com/embed/playlist/…` page, then pages through every track with the web player's playlist query, the same way SoulLite does (ADR 0004). None of this is a documented API. If the full read fails, the sync keeps the embed page's tracks (about the first 100) and logs a warning; a failed sync is shown on the Playlists page and keeps the stored tracks.
 - Python analytics is an internal service. Go authenticates to it with `X-Internal-Token` (`ANALYTICS_API_SECRET`).
 - Registration is invite-only after the first admin account is created during setup.
 - Admin maintenance endpoints require `is_admin`.

@@ -66,7 +66,7 @@ func NewHandler(pool *pgxpool.Pool, cfg Config) *Handler {
 			transcodes = nil
 		}
 	}
-	playlistService := playlists.NewService(pool, spotify.Client{HTTP: &http.Client{Timeout: 20 * time.Second}})
+	playlistService := playlists.NewService(pool, spotify.NewClient(&http.Client{Timeout: 20 * time.Second}))
 	stationService := stations.NewService(pool)
 	return &Handler{
 		transcodes:   transcodes,
