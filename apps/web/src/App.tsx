@@ -7,7 +7,6 @@ import { useSetupStatus } from '@/lib/queries';
 import { PlayerProvider } from '@/player/PlayerProvider';
 import { Shell } from '@/components/Shell';
 import { Spinner } from '@/components/ui';
-import { AdminPage } from '@/pages/Admin';
 import { GenrePage } from '@/pages/Genre';
 import { HomePage } from '@/pages/Home';
 import { InvitePage } from '@/pages/Invite';
@@ -72,12 +71,12 @@ export function AppRoutes() {
         <Route path="playlists" element={<PlaylistsPage />} />
         <Route path="playlist/:id" element={<PlaylistPage />} />
         <Route path="library" element={<LibraryPage />} />
-        <Route path="settings" element={<SettingsPage />} />
+        <Route path="settings/*" element={<SettingsPage />} />
         <Route
           path="admin"
           element={
             <RequireAdmin>
-              <AdminPage />
+              <Navigate to="/settings/overview" replace />
             </RequireAdmin>
           }
         />

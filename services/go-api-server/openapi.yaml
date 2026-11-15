@@ -1030,6 +1030,22 @@ paths:
       parameters: [{ $ref: "#/components/parameters/id" }]
       responses:
         "204": { description: Deleted }
+    put:
+      operationId: setUserAdmin
+      tags: [admin]
+      summary: Grant or remove admin rights (not your own)
+      parameters: [{ $ref: "#/components/parameters/id" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, required: [is_admin], properties: { is_admin: { type: boolean } } }
+      responses:
+        "200":
+          description: Updated
+          content: { application/json: { schema: { type: object, properties: { user: { $ref: "#/components/schemas/User" } } } } }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
   /api/admin/invites:
     post:
       operationId: createInvite

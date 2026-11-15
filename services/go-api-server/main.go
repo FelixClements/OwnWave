@@ -347,6 +347,7 @@ func newRouter(h *Handler, webDir string) http.Handler {
 			r.Get("/admin/users", h.ListUsers)
 			r.Post("/admin/users", h.CreateUser)
 			r.Delete("/admin/users/{id}", h.DeleteUser)
+			r.Put("/admin/users/{id}", h.SetUserAdmin)
 			r.Group(func(r chi.Router) {
 				r.Use(httprate.LimitByIP(10, time.Minute))
 				r.Post("/admin/invites", h.CreateInvite)

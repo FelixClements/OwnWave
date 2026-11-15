@@ -306,19 +306,22 @@ describe('App', () => {
     });
     renderAt('/admin');
     const user = userEvent.setup();
+    // /admin now opens the admin pages of settings
+    await user.click(await screen.findByRole('link', { name: 'Genre stations' }));
     expect(await screen.findByText('Needs 13 more tracks')).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Techno' })).toHaveAttribute('href', '/station/g1');
-    expect(await screen.findByText('3 tracks matched · Techno created')).toBeInTheDocument();
-    expect(screen.getByText('Genres scored', { selector: 'span' })).toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: 'Hide Techno' }));
     expect(await screen.findByText('Hidden by you')).toBeInTheDocument();
     expect(calls.find((c) => c.method === 'PUT' && c.path === '/api/admin/genre-stations/techno')?.body).toEqual({ excluded: true });
 
-    await user.click(screen.getByRole('checkbox', { name: 'A station for every main genre' }));
+    await user.click(screen.getByRole('switch', { name: 'A station for every main genre' }));
     await waitFor(() => expect(calls.find((c) => c.method === 'PUT' && c.path === '/api/admin/genre-stations')?.body).toEqual({ enabled: false }));
     expect(await screen.findAllByText('Off')).toHaveLength(2);
 
+    await user.click(screen.getByRole('link', { name: 'Station refresh' }));
+    expect(await screen.findByText('3 tracks matched · Techno created')).toBeInTheDocument();
+    expect(screen.getByText('Genres scored', { selector: 'span' })).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: /Refresh now/ }));
     await waitFor(() => expect(calls.some((c) => c.method === 'POST' && c.path === '/api/admin/pipeline/refresh')).toBe(true));
   });
@@ -445,7 +448,7 @@ describe('App', () => {
         return { corrections };
       },
     });
-    renderAt('/admin');
+    renderAt('/settings/genre-review');
     const user = userEvent.setup();
     expect(await screen.findByText('Hidden by 2 listeners')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Looks right' })).toBeInTheDocument();
@@ -512,6 +515,35 @@ describe('App', () => {
     expect(await screen.findByText('Importing folders: 4 of 10')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /Scan my library|Scan for changes/ })).not.toBeInTheDocument();
     expect(calls.some((c) => c.method === 'POST' && c.path === '/api/admin/scan')).toBe(false);
+  });
+
+  it('makes someone an admin from settings', async () => {
+    let users = [admin, { id: 'u2', username: 'sam', is_admin: false }];
+    const calls = signedIn({
+      'GET /api/admin/users': () => ({ users }),
+      'PUT /api/admin/users/{id}': (body) => {
+        users = users.map((u) => (u.id === 'u2' ? { ...u, ...(body as object) } : u));
+        return { user: users[1] };
+      },
+    });
+    renderAt('/settings/people');
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('button', { name: 'Make admin' }));
+    await waitFor(() => expect(calls.find((c) => c.method === 'PUT' && c.path === '/api/admin/users/u2')?.body).toEqual({ is_admin: true }));
+    expect(await screen.findByRole('button', { name: 'Remove admin' })).toBeInTheDocument();
+  });
+
+  it('shows a listener only their own settings', async () => {
+    signedIn({ 'GET /api/me': () => ({ ...admin, is_admin: false }) });
+    renderAt('/settings');
+    const user = userEvent.setup();
+    const loudness = await screen.findByRole('switch', { name: 'Even out loudness' });
+    expect(loudness).toHaveAttribute('aria-checked', 'true');
+    await user.click(loudness);
+    expect(JSON.parse(localStorage.getItem('ownwave.settings') ?? '{}').normalize).toBe(false);
+    const nav = screen.getByRole('navigation', { name: 'Settings' });
+    expect(within(nav).getByRole('link', { name: 'Password' })).toBeInTheDocument();
+    expect(within(nav).queryByRole('link', { name: 'People' })).not.toBeInTheDocument();
   });
 
   it('keeps non-admins out of admin', async () => {

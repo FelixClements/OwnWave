@@ -415,8 +415,8 @@ export function useUpdateGenreStation() {
   });
 }
 
-export const useGenreReview = () =>
-  useQuery({ queryKey: keys.genreReview, queryFn: () => call(api.GET('/api/admin/genre-review')).then((r) => r.items) });
+export const useGenreReview = (enabled = true) =>
+  useQuery({ queryKey: keys.genreReview, queryFn: () => call(api.GET('/api/admin/genre-review')).then((r) => r.items), enabled });
 
 export const useGenreCorrections = () =>
   useQuery({ queryKey: keys.genreCorrections, queryFn: () => call(api.GET('/api/admin/genre-corrections')).then((r) => r.corrections) });
@@ -454,5 +454,32 @@ export function useRefreshPipeline() {
       for (const key of [keys.pipeline, keys.genreStations, keys.stations, keys.suggestions, keys.playlists, ['browse']])
         void qc.invalidateQueries({ queryKey: key });
     },
+  });
+}
+
+// --- people and profile (settings) -------------------------------------
+
+export function useUpdateProfile() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: { full_name: string; email: string }) => call(api.PUT('/api/me/profile', { body })),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: keys.me }),
+  });
+}
+
+export function useSetAdmin() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, is_admin }: { id: string; is_admin: boolean }) =>
+      call(api.PUT('/api/admin/users/{id}', { params: { path: { id } }, body: { is_admin } })),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: keys.users }),
+  });
+}
+
+export function useDeleteUser() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => call(api.DELETE('/api/admin/users/{id}', { params: { path: { id } } })),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: keys.users }),
   });
 }
