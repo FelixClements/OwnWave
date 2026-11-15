@@ -306,6 +306,16 @@ class PlaybackService : MediaLibraryService() {
         maybeRefill()
     }
 
+    /** Takes the current track off its station on the server and skips it at once; sent once, not retried. */
+    private fun hide() {
+        val track = currentTrack() ?: return
+        val stationId = track.stationId ?: return
+        val s = session ?: return
+        scope.launch { container.playbackRepository.hide(s, stationId, track.trackId) }
+        player.removeMediaItem(player.currentMediaItemIndex)
+        maybeRefill()
+    }
+
     private fun publishLikeState() {
         val session = librarySession ?: return
         val trackId = currentTrack()?.trackId
@@ -411,6 +421,7 @@ class PlaybackService : MediaLibraryService() {
                         MediaSession.ConnectionResult.DEFAULT_SESSION_AND_LIBRARY_COMMANDS.buildUpon()
                             .add(Commands.LIKE)
                             .add(Commands.BAN)
+                            .add(Commands.HIDE)
                             .build(),
                     )
                     .build()
@@ -436,6 +447,7 @@ class PlaybackService : MediaLibraryService() {
             when (customCommand.customAction) {
                 Commands.ACTION_LIKE -> toggleLike()
                 Commands.ACTION_BAN -> ban()
+                Commands.ACTION_HIDE -> hide()
                 else -> return Futures.immediateFuture(SessionResult(SessionError.ERROR_NOT_SUPPORTED))
             }
             return Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))

@@ -1,18 +1,28 @@
 package io.github.felixclements.ownwave.data
 
+import io.github.felixclements.ownwave.api.apis.AdminApi
 import io.github.felixclements.ownwave.api.apis.AuthApi
+import io.github.felixclements.ownwave.api.apis.GenresApi
+import io.github.felixclements.ownwave.api.apis.LibraryApi
 import io.github.felixclements.ownwave.api.apis.PlaybackApi
+import io.github.felixclements.ownwave.api.apis.PlaylistsApi
 import io.github.felixclements.ownwave.api.apis.StationsApi
 import io.github.felixclements.ownwave.api.infrastructure.Serializer
+import io.github.felixclements.ownwave.api.models.CreateInviteRequest
 import io.github.felixclements.ownwave.api.models.FeedbackRequest
+import io.github.felixclements.ownwave.api.models.StartScanRequest
+import kotlinx.serialization.json.JsonElement
 import okhttp3.HttpUrl
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import retrofit2.Response
 import retrofit2.Retrofit
 import retrofit2.http.Body
+import retrofit2.http.GET
 import retrofit2.http.HTTP
+import retrofit2.http.POST
 import retrofit2.http.Path
+import retrofit2.http.Query
 import retrofit2.converter.kotlinx.serialization.asConverterFactory
 import retrofit2.converter.scalars.ScalarsConverterFactory
 import java.util.UUID
@@ -20,7 +30,17 @@ import java.util.UUID
 /** Builds the generated Retrofit APIs for one server, sharing the app's OkHttp client. */
 class ApiFactory(private val client: OkHttpClient) {
 
-    class Apis(val auth: AuthApi, val stations: StationsApi, val playback: PlaybackApi, val feedback: FeedbackApi)
+    class Apis(
+        val auth: AuthApi,
+        val stations: StationsApi,
+        val playback: PlaybackApi,
+        val feedback: FeedbackApi,
+        val library: LibraryApi,
+        val playlists: PlaylistsApi,
+        val genres: GenresApi,
+        val admin: AdminApi,
+        val untyped: UntypedApi,
+    )
 
     /**
      * Calls the generated client cannot make. Retrofit refuses `@Body` on `@DELETE`, so the generated
@@ -29,6 +49,30 @@ class ApiFactory(private val client: OkHttpClient) {
     interface FeedbackApi {
         @HTTP(method = "DELETE", path = "api/tracks/{id}/feedback", hasBody = true)
         suspend fun deleteFeedback(@Path("id") id: UUID, @Body feedbackRequest: FeedbackRequest): Response<Unit>
+    }
+
+    /**
+     * Endpoints the spec types as plain objects (the analytics service owns their shape). The generated
+     * client returns `Any` for them, which kotlinx.serialization cannot read; these return raw JSON.
+     */
+    interface UntypedApi {
+        @GET("api/admin/health")
+        suspend fun health(): Response<JsonElement>
+
+        @GET("api/admin/scans")
+        suspend fun scans(@Query("limit") limit: Int = 10): Response<JsonElement>
+
+        @POST("api/admin/scan")
+        suspend fun startScan(@Body body: StartScanRequest): Response<JsonElement>
+
+        @GET("api/admin/genres/report")
+        suspend fun genreReport(): Response<JsonElement>
+
+        @POST("api/admin/rebuild-genres")
+        suspend fun refreshGenres(): Response<JsonElement>
+
+        @POST("api/admin/invites")
+        suspend fun createInvite(@Body body: CreateInviteRequest): Response<JsonElement>
     }
 
     @Volatile private var cached: Pair<HttpUrl, Apis>? = null
@@ -46,6 +90,11 @@ class ApiFactory(private val client: OkHttpClient) {
             stations = retrofit.create(StationsApi::class.java),
             playback = retrofit.create(PlaybackApi::class.java),
             feedback = retrofit.create(FeedbackApi::class.java),
+            library = retrofit.create(LibraryApi::class.java),
+            playlists = retrofit.create(PlaylistsApi::class.java),
+            genres = retrofit.create(GenresApi::class.java),
+            admin = retrofit.create(AdminApi::class.java),
+            untyped = retrofit.create(UntypedApi::class.java),
         ).also { cached = server to it }
     }
 }

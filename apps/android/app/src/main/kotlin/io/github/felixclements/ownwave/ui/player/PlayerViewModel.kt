@@ -30,6 +30,9 @@ data class TrackUi(
     val title: String,
     val artist: String?,
     val artworkUri: Uri?,
+    val trackId: String? = null,
+    val album: String? = null,
+    val durationMs: Long? = null,
 )
 
 data class PlayerUiState(
@@ -43,6 +46,8 @@ data class PlayerUiState(
     val seekable: Boolean = false,
     val liked: Boolean = false,
     val upNext: List<TrackUi> = emptyList(),
+    /** The station playing (or loading), from the current item's media id. */
+    val stationId: String? = null,
 )
 
 /**
@@ -102,6 +107,11 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
         controller?.seekToNextMediaItem()
     }
 
+    /** Back to the start of the track, or to the one before when near its start. */
+    fun previous() {
+        controller?.seekToPrevious()
+    }
+
     fun seekTo(positionMs: Long) {
         controller?.seekTo(positionMs)
         _state.value = _state.value.copy(positionMs = positionMs)
@@ -115,10 +125,16 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
         controller?.sendCustomCommand(Commands.BAN, Bundle.EMPTY)
     }
 
+    /** "Not in this station": the server stops queueing the current track here, and it skips. */
+    fun hide() {
+        controller?.sendCustomCommand(Commands.HIDE, Bundle.EMPTY)
+    }
+
     private fun publish() {
         val c = controller ?: return
         val item = c.currentMediaItem
-        val trackId = item?.mediaId?.let(MediaIds::parseTrack)?.trackId
+        val ref = item?.mediaId?.let(MediaIds::parseTrack)
+        val trackId = ref?.trackId
         val extras = c.sessionExtras
         val index = c.currentMediaItemIndex
         _state.value = PlayerUiState(
@@ -130,6 +146,7 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
             seekable = c.isCurrentMediaItemSeekable && c.duration != C.TIME_UNSET,
             liked = trackId != null && extras.getString(Commands.EXTRA_TRACK_ID) == trackId &&
                 extras.getBoolean(Commands.EXTRA_LIKED),
+            stationId = ref?.stationId ?: item?.mediaId?.let(MediaIds::parseStation),
             upNext = (index + 1 until minOf(c.mediaItemCount, index + 1 + UP_NEXT_COUNT)).map { c.getMediaItemAt(it).toUi() },
         )
     }
@@ -139,6 +156,9 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
         title = mediaMetadata.title?.toString().orEmpty(),
         artist = mediaMetadata.artist?.toString(),
         artworkUri = mediaMetadata.artworkUri,
+        trackId = MediaIds.parseTrack(mediaId)?.trackId,
+        album = mediaMetadata.albumTitle?.toString(),
+        durationMs = mediaMetadata.durationMs,
     )
 
     override fun onCleared() {
@@ -148,6 +168,6 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
 
     private companion object {
         const val POSITION_POLL_MS = 500L
-        const val UP_NEXT_COUNT = 5
+        const val UP_NEXT_COUNT = 100
     }
 }
