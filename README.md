@@ -34,8 +34,10 @@ Requires Docker and a folder of audio files.
 cp .env.example .env
 # Edit .env with your MUSIC_PATH and secrets
 
-docker compose up --build -d
+docker compose pull   # public images from ghcr.io/felixclements/ownwave
+docker compose up -d
 # Once healthy, open http://localhost:8080
+# To build from source instead: just dev -d
 ```
 
 ## Development

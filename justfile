@@ -1,6 +1,10 @@
 # OwnWave command runner
 # Requires: `just` (https://just.systems) and `docker`
 
+# Recipes build the images from source (docker-compose.build.yml) instead of
+# pulling the published ones.
+export COMPOSE_FILE := "docker-compose.yml:docker-compose.build.yml"
+
 # Show available recipes by default
 default:
     @just --list

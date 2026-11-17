@@ -1,0 +1,18 @@
+# Builds the go and python images from source instead of pulling them from GHCR.
+# Development and CI only; deployments use docker-compose.yml alone.
+#   docker compose -f docker-compose.yml -f docker-compose.build.yml up --build
+# The justfile sets COMPOSE_FILE to include this file.
+services:
+  python:
+    build: &python-build
+      context: ./services/python-analytics
+      args:
+        DOWNLOAD_GENRE_MODELS: ${DOWNLOAD_GENRE_MODELS:-false}
+
+  worker:
+    build: *python-build
+
+  go:
+    build:
+      context: .
+      dockerfile: services/go-api-server/Dockerfile
