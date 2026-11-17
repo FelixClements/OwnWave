@@ -1,6 +1,7 @@
-# go and python images are published to GHCR by CI on every push to main.
-# Deploy with `docker compose pull && docker compose up -d`; `--build` builds
-# them from source instead. OWNWAVE_IMAGE_TAG pins a commit SHA (rollback).
+# Pull-only: the go and python images are published to GHCR (public) by CI on
+# every push to main. Deploy with `docker compose pull && docker compose up -d`.
+# OWNWAVE_IMAGE_TAG pins a commit SHA (rollback). To build from source, add
+# docker-compose.build.yml (see that file).
 #
 # Required (compose refuses to start without them; see .env.example):
 #   POSTGRES_PASSWORD, ANALYTICS_API_SECRET (generate: openssl rand -hex 32)
@@ -8,10 +9,6 @@
 # Shared by the python (API) and worker services (same image, same config).
 x-python: &python
   image: ghcr.io/felixclements/ownwave/python:${OWNWAVE_IMAGE_TAG:-latest}
-  build:
-    context: ./services/python-analytics
-    args:
-      DOWNLOAD_GENRE_MODELS: ${DOWNLOAD_GENRE_MODELS:-false}
   platform: linux/amd64
   restart: unless-stopped
   environment:
@@ -75,9 +72,6 @@ services:
   # API under /api plus the static web UI at /.
   go:
     image: ghcr.io/felixclements/ownwave/go:${OWNWAVE_IMAGE_TAG:-latest}
-    build:
-      context: .
-      dockerfile: services/go-api-server/Dockerfile
     restart: unless-stopped
     environment:
       DATABASE_URL: postgres://${POSTGRES_USER:-ownwave}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-ownwave}

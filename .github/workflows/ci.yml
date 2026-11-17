@@ -101,7 +101,30 @@ jobs:
           # Required by docker-compose.yml interpolation; build-only, never run.
           POSTGRES_PASSWORD: ci-build-only
           ANALYTICS_API_SECRET: ci-build-only-not-a-real-secret
-        run: docker compose build
+        run: docker compose -f docker-compose.yml -f docker-compose.build.yml build
+
+      # docker-compose.yml is what deployments run: it must only pull, and pull
+      # exactly the images the publish job pushes.
+      - name: Check docker-compose.yml pulls the published images
+        env:
+          POSTGRES_PASSWORD: ci-check-only
+          ANALYTICS_API_SECRET: ci-check-only-not-a-real-secret
+        run: |
+          config=$(docker compose -f docker-compose.yml config --format json)
+          built=$(jq -r '.services | to_entries[] | select(.value.build) | .key' <<<"$config" | paste -sd, -)
+          if [ -n "$built" ]; then
+            echo "::error::docker-compose.yml builds instead of pulling: $built (move build: to docker-compose.build.yml)"
+            exit 1
+          fi
+          repo="ghcr.io/${GITHUB_REPOSITORY,,}"
+          for svc in go:go python:python worker:python; do
+            want="$repo/${svc#*:}:latest"
+            got=$(jq -r --arg s "${svc%%:*}" '.services[$s].image' <<<"$config")
+            if [ "$got" != "$want" ]; then
+              echo "::error::${svc%%:*} pulls $got, but the publish job pushes $want"
+              exit 1
+            fi
+          done
 
   android:
     runs-on: ubuntu-latest
