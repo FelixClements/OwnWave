@@ -272,7 +272,7 @@ func TestBuildQueue_CopiesPlayAsOneSong(t *testing.T) {
 	f := newFixture(t)
 	best := f.addTrack(track{title: "Song", artist: "X", genres: []string{"techno"}})
 	other := f.addTrack(track{title: "Song (2011 Remaster)", artist: "X", genres: []string{"techno"}})
-	f.exec(`UPDATE tracks SET copy_of = $1::uuid WHERE id = $2::uuid`, best, other)
+	f.exec(`INSERT INTO track_copies (track_id, copy_of) VALUES ($1::uuid, $2::uuid)`, other, best)
 	station := f.scalar(`INSERT INTO stations (user_id, name, genres, auto_genre, auto_active)
 		VALUES (NULL, 'Techno', ARRAY['techno'], 'techno', TRUE) RETURNING id::text`)
 	def := stations.Definition{Library: true, Genres: []string{"techno"}}

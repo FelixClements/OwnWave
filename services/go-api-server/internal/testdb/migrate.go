@@ -11,6 +11,33 @@ import (
 )
 
 func RunMigrations(databaseURL, migrationsPath string) error {
+	m, err := newMigrate(databaseURL, migrationsPath)
+	if err != nil {
+		return err
+	}
+	defer m.Close()
+
+	if err := m.Up(); err != nil && !errors.Is(err, migrate.ErrNoChange) {
+		return fmt.Errorf("migrate up: %w", err)
+	}
+	return nil
+}
+
+// MigrateTo moves the database up or down to the given migration version.
+func MigrateTo(databaseURL, migrationsPath string, version uint) error {
+	m, err := newMigrate(databaseURL, migrationsPath)
+	if err != nil {
+		return err
+	}
+	defer m.Close()
+
+	if err := m.Migrate(version); err != nil && !errors.Is(err, migrate.ErrNoChange) {
+		return fmt.Errorf("migrate to %d: %w", version, err)
+	}
+	return nil
+}
+
+func newMigrate(databaseURL, migrationsPath string) (*migrate.Migrate, error) {
 	driverURL := databaseURL
 	if strings.HasPrefix(driverURL, "postgres://") {
 		driverURL = "pgx5" + driverURL[len("postgres"):]
@@ -19,15 +46,9 @@ func RunMigrations(databaseURL, migrationsPath string) error {
 		driverURL = "pgx5" + driverURL[len("postgresql"):]
 	}
 
-	src := "file://" + migrationsPath
-	m, err := migrate.New(src, driverURL)
+	m, err := migrate.New("file://"+migrationsPath, driverURL)
 	if err != nil {
-		return fmt.Errorf("migrate init: %w", err)
+		return nil, fmt.Errorf("migrate init: %w", err)
 	}
-	defer m.Close()
-
-	if err := m.Up(); err != nil && !errors.Is(err, migrate.ErrNoChange) {
-		return fmt.Errorf("migrate up: %w", err)
-	}
-	return nil
+	return m, nil
 }

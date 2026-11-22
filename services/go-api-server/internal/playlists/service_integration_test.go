@@ -360,7 +360,7 @@ func TestRebuildPicksFindsSimilarLibrarySongs(t *testing.T) {
 	require.NoError(t, pool.QueryRow(ctx, `SELECT id::text FROM tracks WHERE title = 'close'`).Scan(&close))
 	third := ""
 	require.NoError(t, pool.QueryRow(ctx, `SELECT id::text FROM tracks WHERE title = 'third'`).Scan(&third))
-	exec(`UPDATE tracks SET copy_of = $1::uuid WHERE id = $2::uuid`, close, third)
+	exec(`INSERT INTO track_copies (track_id, copy_of) VALUES ($1::uuid, $2::uuid)`, third, close)
 	_, err = svc.RebuildPicks(ctx, true)
 	require.NoError(t, err)
 	require.Equal(t, []string{"close"}, picked())
