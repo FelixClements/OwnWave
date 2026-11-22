@@ -113,8 +113,8 @@ the fresh row and moves its path, size and mtime onto the old row. An
 ambiguous pair, such as two copies of one file, is not matched, and the
 vanished track is deleted as before.
 
-Any change to scans keeps this contract. #116 relies on it: prune still sees
-the full listing.
+Any change to scans keeps this contract. ADR 0006 (#116, incremental scans)
+relies on it: prune still sees the full listing.
 
 ## Rules the code broke
 
@@ -137,8 +137,9 @@ Tables and columns that approved tickets will add, with their owner:
 | `track_analysis_failures` | Python | #119 |
 | `scan_jobs.rerun_requested` | Python (a column of a Python table) | #120 |
 
-ADR 0006 (#117, incremental library scans) relies on the last two being
-Python's.
+ADR 0006 (`0006-incremental-scans.md`, #117) adds both and relies on them
+being Python's. When a ticket lands, its row leaves this table, and
+`track_analysis_failures` joins the Python table above.
 
 ## Consequences
 
