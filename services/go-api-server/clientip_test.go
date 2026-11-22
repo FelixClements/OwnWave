@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"ownwave/api/internal/auth"
+	"ownwave/api/internal/analytics"
 )
 
 func TestResolveClientIP(t *testing.T) {
@@ -64,7 +64,7 @@ func TestLoadTrustedProxies(t *testing.T) {
 }
 
 func TestRouterRateLimitIgnoresSpoofedHeaders(t *testing.T) {
-	r := newRouter(&Handler{auth: auth.NewService(nil)}, t.TempDir())
+	r := newRouter(newTestHandler(analytics.NewStub()), t.TempDir())
 	limited := false
 	for i := 0; i < 12; i++ {
 		req := httptest.NewRequest(http.MethodPost, "/api/login", strings.NewReader(`{}`))

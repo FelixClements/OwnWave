@@ -168,11 +168,7 @@ func (h *Handler) AdminDeleteGenreCorrection(w http.ResponseWriter, r *http.Requ
 // rescoreAndListCorrections queues genre scoring, which applies corrections.
 // The change is saved either way, so a client can retry when queueing fails.
 func (h *Handler) rescoreAndListCorrections(w http.ResponseWriter, r *http.Request) {
-	resp, err := h.analytics.RebuildGenres(r.Context())
-	if err == nil && resp.StatusCode >= http.StatusBadRequest {
-		err = fmt.Errorf("analytics answered %d", resp.StatusCode)
-	}
-	if err != nil {
+	if err := h.analytics.RebuildGenres(r.Context()); err != nil {
 		writeInternalError(w, r, "queue genre scoring", err)
 		return
 	}

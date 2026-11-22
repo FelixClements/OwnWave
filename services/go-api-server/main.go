@@ -258,7 +258,7 @@ func newRouter(h *Handler, webDir string) http.Handler {
 		r.Group(func(r chi.Router) {
 			r.Use(h.requireSetupAccess)
 			r.Post("/setup/complete", h.SetupComplete)
-			r.Get("/setup/summary", h.SetupSummary)
+			h.mountAnalytics(r, analytics.SetupAccess)
 		})
 
 		r.Group(func(r chi.Router) {
@@ -295,8 +295,7 @@ func newRouter(h *Handler, webDir string) http.Handler {
 			r.Delete("/tracks/{id}/feedback", h.DeleteFeedback)
 			r.Get("/history", h.ListHistory)
 			r.Get("/feedback", h.ListFeedback)
-			r.Get("/genres", h.ListGenres)
-			r.Get("/tracks/{id}/genres", h.GetTrackGenres)
+			h.mountAnalytics(r, analytics.AnyUser)
 
 			r.Get("/playlists", h.ListPlaylists)
 			r.Get("/playlists/{id}", h.GetPlaylist)
@@ -317,9 +316,7 @@ func newRouter(h *Handler, webDir string) http.Handler {
 
 		r.Group(func(r chi.Router) {
 			r.Use(h.auth.RequireAdmin)
-			r.Post("/admin/scan", h.TriggerScan)
-			r.Get("/admin/scan/{id}", h.ScanStatus)
-			r.Get("/admin/scans", h.ListScans)
+			h.mountAnalytics(r, analytics.AdminOnly)
 			r.Get("/admin/health", h.AdminHealth)
 			r.Get("/admin/stations", h.AdminStations)
 			r.Get("/admin/station-suggestions", h.ListStationSuggestions)
@@ -333,9 +330,6 @@ func newRouter(h *Handler, webDir string) http.Handler {
 			r.Get("/admin/pipeline", h.AdminPipeline)
 			r.Post("/admin/pipeline/refresh", h.AdminRefreshPipeline)
 			r.Post("/admin/station-suggestions/dismiss", h.DismissStationSuggestion)
-			r.Post("/admin/rebuild-analysis", h.AdminRebuildAnalysis)
-			r.Post("/admin/rebuild-genres", h.AdminRebuildGenres)
-			r.Get("/admin/genres/report", h.AdminGenreReport)
 			r.Post("/admin/playlists", h.AddPlaylist)
 			r.Post("/admin/playlists/{id}/sync", h.SyncPlaylist)
 			r.Delete("/admin/playlists/{id}", h.DeletePlaylist)

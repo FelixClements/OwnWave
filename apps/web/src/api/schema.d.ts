@@ -752,7 +752,11 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Start a library scan */
+        /**
+         * Start a library scan
+         * @description Without `path`, the analytics service scans its own MUSIC_DIR. SoulLite
+         *     calls this after each sync (ADR 0003).
+         */
         post: operations["startScan"];
         delete?: never;
         options?: never;
@@ -1930,7 +1934,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
-                        total_tracks?: number;
+                        total_tracks: number;
                     };
                 };
             };
@@ -2165,8 +2169,8 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
-                        track_id?: string;
-                        genres?: {
+                        track_id: string;
+                        genres: {
                             genre: string;
                             /** Format: double */
                             score: number;
@@ -2678,7 +2682,18 @@ export interface operations {
             };
         };
         responses: {
-            200: components["responses"]["Object"];
+            /** @description Scan queued */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        job_id: string;
+                        status: string;
+                    };
+                };
+            };
         };
     };
     getScan: {
@@ -2974,7 +2989,18 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            200: components["responses"]["Object"];
+            /** @description Queued task */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        task_id: string;
+                        status: string;
+                    };
+                };
+            };
         };
     };
     refreshGenres: {
@@ -2986,7 +3012,17 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            200: components["responses"]["Object"];
+            /** @description Queued */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        status: string;
+                    };
+                };
+            };
         };
     };
     getGenreReport: {

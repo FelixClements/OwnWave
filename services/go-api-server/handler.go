@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"ownwave/api/internal/analytics"
@@ -34,7 +35,7 @@ type Handler struct {
 	transcodes   *streaming.Cache // nil: transcode live, uncached
 	coverCache   *streaming.CoverCache
 	analytics    analytics.Client
-	musicDir     string
+	analyticsAPI *analytics.Proxy // pass-through routes, see analytics.Routes
 	ffmpegPath   string
 	cookieSecure bool
 	logins       *loginThrottle   // nil: no per-username limit
@@ -92,7 +93,7 @@ func NewHandler(pool *pgxpool.Pool, cfg Config) *Handler {
 		stream:       streaming.New(streaming.Config{MusicDir: cfg.MusicDir, FFmpegPath: cfg.FFmpegPath}),
 		coverCache:   streaming.NewCoverCache(cfg.CoverCacheDir, 1000, 4),
 		analytics:    analytics.NewHTTPClient(cfg.PythonURL),
-		musicDir:     cfg.MusicDir,
+		analyticsAPI: newAnalyticsProxy(cfg.PythonURL),
 		ffmpegPath:   cfg.FFmpegPath,
 		cookieSecure: auth.CookieSecure(),
 		logins:       newLoginThrottle(10, 15*time.Minute),
@@ -110,12 +111,18 @@ func (h *Handler) currentUser(w http.ResponseWriter, r *http.Request) (auth.User
 	return user, true
 }
 
-func proxyAnalytics(w http.ResponseWriter, r *http.Request, resp *analytics.Response, err error) {
-	if err != nil {
+func newAnalyticsProxy(pythonURL string) *analytics.Proxy {
+	return analytics.NewProxy(pythonURL, func(w http.ResponseWriter, r *http.Request, err error) {
 		writeInternalError(w, r, "analytics proxy", err)
-		return
+	})
+}
+
+// mountAnalytics registers the pass-through analytics routes behind one guard.
+// The caller's group applies that guard.
+func (h *Handler) mountAnalytics(r chi.Router, access analytics.Access) {
+	for _, rt := range analytics.RoutesFor(access) {
+		r.Method(rt.Method, rt.Public, h.analyticsAPI.Handler(rt))
 	}
-	resp.WriteJSON(w)
 }
 
 func (h *Handler) Health(w http.ResponseWriter, r *http.Request) {

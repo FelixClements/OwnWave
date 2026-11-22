@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -19,7 +20,11 @@ import (
 // newTestHandler builds a Handler without a database; only use it for paths
 // that fail validation or proxy to the analytics stub before touching the DB.
 func newTestHandler(stub *analytics.Stub) *Handler {
-	return &Handler{auth: auth.NewService(nil), analytics: stub}
+	return &Handler{
+		auth:         auth.NewService(nil),
+		analytics:    stub,
+		analyticsAPI: newAnalyticsProxy("http://analytics.invalid"),
+	}
 }
 
 func TestRegisterRejectsInvalidPasswords(t *testing.T) {
@@ -63,15 +68,46 @@ func TestInviteURL(t *testing.T) {
 	}
 }
 
+// pythonStub stands in for the analytics service and records the last request.
+func pythonStub(t *testing.T, status int, body string) (*httptest.Server, *string) {
+	t.Helper()
+	var got string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got = r.Method + " " + r.URL.RequestURI()
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(status)
+		_, _ = w.Write([]byte(body))
+	}))
+	t.Cleanup(srv.Close)
+	return srv, &got
+}
+
+// analyticsRouter serves the pass-through routes behind one guard, without
+// the guard itself.
+func analyticsRouter(h *Handler, access analytics.Access) http.Handler {
+	r := chi.NewRouter()
+	h.mountAnalytics(r, access)
+	return r
+}
+
 func TestProxyAnalyticsForwardsUpstreamStatus(t *testing.T) {
-	stub := analytics.NewStub()
-	stub.Responses["ListGenres"] = &analytics.Response{StatusCode: http.StatusServiceUnavailable, Body: []byte(`{"detail":"down"}`)}
-	h := newTestHandler(stub)
+	py, _ := pythonStub(t, http.StatusServiceUnavailable, `{"detail":"down"}`)
+	h := newTestHandler(analytics.NewStub())
+	h.analyticsAPI = newAnalyticsProxy(py.URL)
 
 	rec := httptest.NewRecorder()
-	h.ListGenres(rec, httptest.NewRequest(http.MethodGet, "/genres", nil))
+	analyticsRouter(h, analytics.AnyUser).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/genres", nil))
 	require.Equal(t, http.StatusServiceUnavailable, rec.Code)
 	require.JSONEq(t, `{"detail":"down"}`, rec.Body.String())
+}
+
+func TestProxyAnalyticsAnswers500WhenPythonIsDown(t *testing.T) {
+	h := newTestHandler(analytics.NewStub())
+	h.analyticsAPI = newAnalyticsProxy("http://127.0.0.1:1")
+
+	rec := httptest.NewRecorder()
+	analyticsRouter(h, analytics.SetupAccess).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/setup/summary", nil))
+	require.Equal(t, http.StatusInternalServerError, rec.Code)
 }
 
 func TestMetricsUseRoutePattern(t *testing.T) {
@@ -121,33 +157,46 @@ func TestFeedbackOnlyAcceptsLikeAndBan(t *testing.T) {
 	}
 }
 
-func TestListScansValidatesLimit(t *testing.T) {
-	stub := analytics.NewStub()
-	h := newTestHandler(stub)
+// TestListScansPassesLimit: Python owns the 1-50 limit (FastAPI answers 422
+// outside it); Go forwards the query unchanged.
+func TestListScansPassesLimit(t *testing.T) {
+	py, got := pythonStub(t, http.StatusOK, `{"jobs":[]}`)
+	h := newTestHandler(analytics.NewStub())
+	h.analyticsAPI = newAnalyticsProxy(py.URL)
+	router := analyticsRouter(h, analytics.AdminOnly)
 
-	for _, tc := range []struct {
-		query    string
-		wantCode int
-		wantCall string
-	}{
-		{"", http.StatusOK, "ListJobs:10"},
-		{"?limit=25", http.StatusOK, "ListJobs:25"},
-		{"?limit=0", http.StatusBadRequest, ""},
-		{"?limit=51", http.StatusBadRequest, ""},
-		{"?limit=abc", http.StatusBadRequest, ""},
-	} {
-		t.Run(tc.query, func(t *testing.T) {
-			stub.Calls = nil
-			rec := httptest.NewRecorder()
-			h.ListScans(rec, httptest.NewRequest(http.MethodGet, "/admin/scans"+tc.query, nil))
-			require.Equal(t, tc.wantCode, rec.Code)
-			if tc.wantCall == "" {
-				require.Empty(t, stub.Calls)
-			} else {
-				require.Equal(t, []string{tc.wantCall}, stub.Calls)
-			}
-		})
+	for query, want := range map[string]string{"": "GET /jobs", "?limit=25": "GET /jobs?limit=25"} {
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/admin/scans"+query, nil))
+		require.Equal(t, http.StatusOK, rec.Code)
+		require.Equal(t, want, *got)
 	}
+}
+
+// TestTriggerScanPassesForce: Python scans its own MUSIC_DIR when no path is
+// given, so Go forwards the body as it came (SoulLite posts here, ADR 0003).
+func TestTriggerScanPassesForce(t *testing.T) {
+	var body, contentType string
+	py := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		body, contentType = string(b), r.Header.Get("Content-Type")
+		_, _ = w.Write([]byte(`{"job_id":"j","status":"queued"}`))
+	}))
+	t.Cleanup(py.Close)
+	h := newTestHandler(analytics.NewStub())
+	h.analyticsAPI = newAnalyticsProxy(py.URL)
+	router := analyticsRouter(h, analytics.AdminOnly)
+
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/admin/scan", strings.NewReader(`{"force":true}`)))
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.JSONEq(t, `{"force":true}`, body)
+	require.Equal(t, "application/json", contentType)
+
+	rec = httptest.NewRecorder()
+	router.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/admin/scan", nil))
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Empty(t, body)
 }
 
 func TestStreamRejectsUnknownQuality(t *testing.T) {

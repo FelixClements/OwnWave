@@ -63,7 +63,3 @@ func (h *Handler) SetupComplete(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, map[string]interface{}{"setup_completed": true})
 }
-func (h *Handler) SetupSummary(w http.ResponseWriter, r *http.Request) {
-	resp, err := h.analytics.SetupSummary(r.Context())
-	proxyAnalytics(w, r, resp, err)
-}
