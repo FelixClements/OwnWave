@@ -52,7 +52,7 @@ func (t *setupToken) announceOnce() {
 
 // announceSetupTokenIfOpen announces the setup token when no account exists.
 func (h *Handler) announceSetupTokenIfOpen(ctx context.Context) {
-	count, err := h.db.CountUsers(ctx)
+	count, err := h.auth.CountUsers(ctx)
 	if err != nil {
 		slog.Error("setup token: count users", "error", err)
 		return

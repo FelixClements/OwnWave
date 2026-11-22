@@ -56,13 +56,13 @@ Python).
 | `users` | `internal/auth/service.go` |
 | `sessions` | `internal/auth/service.go` |
 | `user_invites` | `internal/auth/service.go` |
-| `listening_history` | `internal/playback/service.go` |
-| `track_feedback` | `db.go` |
+| `listening_history` | `internal/listening/service.go` |
+| `track_feedback` | `internal/listening/service.go` |
 | `stations` | `internal/stations/service.go`, `internal/stations/genre_stations.go` |
 | `station_playlists` | `internal/stations/service.go` |
 | `station_suggestion_dismissals` | `internal/stations/service.go` |
 | `station_refresh_runs` | the genre-station refresh |
-| `station_hidden_tracks` | `internal/stations/hidden.go` |
+| `station_hidden_tracks` | `internal/listening/service.go` |
 | `genre_corrections` | `internal/stations/genre_corrections.go` |
 | `playlists` | `internal/playlists/service.go`, `internal/playlists/picks.go` |
 | `playlist_items` | `internal/playlists/service.go` |
@@ -75,12 +75,15 @@ Python).
 
 | Key | Writer | Written in | Read by |
 | --- | --- | --- | --- |
-| `setup_completed` | Go | `handlers_setup.go`, through `SetAppState` in `db.go` | Go |
+| `setup_completed` | Go | `handlers_setup.go`, through `settings.Service.Set` in `internal/settings` | Go |
 | `auto_stations` | Go | `SetGenreStationsEnabled` in `internal/stations/genre_stations.go` | Go |
 | `genres_scored` | Python | `score_genres` in `tasks.py` | Go (`internal/pipeline/pipeline.go`) |
 
-`SetAppState` writes any key it is given, but today only `setup_completed`
-goes through it. A new key gets a row in this table.
+`settings.Service.Set` writes any key it is given, but today only
+`setup_completed` goes through it. Every key is a `settings.Key` constant in
+`internal/settings/settings.go` (Python's `genres_scored` is also
+`GENRES_SCORED_KEY` in `tasks.py`). A new key gets a constant there and a row
+in this table. (Paths updated by #114, which split the root `db.go`.)
 
 ### Dropped tables: no owner
 

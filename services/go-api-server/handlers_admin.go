@@ -54,7 +54,7 @@ func (h *Handler) AdminHealth(w http.ResponseWriter, r *http.Request) {
 		"python":  "unknown",
 		"version": "ok",
 	}
-	if err := h.db.pool.Ping(r.Context()); err != nil {
+	if err := h.db.Ping(r.Context()); err != nil {
 		status["db"] = "error: " + err.Error()
 	}
 	resp, err := h.analytics.Health(r.Context())
@@ -87,7 +87,7 @@ func (h *Handler) AdminStations(w http.ResponseWriter, r *http.Request) {
 	out := make([]stationStatus, 0, len(list))
 	for _, st := range list {
 		status := stationStatus{Station: st}
-		if status.PlayedCount, err = h.db.PlayedCount(r.Context(), user.ID, st.ID); err != nil {
+		if status.PlayedCount, err = h.listening.PlayedCount(r.Context(), user.ID, st.ID); err != nil {
 			writeInternalError(w, r, "admin stations played", err)
 			return
 		}

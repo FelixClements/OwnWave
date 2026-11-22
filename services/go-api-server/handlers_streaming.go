@@ -33,7 +33,7 @@ func (h *Handler) StreamTrack(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	track, err := h.db.GetTrackByID(r.Context(), trackID)
+	track, err := h.library.GetTrackByID(r.Context(), trackID)
 	if err != nil {
 		http.Error(w, "track not found", http.StatusNotFound)
 		return

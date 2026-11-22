@@ -1,6 +1,6 @@
 //go:build integration
 
-package playback_test
+package listening_test
 
 import (
 	"context"
@@ -12,8 +12,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"ownwave/api/internal/playback"
-	"ownwave/api/internal/testdb"
+	"ownwave/api/internal/listening"
+	"ownwave/api/internal/testutil/testdb"
 )
 
 type fixture struct {
@@ -56,7 +56,7 @@ func TestRecord_WritesHistoryAndChecksStationOwner(t *testing.T) {
 	f := newFixture(t)
 	trackID := f.addTrack("History")
 	station := f.scalar(`INSERT INTO stations (user_id, name) VALUES ($1::uuid, 'Mine') RETURNING id::text`, f.user)
-	svc := playback.NewService(f.pool)
+	svc := listening.NewService(f.pool)
 
 	require.NoError(t, svc.Record(f.ctx, f.user, trackID, ""))
 	require.NoError(t, svc.Record(f.ctx, f.user, trackID, station))

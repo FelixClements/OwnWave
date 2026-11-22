@@ -17,6 +17,7 @@ import (
 
 	"ownwave/api/internal/analytics"
 	"ownwave/api/internal/auth"
+	"ownwave/api/internal/listening"
 	"ownwave/api/internal/pipeline"
 	"ownwave/api/internal/playlists"
 	"ownwave/api/internal/spotify"
@@ -41,8 +42,8 @@ func (f *fakeSpotify) FetchImage(context.Context, string) ([]byte, string, error
 
 // withSpotify makes the handler sync playlists from fake.
 func (f *stationsFixture) withSpotify(fake *fakeSpotify) {
-	f.h.playlists = playlists.NewService(f.h.db.pool, fake)
-	f.h.pipeline = pipeline.New(f.h.db.pool, f.h.playlists, f.h.stations)
+	f.h.playlists = playlists.NewService(f.pool, fake)
+	f.h.pipeline = pipeline.New(f.pool, f.h.playlists, f.h.stations)
 }
 
 func (f *stationsFixture) refresh() []stations.Change {
@@ -165,7 +166,7 @@ func TestGenreStationsPlayTheWholeLibraryByMainGenre(t *testing.T) {
 	require.Equal(t, http.StatusNoContent, rec.Code, rec.Body.String())
 	require.Equal(t, []string{"Techno/genre/25"}, f.visible(alice))
 	hidden := decode[struct {
-		Tracks []stations.HiddenTrack `json:"tracks"`
+		Tracks []listening.HiddenTrack `json:"tracks"`
 	}](t, f.call(f.h.ListHiddenTracks, alice, http.MethodGet, "/h", stationID, ""))
 	require.Len(t, hidden.Tracks, 1)
 	require.Contains(t, hidden.Tracks[0].Title, "Domino")
@@ -297,7 +298,7 @@ func TestAddingAPlaylistCreatesNoDuplicateStation(t *testing.T) {
 	require.Equal(t, "1", f.one(`SELECT COUNT(*)::text FROM stations`))
 
 	// The unique index is the last guard, whoever inserts.
-	_, err := f.h.db.pool.Exec(f.ctx, `
+	_, err := f.pool.Exec(f.ctx, `
 		INSERT INTO stations (user_id, name, genres, auto_genre, auto_active)
 		VALUES (NULL, 'Techno 2', ARRAY['techno'], 'techno', TRUE)`)
 	require.Error(t, err)
@@ -408,7 +409,7 @@ func TestNewFileReachesItsGenreStation(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(f.ctx)
 	defer cancel()
-	f.h.pipeline.Start(ctx, f.h.db.pool.Config().ConnString())
+	f.h.pipeline.Start(ctx, f.pool.Config().ConnString())
 	eventually := func(what string, cond func() bool) {
 		t.Helper()
 		deadline := time.Now().Add(15 * time.Second)

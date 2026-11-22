@@ -2,16 +2,18 @@ package main
 
 import (
 	"net/http"
+
+	"ownwave/api/internal/settings"
 )
 
 func (h *Handler) SetupStatus(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	hasUsers, err := h.db.CountUsers(ctx)
+	hasUsers, err := h.auth.CountUsers(ctx)
 	if err != nil {
 		writeInternalError(w, r, "setup status users", err)
 		return
 	}
-	state, _ := h.db.GetAppState(ctx, "setup_completed")
+	state, _ := h.settings.Get(ctx, settings.SetupCompleted)
 	completed := false
 	if state != nil {
 		if v, ok := state["completed"].(bool); ok {
@@ -35,7 +37,7 @@ func (h *Handler) SetupStatus(w http.ResponseWriter, r *http.Request) {
 	// library size.
 	if !completed {
 		if user, ok := h.auth.UserFromRequest(r); ok && user.IsAdmin {
-			if trackCount, err := h.db.CountTracks(ctx); err == nil {
+			if trackCount, err := h.library.CountTracks(ctx); err == nil {
 				resp["track_count"] = trackCount
 			}
 		}
@@ -45,7 +47,7 @@ func (h *Handler) SetupStatus(w http.ResponseWriter, r *http.Request) {
 }
 func (h *Handler) SetupComplete(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	hasUsers, err := h.db.CountUsers(ctx)
+	hasUsers, err := h.auth.CountUsers(ctx)
 	if err != nil {
 		writeInternalError(w, r, "setup complete check users", err)
 		return
@@ -55,7 +57,7 @@ func (h *Handler) SetupComplete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := h.db.SetAppState(ctx, "setup_completed", map[string]interface{}{"completed": true}); err != nil {
+	if err := h.settings.Set(ctx, settings.SetupCompleted, map[string]interface{}{"completed": true}); err != nil {
 		writeInternalError(w, r, "setup complete", err)
 		return
 	}

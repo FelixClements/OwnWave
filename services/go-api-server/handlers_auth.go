@@ -133,7 +133,7 @@ func (h *Handler) UpdateProfile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := h.db.UpdateUserProfile(r.Context(), user.ID, email, fullName); err != nil {
+	if err := h.auth.UpdateUserProfile(r.Context(), user.ID, email, fullName); err != nil {
 		writeInternalError(w, r, "update profile", err)
 		return
 	}

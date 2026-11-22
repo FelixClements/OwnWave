@@ -15,7 +15,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"ownwave/api/internal/stations"
-	"ownwave/api/internal/testdb"
+	"ownwave/api/internal/testutil/testdb"
 )
 
 // These tests seed tracks, playlists, likes, bans, hides and history,

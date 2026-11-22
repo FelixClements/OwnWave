@@ -12,7 +12,7 @@ import (
 	"ownwave/api/internal/playlists"
 	"ownwave/api/internal/spotify"
 	"ownwave/api/internal/stations"
-	"ownwave/api/internal/testdb"
+	"ownwave/api/internal/testutil/testdb"
 )
 
 func addLocalTrack(t *testing.T, pool *pgxpool.Pool, title, artist string) string {

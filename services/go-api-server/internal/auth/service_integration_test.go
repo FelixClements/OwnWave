@@ -13,7 +13,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"ownwave/api/internal/auth"
-	"ownwave/api/internal/testdb"
+	"ownwave/api/internal/testutil/testdb"
 )
 
 // testSetupToken stands in for OWNWAVE_SETUP_TOKEN.

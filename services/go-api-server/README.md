@@ -5,7 +5,7 @@
 Integration tests use testcontainers and require Docker:
 
 ```bash
-go test -tags=integration ./internal/stations/... ./internal/playback/...
+go test -tags=integration ./internal/stations/... ./internal/listening/...
 ```
 
 Unit tests (default):

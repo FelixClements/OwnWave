@@ -9,7 +9,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/stretchr/testify/require"
 
-	"ownwave/api/internal/testdb"
+	"ownwave/api/internal/testutil/testdb"
 )
 
 // The songs view is the one home of song identity (#111).
