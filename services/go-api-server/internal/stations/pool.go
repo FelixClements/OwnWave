@@ -2,31 +2,31 @@ package stations
 
 import "fmt"
 
-// Args accumulates positional SQL parameters ($1, $2, ...).
-type Args []any
+// sqlArgs accumulates positional SQL parameters ($1, $2, ...).
+type sqlArgs []any
 
-// Add appends v and returns its placeholder.
-func (a *Args) Add(v any) string {
+// add appends v and returns its placeholder.
+func (a *sqlArgs) add(v any) string {
 	*a = append(*a, v)
 	return fmt.Sprintf("$%d", len(*a))
 }
 
-// Where returns an SQL predicate on `tracks t` that holds for the songs the
+// where returns an SQL predicate on `tracks t` that holds for the songs the
 // definition plays, each by its best copy, so t.id is the song id. A genre
 // station plays every song of the library whose best copy's main genre is
 // its genre. Any other station plays the songs of the local matches of its
 // playlists (of every playlist for AllPlaylists), with Enhance also of their
 // library picks, and when it has genres, songs with one of them among their
 // station genres.
-func (d Definition) Where(args *Args) string {
+func (d Definition) where(args *sqlArgs) string {
 	if d.Library {
 		return `t.id IN (
 		SELECT g.track_id FROM track_station_genres g JOIN songs s ON s.track_id = g.track_id
-		WHERE s.best_copy AND g.is_primary AND g.genre = ANY(` + args.Add(d.Genres) + `::text[]))`
+		WHERE s.best_copy AND g.is_primary AND g.genre = ANY(` + args.add(d.Genres) + `::text[]))`
 	}
 	matches, picks := "", ""
 	if !d.AllPlaylists {
-		ids := args.Add(d.PlaylistIDs)
+		ids := args.add(d.PlaylistIDs)
 		matches = ` AND pi.playlist_id = ANY(` + ids + `::uuid[])`
 		picks = ` WHERE lp.playlist_id = ANY(` + ids + `::uuid[])`
 	}
@@ -44,7 +44,7 @@ func (d Definition) Where(args *Args) string {
 	if len(d.Genres) > 0 {
 		cond += ` AND EXISTS (
 		SELECT 1 FROM track_station_genres g
-		WHERE g.track_id = t.id AND g.genre = ANY(` + args.Add(d.Genres) + `::text[]))`
+		WHERE g.track_id = t.id AND g.genre = ANY(` + args.add(d.Genres) + `::text[]))`
 	}
 	return cond
 }

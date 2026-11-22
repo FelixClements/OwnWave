@@ -31,7 +31,6 @@ type Handler struct {
 	analytics    analytics.Client
 	musicDir     string
 	ffmpegPath   string
-	recentHours  int
 	cookieSecure bool
 	logins       *loginThrottle   // nil: no per-username limit
 	soullite     *soullite.Client // nil: SoulLite integration off
@@ -58,9 +57,6 @@ type Config struct {
 }
 
 func NewHandler(pool *pgxpool.Pool, cfg Config) *Handler {
-	if cfg.RecentHours <= 0 {
-		cfg.RecentHours = 24
-	}
 	var transcodes *streaming.Cache
 	if cfg.TranscodeCacheDir != "" {
 		var err error
@@ -71,7 +67,7 @@ func NewHandler(pool *pgxpool.Pool, cfg Config) *Handler {
 		}
 	}
 	playlistService := playlists.NewService(pool, spotify.NewClient(&http.Client{Timeout: 20 * time.Second}))
-	stationService := stations.NewService(pool)
+	stationService := stations.NewService(pool, stations.WithRecentHours(cfg.RecentHours))
 	setup := newSetupToken(cfg.SetupToken)
 	return &Handler{
 		transcodes:   transcodes,
@@ -86,7 +82,6 @@ func NewHandler(pool *pgxpool.Pool, cfg Config) *Handler {
 		analytics:    analytics.NewHTTPClient(cfg.PythonURL),
 		musicDir:     cfg.MusicDir,
 		ffmpegPath:   cfg.FFmpegPath,
-		recentHours:  cfg.RecentHours,
 		cookieSecure: auth.CookieSecure(),
 		logins:       newLoginThrottle(10, 15*time.Minute),
 		soullite:     cfg.SoulLite,

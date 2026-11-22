@@ -117,12 +117,16 @@ func TestHiddenSongsLeaveStationsAndStayHidden(t *testing.T) {
 	require.Equal(t, 3, p.TrackCount)
 	require.Equal(t, 2, p.MatchedCount)
 
+	var userID, stationID string
+	require.NoError(t, pool.QueryRow(ctx, `INSERT INTO users (username, password_hash) VALUES ('hider', 'x') RETURNING id::text`).Scan(&userID))
+	require.NoError(t, pool.QueryRow(ctx, `INSERT INTO stations (user_id, name) VALUES ($1::uuid, 'Bunker') RETURNING id::text`, userID).Scan(&stationID))
+	_, err = pool.Exec(ctx, `INSERT INTO station_playlists (station_id, playlist_id) VALUES ($1::uuid, $2::uuid)`, stationID, p.ID)
+	require.NoError(t, err)
+	stationSvc := stations.NewService(pool)
 	poolSize := func() int {
-		var args stations.Args
-		where := stations.Definition{PlaylistIDs: []string{p.ID}}.Where(&args)
-		var n int
-		require.NoError(t, pool.QueryRow(ctx, `SELECT COUNT(*) FROM tracks t WHERE `+where, args...).Scan(&n))
-		return n
+		st, err := stationSvc.Get(ctx, userID, stationID)
+		require.NoError(t, err)
+		return st.TrackCount
 	}
 	require.Equal(t, 2, poolSize())
 

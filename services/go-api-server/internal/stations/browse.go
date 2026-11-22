@@ -360,11 +360,11 @@ func (s *Service) addArtistHits(ctx context.Context, userID, q string, list []St
 		if st.TrackCount == 0 {
 			continue
 		}
-		args := Args{userID, q}
+		args := sqlArgs{userID, q}
 		var n int
 		err := s.pool.QueryRow(ctx, `
 			SELECT COUNT(*) FROM tracks t JOIN artists a ON a.id = t.artist_id
-			WHERE lower(a.name) LIKE '%' || $2 || '%' AND `+NotBanned("$1")+` AND `+st.Definition().Where(&args), args...).Scan(&n)
+			WHERE lower(a.name) LIKE '%' || $2 || '%' AND `+notBanned("$1")+` AND `+st.Definition().where(&args), args...).Scan(&n)
 		if err != nil {
 			return err
 		}
@@ -378,11 +378,11 @@ func (s *Service) addArtistHits(ctx context.Context, userID, q string, list []St
 // CoverCandidates returns up to limit track ids of a station, one per
 // album, in a stable order, to take the station's cover art from.
 func (s *Service) CoverCandidates(ctx context.Context, userID string, st Station, limit int) ([]string, error) {
-	args := Args{userID}
+	args := sqlArgs{userID}
 	rows, err := s.pool.Query(ctx, `
 		SELECT id FROM (
 			SELECT DISTINCT ON (COALESCE(t.album_id::text, t.id::text)) t.id::text AS id, t.album_id
-			FROM tracks t WHERE `+NotBanned("$1")+` AND `+st.Definition().Where(&args)+`
+			FROM tracks t WHERE `+notBanned("$1")+` AND `+st.Definition().where(&args)+`
 			ORDER BY COALESCE(t.album_id::text, t.id::text), t.id
 		) x ORDER BY md5(id) LIMIT `+fmt.Sprint(limit), args...)
 	if err != nil {

@@ -140,14 +140,9 @@ func (h *Handler) GetQueue(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	st, err := h.stations.Get(r.Context(), user.ID, id)
+	queue, err := h.stations.Queue(r.Context(), user.ID, id)
 	if err != nil {
-		writeStationError(w, r, "get station", err)
-		return
-	}
-	queue, err := h.playback.BuildQueue(r.Context(), user.ID, st.ID, st.Definition(), h.recentHours)
-	if err != nil {
-		writeInternalError(w, r, "build queue", err)
+		writeStationError(w, r, "build queue", err)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"queue": queue})

@@ -1,4 +1,4 @@
-package playback
+package stations
 
 import (
 	"testing"
@@ -8,7 +8,7 @@ import (
 )
 
 func q(id, artist string) queued {
-	return queued{track: TrackWithFeatures{Track: Track{ID: id, Title: id, Artist: &artist}}}
+	return queued{track: QueueTrack{ID: id, Title: id, Artist: &artist}}
 }
 
 func ids(items []queued) []string {
@@ -30,7 +30,7 @@ func TestSpreadArtistsFallsBackWhenPoolIsOneArtist(t *testing.T) {
 }
 
 func TestSpreadArtistsIgnoresMissingArtist(t *testing.T) {
-	none := queued{track: TrackWithFeatures{Track: Track{ID: "x", Title: "x"}}}
+	none := queued{track: QueueTrack{ID: "x", Title: "x"}}
 	in := []queued{none, none, q("a", "A")}
 	require.Len(t, spreadArtists(in, 3), 3)
 }
