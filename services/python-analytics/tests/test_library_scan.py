@@ -9,7 +9,7 @@ from mutagen.flac import FLAC
 
 from library_scan import scan_library
 from library_scan.options import ScanOptions
-from library_scan.prune import match_moved_tracks, music_dirs
+from library_scan.prune import match_moved_tracks
 
 
 def write_flac(path: Path, title: str, seconds: float = 1.0, freq: float = 440.0) -> Path:
@@ -30,16 +30,6 @@ def scan(root: Path):
 def tracks(url: str) -> dict:
     with psycopg.connect(url) as conn:
         return {path: tid for tid, path in conn.execute("SELECT id, path FROM tracks").fetchall()}
-
-
-def test_music_dirs_includes_folders_with_loose_files(tmp_path):
-    write_flac(tmp_path / "loose.flac", "Loose")
-    write_flac(tmp_path / "Artist" / "single.flac", "Single")
-    write_flac(tmp_path / "Artist" / "Album" / "song.flac", "Song")
-
-    assert music_dirs(tmp_path) == sorted(
-        [str(tmp_path), str(tmp_path / "Artist"), str(tmp_path / "Artist" / "Album")]
-    )
 
 
 def test_match_moved_tracks_requires_unambiguous_match():
@@ -151,3 +141,138 @@ def test_queued_scan_finalizes_job_and_prunes(db_url, tmp_path):
         conn.commit()
     drain_queue()
     assert set(tracks(db_url)) == {str(nested)}
+
+
+def queue_scan(path: Path):
+    import db
+    import tasks
+
+    with db.get_conn() as conn:
+        job_id = tasks.queue_library_scan(conn, str(path))
+        conn.commit()
+    return job_id
+
+
+def folder_jobs(url: str, master) -> list:
+    with psycopg.connect(url) as conn:
+        return [r[0] for r in conn.execute("SELECT path FROM scan_jobs WHERE parent_id = %s", (master,)).fetchall()]
+
+
+def test_scan_with_no_changes_queues_nothing_and_sends_no_notify(db_url, tmp_path, monkeypatch):
+    import db
+    import task_queue
+    import tasks
+
+    monkeypatch.setattr("config.MUSICBRAINZ_ENABLED", False)
+    write_flac(tmp_path / "A" / "a.flac", "A")
+    write_flac(tmp_path / "B" / "b.flac", "B", freq=550.0)
+    queue_scan(tmp_path)
+    drain_queue()
+
+    with psycopg.connect(db_url, autocommit=True) as listener:
+        listener.execute(f"LISTEN {tasks.PIPELINE_CHANNEL}")
+        job_id = queue_scan(tmp_path)
+        with db.get_conn() as conn:
+            assert task_queue.run_one(conn)  # trigger_library_scan
+            queued = conn.execute("SELECT task FROM task_queue").fetchall()
+            status = db.get_scan_status(conn, job_id)
+        notices = [n.payload for n in listener.notifies(timeout=1, stop_after=1)]
+
+    assert queued == []
+    assert status["status"] == "completed"
+    assert status["folders"] == {"total": 0, "done": 0, "failed": 0}
+    assert status["stats"]["total_files"] == 2
+    assert notices == []
+
+
+def test_queued_scan_of_one_new_file_imports_one_folder(db_url, tmp_path, monkeypatch):
+    monkeypatch.setattr("config.MUSICBRAINZ_ENABLED", False)
+    write_flac(tmp_path / "A" / "a.flac", "A")
+    write_flac(tmp_path / "B" / "b.flac", "B", freq=550.0)
+    queue_scan(tmp_path)
+    drain_queue()
+
+    new = write_flac(tmp_path / "C" / "c.flac", "C", freq=660.0)
+    job_id = queue_scan(tmp_path)
+    drain_queue()
+
+    assert folder_jobs(db_url, job_id) == [str(tmp_path / "C")]
+    assert str(new) in tracks(db_url)
+
+
+def test_queued_scan_keeps_track_id_of_file_moved_between_folders(db_url, tmp_path, monkeypatch):
+    import db
+
+    monkeypatch.setattr("config.MUSICBRAINZ_ENABLED", False)
+    original = write_flac(tmp_path / "A" / "song.flac", "Song")
+    write_flac(tmp_path / "A" / "other.flac", "Other", freq=660.0, seconds=2.0)
+    queue_scan(tmp_path)
+    drain_queue()
+    track_id = tracks(db_url)[str(original)]
+
+    moved = tmp_path / "B" / "song.flac"
+    moved.parent.mkdir()
+    original.rename(moved)
+    job_id = queue_scan(tmp_path)
+    drain_queue()
+
+    after = tracks(db_url)
+    assert after[str(moved)] == track_id
+    assert str(original) not in after
+    # Only the destination is imported; prune sees the source from the full listing.
+    assert folder_jobs(db_url, job_id) == [str(tmp_path / "B")]
+    with db.get_conn() as conn:
+        assert db.get_scan_status(conn, job_id)["status"] == "completed"
+
+
+def test_queued_scan_of_only_deleted_files_prunes_without_folder_tasks(db_url, tmp_path, monkeypatch):
+    import db
+
+    monkeypatch.setattr("config.MUSICBRAINZ_ENABLED", False)
+    gone = write_flac(tmp_path / "A" / "a.flac", "A")
+    kept = write_flac(tmp_path / "B" / "b.flac", "B", freq=550.0)
+    queue_scan(tmp_path)
+    drain_queue()
+
+    gone.unlink()
+    job_id = queue_scan(tmp_path)
+    drain_queue()
+
+    assert set(tracks(db_url)) == {str(kept)}
+    assert folder_jobs(db_url, job_id) == []
+    with db.get_conn() as conn:
+        assert db.get_scan_status(conn, job_id)["status"] == "completed"
+
+
+def test_scan_whose_planned_folder_changes_nothing_skips_downstream(db_url, tmp_path, monkeypatch):
+    """A file that fails analysis is planned again every scan (until #119),
+    but when its folder changes nothing, no analysis refresh or NOTIFY follows."""
+    import db
+    import task_queue
+    import tasks
+
+    monkeypatch.setattr("config.MUSICBRAINZ_ENABLED", False)
+    broken = tmp_path / "A" / "broken.flac"
+    broken.parent.mkdir()
+    broken.write_bytes(b"not audio")
+    queue_scan(tmp_path)
+    drain_queue()
+
+    with psycopg.connect(db_url, autocommit=True) as listener:
+        listener.execute(f"LISTEN {tasks.PIPELINE_CHANNEL}")
+        job_id = queue_scan(tmp_path)
+        ran = []
+        with db.get_conn() as conn:
+            while True:
+                task = conn.execute("SELECT task FROM task_queue ORDER BY id LIMIT 1").fetchone()
+                if not task or not task_queue.run_one(conn):
+                    break
+                ran.append(task[0])
+            status = db.get_scan_status(conn, job_id)
+        notices = [n.payload for n in listener.notifies(timeout=1, stop_after=1)]
+
+    assert ran == ["trigger_library_scan", "process_audio_folder", "finalize_scan"]
+    assert status["status"] == "completed"
+    assert status["stats"]["imported"] == 0
+    assert status["stats"]["failed_paths"]
+    assert notices == []

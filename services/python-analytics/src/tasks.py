@@ -6,9 +6,11 @@ from uuid import UUID, uuid4
 from psycopg.types.json import Jsonb
 
 import db
+import genre_audio
 import task_queue
 from folder_importer import import_folder
-from library_scan.prune import music_dirs, prune_library
+from library_scan.plan import plan_scan
+from library_scan.prune import prune_library
 from models import ScanResult
 
 log = logging.getLogger(__name__)
@@ -50,50 +52,95 @@ def queue_library_scan(conn, path: str, force: bool = False) -> UUID:
     return job_id
 
 
+def _scan_dispatched(conn, master: UUID) -> bool:
+    """Whether trigger_library_scan already committed its work for this scan.
+
+    Its last commit writes the master's own progress row (and, before scan
+    plans, created the folder jobs), so a re-run after the worker died
+    between committing and acknowledging finds one of them.
+    """
+    job = db.get_scan_job(conn, master)
+    if job is None or job["status"] in ("completed", "failed"):
+        return True
+    return bool(
+        conn.execute(
+            """
+            SELECT 1 FROM scan_job_progress WHERE job_id = %s
+            UNION ALL
+            SELECT 1 FROM scan_jobs WHERE parent_id = %s
+            LIMIT 1
+            """,
+            (master, master),
+        ).fetchone()
+    )
+
+
 def trigger_library_scan(master_job_id: str, path: str, force: bool = False) -> dict:
-    """Queue one import task per music folder; the last one to finish queues finalize_scan."""
+    """Plan the scan, then queue one import task per folder that needs work.
+
+    The last folder task to finish queues finalize_scan. A plan with nothing
+    to import and no missing track completes the scan here (ADR 0006).
+    """
     master = UUID(master_job_id)
+    nothing = {"master_job_id": master_job_id, "dispatched": 0}
     with db.get_conn() as conn:
-        if conn.execute("SELECT 1 FROM scan_jobs WHERE parent_id = %s LIMIT 1", (master,)).fetchone():
-            # Re-run after the worker died between dispatching and acknowledging.
-            return {"master_job_id": master_job_id, "dispatched": 0}
+        if _scan_dispatched(conn, master):
+            return nothing
         db.update_scan_job(conn, master, "running")
+        conn.commit()
 
         root = Path(path).expanduser().resolve()
         if not root.is_dir():
             db.update_scan_job(conn, master, "failed", error=f"not a directory: {root}")
             conn.commit()
-            return {"master_job_id": master_job_id, "dispatched": 0}
+            return nothing
 
-        folders = music_dirs(root)
-        if not folders:
-            db.upsert_scan_job_progress(conn, master, None, ScanResult())
-            db.update_scan_job(conn, master, "completed")
-            conn.commit()
-            return {"master_job_id": master_job_id, "dispatched": 0}
-
-        # Folder jobs and their tasks are created together so progress has a
-        # fixed denominator and every folder job has a task to finish it.
-        folder_args = []
-        for folder in folders:
-            job_id = db.create_scan_job(conn, folder, job_id=uuid4(), parent_id=master)
-            folder_args.append(
-                {
-                    "folder_path": folder,
-                    "job_id": str(job_id),
-                    "master_job_id": master_job_id,
-                    "root_path": str(root),
-                    "force": force,
-                }
-            )
-        task_queue.enqueue_many(conn, "process_audio_folder", folder_args)
+        genre_version = genre_audio.MODEL_VERSION if genre_audio.get_model() else None
+        plan = plan_scan(conn, root, force=force, genre_version=genre_version)
         conn.commit()
 
-    return {"master_job_id": master_job_id, "dispatched": len(folders)}
+        conn.execute("SELECT 1 FROM scan_jobs WHERE id = %s FOR UPDATE", (master,))
+        if _scan_dispatched(conn, master):
+            conn.rollback()
+            return nothing
+        db.upsert_scan_job_progress(conn, master, None, ScanResult(total_files=len(plan.files)))
+
+        if plan.empty:
+            db.update_scan_job(conn, master, "completed")
+        elif not plan.folders:
+            # Only vanished files: prune them, nothing to import.
+            task_queue.enqueue(conn, "finalize_scan", master_job_id=master_job_id, root_path=str(root))
+        else:
+            # Folder jobs and their tasks are created together so progress has
+            # a fixed denominator and every folder job has a task to finish it.
+            folder_args = []
+            for folder, files in plan.folders.items():
+                job_id = db.create_scan_job(conn, folder, job_id=uuid4(), parent_id=master)
+                folder_args.append(
+                    {
+                        "folder_path": folder,
+                        "job_id": str(job_id),
+                        "master_job_id": master_job_id,
+                        "root_path": str(root),
+                        "force": force,
+                        "files": [list(f) for f in files],
+                    }
+                )
+            task_queue.enqueue_many(conn, "process_audio_folder", folder_args)
+        conn.commit()
+
+    return {"master_job_id": master_job_id, "dispatched": len(plan.folders), "missing": plan.missing}
 
 
-def process_audio_folder(folder_path: str, job_id: str, master_job_id: str, root_path: str, force: bool = False) -> dict:
-    """Import one music folder. Raising lets the queue retry it."""
+def process_audio_folder(
+    folder_path: str,
+    job_id: str,
+    master_job_id: str,
+    root_path: str,
+    force: bool = False,
+    files: Optional[list] = None,
+) -> dict:
+    """Import the planned files of one folder. Raising lets the queue retry it."""
     jid = UUID(job_id)
     with db.get_conn() as conn:
         job = db.get_scan_job(conn, jid)
@@ -103,7 +150,9 @@ def process_audio_folder(folder_path: str, job_id: str, master_job_id: str, root
         db.update_scan_job(conn, jid, "running")
         conn.commit()
 
-    result = import_folder(folder_path, job_id=jid, master_job_id=UUID(master_job_id), analyze=True, force=force)
+    result = import_folder(
+        folder_path, job_id=jid, master_job_id=UUID(master_job_id), analyze=True, force=force, files=files
+    )
     _finish_folder(jid, UUID(master_job_id), root_path, "completed")
     return {"folder": folder_path, "tracks": len(result.track_ids), "job_id": job_id}
 
@@ -138,18 +187,31 @@ def _finish_folder(job_id: UUID, master: UUID, root_path: str, status: str, erro
         conn.commit()
 
 
-def finalize_scan(master_job_id: str, root_path: str) -> dict:
-    """Prune moved/deleted tracks, then refresh analysis.
+# Progress counters that mean a folder task changed the database.
+_CHANGE_COUNTERS = ("imported", "features", "model_success")
 
-    The master job stays running until rebuild_analysis completes it.
+
+def finalize_scan(master_job_id: str, root_path: str) -> dict:
+    """Prune moved/deleted tracks, then refresh analysis if anything changed.
+
+    When something changed the master job stays running until
+    rebuild_analysis completes it. When nothing did (every planned file
+    failed or was already up to date), the scan completes here with no
+    analysis refresh and no NOTIFY.
     """
     job_id = UUID(master_job_id)
 
     with db.get_conn() as conn:
+        job = db.get_scan_job(conn, job_id)
+        if job is None or job["status"] == "completed":
+            # Re-run after the worker died between finishing and acknowledging.
+            return {"master_job_id": master_job_id, "skipped": True}
+
         total, failed = conn.execute(
             "SELECT COUNT(*), COUNT(*) FILTER (WHERE status = 'failed') FROM scan_jobs WHERE parent_id = %s",
             (job_id,),
         ).fetchone()
+        stats = db.scan_stats(conn, job_id)
         summary = {"master_job_id": master_job_id, "total": total, "failed": failed}
 
         if failed:
@@ -165,10 +227,16 @@ def finalize_scan(master_job_id: str, root_path: str) -> dict:
                 conn.commit()
                 raise
 
-        # A failed scan is already finished; still refresh analysis for the
-        # folders that did import.
-        task_queue.enqueue(conn, "rebuild_analysis", scan_job_id=None if failed else master_job_id)
+        changed = any(stats[k] for k in _CHANGE_COUNTERS) or summary.get("moved") or summary.get("deleted")
+        summary["changed"] = bool(changed)
+        if changed:
+            # A failed scan is already finished; still refresh analysis for
+            # the folders that did import.
+            task_queue.enqueue(conn, "rebuild_analysis", scan_job_id=None if failed else master_job_id)
+        elif not failed:
+            db.update_scan_job(conn, job_id, "completed")
         conn.commit()
+    log.info("scan %s finalized: %s", master_job_id, summary)
     return summary
 
 

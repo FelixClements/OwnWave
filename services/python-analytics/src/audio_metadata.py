@@ -11,10 +11,9 @@ def is_supported_audio_file(path: Path) -> bool:
     return not path.is_symlink() and path.is_file() and path.suffix.lower() in SUPPORTED_EXTS
 
 
-def get_file_stats(path: Path) -> Tuple[int, datetime]:
-    stat = path.stat()
-    mtime = datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc)
-    return stat.st_size, mtime
+def file_mtime(st_mtime: float) -> datetime:
+    """The tracks.file_mtime value for an os.stat st_mtime."""
+    return datetime.fromtimestamp(st_mtime, tz=timezone.utc)
 
 
 def parse_int_tag(value) -> Optional[int]:
