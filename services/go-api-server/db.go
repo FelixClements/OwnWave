@@ -245,9 +245,9 @@ func (db *DB) RecordFeedback(ctx context.Context, userID, trackID, feedback stri
 func (db *DB) DeleteFeedback(ctx context.Context, userID, trackID, feedback string) error {
 	_, err := db.pool.Exec(ctx, `
 		DELETE FROM track_feedback f
-		USING tracks ft, tracks t
-		WHERE f.user_id = $1::uuid AND f.feedback = $3 AND ft.id = f.track_id
-		  AND t.id = $2::uuid AND COALESCE(ft.copy_of, ft.id) = COALESCE(t.copy_of, t.id)
+		USING songs fs, songs ts
+		WHERE f.user_id = $1::uuid AND f.feedback = $3 AND fs.track_id = f.track_id
+		  AND ts.track_id = $2::uuid AND fs.song_id = ts.song_id
 	`, userID, trackID, feedback)
 	return err
 }

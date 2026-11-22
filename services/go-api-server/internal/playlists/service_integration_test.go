@@ -236,7 +236,7 @@ func TestGroupCopiesRecordsAndFollowsTheLibrary(t *testing.T) {
 	}
 	copyOf := func(id string) string {
 		var v string
-		require.NoError(t, pool.QueryRow(ctx, `SELECT COALESCE(copy_of::text, '') FROM tracks WHERE id = $1::uuid`, id).Scan(&v))
+		require.NoError(t, pool.QueryRow(ctx, `SELECT CASE WHEN best_copy THEN '' ELSE song_id::text END FROM songs WHERE track_id = $1::uuid`, id).Scan(&v))
 		return v
 	}
 	low := add("/m/low.mp3", "Song", 44100)

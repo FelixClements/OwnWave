@@ -18,7 +18,7 @@ type HiddenTrack struct {
 // other users are not affected; a ban is the way to never hear it anywhere.
 func (s *Service) HideTrack(ctx context.Context, userID, stationID, trackID string) error {
 	var song string
-	err := s.pool.QueryRow(ctx, `SELECT COALESCE(copy_of, id)::text FROM tracks WHERE id = $1::uuid`, trackID).Scan(&song)
+	err := s.pool.QueryRow(ctx, `SELECT song_id::text FROM songs WHERE track_id = $1::uuid`, trackID).Scan(&song)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return ErrNotFound
 	}
@@ -37,9 +37,10 @@ func (s *Service) HideTrack(ctx context.Context, userID, stationID, trackID stri
 func (s *Service) UnhideTrack(ctx context.Context, userID, stationID, trackID string) error {
 	_, err := s.pool.Exec(ctx, `
 		DELETE FROM station_hidden_tracks h
-		USING tracks ht, tracks t
-		WHERE h.user_id = $1::uuid AND h.station_id = $2::uuid AND ht.id = h.track_id
-		  AND t.id = $3::uuid AND `+sameSong("ht", "t"), userID, stationID, trackID)
+		USING songs hs, songs ts
+		WHERE h.user_id = $1::uuid AND h.station_id = $2::uuid AND hs.track_id = h.track_id
+		  AND ts.track_id = $3::uuid AND hs.song_id = ts.song_id
+	`, userID, stationID, trackID)
 	return err
 }
 

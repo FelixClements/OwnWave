@@ -90,8 +90,9 @@ def primary_of(dist: Dict[str, float]) -> Optional[str]:
 # --- database pass -----------------------------------------------------------
 
 _TRACKS_SQL = """
-    SELECT t.id, COALESCE(t.copy_of, t.id), a.name, t.genre_tag, g.activations
+    SELECT t.id, s.song_id, a.name, t.genre_tag, g.activations
     FROM tracks t
+    JOIN songs s ON s.track_id = t.id
     LEFT JOIN artists a ON a.id = t.artist_id
     LEFT JOIN track_audio_genres g ON g.track_id = t.id
 """
@@ -137,8 +138,8 @@ def load_corrections(conn) -> Corrections:
     fixes = Corrections({}, {})
     rows = conn.execute(
         """
-        SELECT COALESCE(t.copy_of, t.id), c.artist, c.genre
-        FROM genre_corrections c LEFT JOIN tracks t ON t.id = c.track_id
+        SELECT s.song_id, c.artist, c.genre
+        FROM genre_corrections c LEFT JOIN songs s ON s.track_id = c.track_id
         ORDER BY c.created_at
         """
     ).fetchall()
