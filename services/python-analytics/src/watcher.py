@@ -1,4 +1,5 @@
 import logging
+import os
 import threading
 import time
 from pathlib import Path
@@ -26,10 +27,18 @@ CHANGE_EVENTS = {"created", "deleted", "modified", "moved"}
 # queue, and watchdog answers an overflow by walking the tree again.
 WATCHED_EVENTS = [FileCreatedEvent, FileDeletedEvent, FileModifiedEvent, FileMovedEvent]
 
+
+def _seconds(name: str, default: float) -> float:
+    value = os.environ.get(name, "").strip()
+    return float(value) if value else default
+
+
 # A scan reads the whole library, so wait for a bulk write (a tag fixer, a large
 # download) to go quiet. Changes that never go quiet still get a scan this often.
-QUIET_SECONDS = 60.0
-MAX_WAIT_SECONDS = 900.0
+# After a scan is queued, the next waits at least the cooldown (map #116).
+QUIET_SECONDS = _seconds("WATCH_QUIET_SECONDS", 60.0)
+MAX_WAIT_SECONDS = _seconds("WATCH_MAX_WAIT_SECONDS", 900.0)
+COOLDOWN_SECONDS = _seconds("WATCH_COOLDOWN_SECONDS", 30.0)
 
 
 class MusicEventHandler(FileSystemEventHandler):
@@ -37,7 +46,7 @@ class MusicEventHandler(FileSystemEventHandler):
         self,
         root_path: str,
         debounce_seconds: float = QUIET_SECONDS,
-        cooldown_seconds: float = 30.0,
+        cooldown_seconds: float = COOLDOWN_SECONDS,
         max_wait_seconds: float = MAX_WAIT_SECONDS,
     ):
         self.root_path = Path(root_path).expanduser().resolve()
@@ -107,14 +116,20 @@ def queue_scan(path: str) -> None:
 def start_watching(
     path: str = MUSIC_DIR,
     debounce_seconds: float = QUIET_SECONDS,
-    cooldown_seconds: float = 30.0,
+    cooldown_seconds: float = COOLDOWN_SECONDS,
+    max_wait_seconds: float = MAX_WAIT_SECONDS,
 ) -> Observer:
     """Queue a library scan whenever music files under path change."""
     root = Path(path).expanduser().resolve()
     if not root.exists():
         raise FileNotFoundError(f"Music path does not exist: {root}")
 
-    event_handler = MusicEventHandler(str(root), debounce_seconds=debounce_seconds, cooldown_seconds=cooldown_seconds)
+    event_handler = MusicEventHandler(
+        str(root),
+        debounce_seconds=debounce_seconds,
+        cooldown_seconds=cooldown_seconds,
+        max_wait_seconds=max_wait_seconds,
+    )
     observer = Observer()
     observer.daemon = True
     observer.schedule(event_handler, str(root), recursive=True, event_filter=WATCHED_EVENTS)

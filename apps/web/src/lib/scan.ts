@@ -5,6 +5,8 @@ type Scan = ScanStatus | ScanSummary;
 /**
  * Where a scan is: folder imports drive the progress (0..1, null = unknown).
  * Only folders the scan plan picked get a job, so a scan may have 0 or 1.
+ * Folder jobs are deleted once a scan ends; Python then reports the same
+ * `folders` counts from the scan's own totals (ADR 0006).
  */
 export function scanPhase(scan: Scan): { label: string; progress: number | null } {
   const { total, done, failed } = scan.folders;

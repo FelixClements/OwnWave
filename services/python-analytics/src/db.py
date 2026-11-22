@@ -209,8 +209,7 @@ def scan_stats(conn: psycopg.Connection, job_id: UUID) -> dict:
     return stats
 
 
-def _scan_folders(conn: psycopg.Connection, job_id: UUID) -> dict:
-    """Count a master job's folder jobs by outcome."""
+def _count_folder_jobs(conn: psycopg.Connection, job_id: UUID) -> dict:
     with conn.cursor() as cur:
         cur.execute(
             """
@@ -223,6 +222,69 @@ def _scan_folders(conn: psycopg.Connection, job_id: UUID) -> dict:
         )
         total, done, failed = cur.fetchone()
     return {"total": total, "done": done, "failed": failed}
+
+
+def _scan_folders(conn: psycopg.Connection, job_id: UUID) -> dict:
+    """Count a master job's folder jobs by outcome.
+
+    A finished scan's folder jobs are deleted (roll_up_scan); its counts are
+    then read from the master's own progress row.
+    """
+    folders = _count_folder_jobs(conn, job_id)
+    if folders["total"]:
+        return folders
+    with conn.cursor() as cur:
+        cur.execute("SELECT stats->'folders' FROM scan_job_progress WHERE job_id = %s", (job_id,))
+        row = cur.fetchone()
+    saved = (row[0] if row else None) or {}
+    return {k: int(saved.get(k, 0) or 0) for k in ("total", "done", "failed")}
+
+
+def roll_up_scan(conn: psycopg.Connection, job_id: UUID) -> None:
+    """Fold a finished scan's folder jobs into its master's progress row.
+
+    The master row then holds the summed folder progress and the folder
+    counts, so the scan reports the same totals, and the folder jobs are
+    deleted (their progress rows go with them through the cascade).
+    """
+    folders = _count_folder_jobs(conn, job_id)
+    if not folders["total"]:
+        return
+    stats = scan_stats(conn, job_id)
+    stats["folders"] = folders
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            INSERT INTO scan_job_progress (job_id, master_job_id, stats, updated_at)
+            VALUES (%s, NULL, %s, NOW())
+            ON CONFLICT (job_id) DO UPDATE
+            SET master_job_id = NULL, stats = EXCLUDED.stats, updated_at = NOW()
+            """,
+            (job_id, Jsonb(stats)),
+        )
+        cur.execute("DELETE FROM scan_jobs WHERE parent_id = %s", (job_id,))
+
+
+# Library scans kept in scan_jobs; older finished ones are deleted.
+SCAN_JOBS_KEPT = 100
+
+
+def prune_scan_jobs(conn: psycopg.Connection, keep: int = SCAN_JOBS_KEPT) -> int:
+    """Delete finished scans beyond the newest `keep` scans."""
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            DELETE FROM scan_jobs
+            WHERE parent_id IS NULL
+              AND status IN ('completed', 'failed')
+              AND id NOT IN (
+                  SELECT id FROM scan_jobs WHERE parent_id IS NULL
+                  ORDER BY created_at DESC LIMIT %s
+              )
+            """,
+            (keep,),
+        )
+        return cur.rowcount
 
 
 def get_scan_status(conn: psycopg.Connection, job_id: UUID) -> Optional[dict]:

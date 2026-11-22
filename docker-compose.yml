@@ -23,6 +23,11 @@ x-python: &python
     # WORKER_CONCURRENCY x TF_NUM_INTRAOP_THREADS near the CPU count.
     TF_NUM_INTRAOP_THREADS: ${TF_NUM_INTRAOP_THREADS:-3}
     TF_NUM_INTEROP_THREADS: ${TF_NUM_INTEROP_THREADS:-1}
+    # Music folder watcher (worker): queue a scan once changes are quiet this
+    # long, at most this long after the first change, then wait the cooldown.
+    WATCH_QUIET_SECONDS: ${WATCH_QUIET_SECONDS:-60}
+    WATCH_MAX_WAIT_SECONDS: ${WATCH_MAX_WAIT_SECONDS:-900}
+    WATCH_COOLDOWN_SECONDS: ${WATCH_COOLDOWN_SECONDS:-30}
   volumes:
     - ${MUSIC_PATH:-./music}:/music:ro
   # go runs the database migrations, so it must be healthy first.
