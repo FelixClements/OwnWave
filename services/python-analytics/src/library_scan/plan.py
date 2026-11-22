@@ -72,20 +72,31 @@ def walk_audio_files(root: Path) -> Dict[str, FileStat]:
 
 
 def load_tracks(conn: psycopg.Connection, root: Path) -> Dict[str, dict]:
-    """path -> size, mtime, features and genre model version of every track under root."""
+    """path -> size, mtime, features, genre model version and analysis failures
+    of every track under root."""
     rows = conn.execute(
         """
         SELECT t.path, t.file_size, t.file_mtime,
-               af.track_id IS NOT NULL AS has_features, g.model_version
+               af.track_id IS NOT NULL AS has_features, g.model_version,
+               ff.track_id IS NOT NULL AS features_failed, gf.model_version
         FROM tracks t
         LEFT JOIN audio_features af ON af.track_id = t.id
         LEFT JOIN track_audio_genres g ON g.track_id = t.id
+        LEFT JOIN track_analysis_failures ff ON ff.track_id = t.id AND ff.kind = 'features'
+        LEFT JOIN track_analysis_failures gf ON gf.track_id = t.id AND gf.kind = 'genre'
         WHERE starts_with(t.path, %s)
         """,
         (str(root) + "/",),
     ).fetchall()
     return {
-        r[0]: {"file_size": r[1], "file_mtime": r[2], "has_features": r[3], "genre_version": r[4]}
+        r[0]: {
+            "file_size": r[1],
+            "file_mtime": r[2],
+            "has_features": r[3],
+            "genre_version": r[4],
+            "features_failed": r[5],
+            "genre_failed_version": r[6],
+        }
         for r in rows
     }
 
@@ -102,6 +113,10 @@ def needs_import(
 
     genre_version is the current audio genre model version, or None when the
     model is off (then stored genre versions don't matter).
+
+    Analysis that failed before is not retried (#119): features with any
+    failure on record, genre with a failure for the current model version.
+    A changed file (its failures are cleared on import) or force retries both.
     """
     if force or track is None:
         return True
@@ -110,9 +125,13 @@ def needs_import(
         return True
     if not analyze:
         return False
-    if not track["has_features"]:
+    if not track["has_features"] and not track.get("features_failed"):
         return True
-    return genre_version is not None and track["genre_version"] != genre_version
+    return (
+        genre_version is not None
+        and track["genre_version"] != genre_version
+        and track.get("genre_failed_version") != genre_version
+    )
 
 
 def plan_scan(

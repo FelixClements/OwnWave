@@ -245,8 +245,8 @@ def test_queued_scan_of_only_deleted_files_prunes_without_folder_tasks(db_url, t
 
 
 def test_scan_whose_planned_folder_changes_nothing_skips_downstream(db_url, tmp_path, monkeypatch):
-    """A file that fails analysis is planned again every scan (until #119),
-    but when its folder changes nothing, no analysis refresh or NOTIFY follows."""
+    """A planned folder whose analysis fails again changes nothing, so no
+    analysis refresh or NOTIFY follows."""
     import db
     import task_queue
     import tasks
@@ -257,6 +257,11 @@ def test_scan_whose_planned_folder_changes_nothing_skips_downstream(db_url, tmp_
     broken.write_bytes(b"not audio")
     queue_scan(tmp_path)
     drain_queue()
+    # The failure is on record now (#119), so the next scan would skip the
+    # file. Forget it, as for a failure recorded before #119, to plan it again.
+    with psycopg.connect(db_url) as conn:
+        assert conn.execute("SELECT count(*) FROM track_analysis_failures").fetchone()[0] > 0
+        conn.execute("DELETE FROM track_analysis_failures")
 
     with psycopg.connect(db_url, autocommit=True) as listener:
         listener.execute(f"LISTEN {tasks.PIPELINE_CHANNEL}")
@@ -276,3 +281,8 @@ def test_scan_whose_planned_folder_changes_nothing_skips_downstream(db_url, tmp_
     assert status["stats"]["imported"] == 0
     assert status["stats"]["failed_paths"]
     assert notices == []
+
+    # With the failure on record again, the next scan has nothing to do.
+    job_id = queue_scan(tmp_path)
+    drain_queue()
+    assert folder_jobs(db_url, job_id) == []

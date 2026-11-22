@@ -42,6 +42,7 @@ Python).
 | `albums` | `db.py` |
 | `audio_features` | `db.py` |
 | `track_audio_genres` | `db.py` |
+| `track_analysis_failures` | `db.py`, called from `folder_importer.py` (#119, migration 029) |
 | `musicbrainz_artists` | `tasks.py` |
 | `track_station_genres` | `genre_scoring.py` (including `corrected`, which it derives from Go's `genre_corrections`) |
 | `station_genres` | `genre_scoring.py` |
@@ -134,12 +135,12 @@ Tables and columns that approved tickets will add, with their owner:
 
 | Table or column | Owner | Ticket |
 | --- | --- | --- |
-| `track_analysis_failures` | Python | #119 |
 | `scan_jobs.rerun_requested` | Python (a column of a Python table) | #120 |
 
-ADR 0006 (`0006-incremental-scans.md`, #117) adds both and relies on them
-being Python's. When a ticket lands, its row leaves this table, and
-`track_analysis_failures` joins the Python table above.
+ADR 0006 (`0006-incremental-scans.md`, #117) adds it and relies on it being
+Python's. When a ticket lands, its row leaves this table.
+`track_analysis_failures` (#119) has landed and is listed in the Python table
+above.
 
 ## Consequences
 
