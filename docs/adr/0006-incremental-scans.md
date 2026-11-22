@@ -126,8 +126,7 @@ vanished row as before.
 - **A scan with nothing to do is nearly free**, so the watcher and SoulLite
   can both keep asking for scans. Neither trigger changes.
 - **A failed file is analysed once**, then again only after the file
-  changes, the model version changes, or a `force` scan. Until #119 lands,
-  failed files are still retried on every scan.
+  changes, the model version changes, or a `force` scan (#119).
 - **A change during a running scan is picked up** by one follow-up scan.
 - **`scan_jobs` stays small**: at most 100 master jobs, and child rows only
   while a scan runs.

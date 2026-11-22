@@ -10,10 +10,12 @@ import genre_audio
 from tags import read_tags
 from db import (
     audio_genre_versions_by_paths,
+    clear_analysis_failures,
     get_conn,
     get_or_create_album,
     get_or_create_artist,
     get_track_stats_by_paths,
+    record_analysis_failure,
     upsert_audio_features_batch,
     upsert_scan_job_progress,
     upsert_track_audio_genres,
@@ -34,9 +36,8 @@ log = logging.getLogger(__name__)
 PlannedFile = Tuple[str, int, float]
 
 
-def _file_changed(stats: dict, size: int, mtime, force: bool) -> bool:
-    if force:
-        return True
+def _file_changed(stats: dict, size: int, mtime) -> bool:
+    """Whether the file is new or its size or mtime differs from the stored track."""
     return stats.get("file_size") != size or stats.get("file_mtime") != mtime
 
 
@@ -135,7 +136,14 @@ def _import_file(
     changed = False
     try:
         track_id = stats.get("id")
-        if _file_changed(stats, size, mtime, force):
+        features_failed = stats.get("features_failed", False)
+        genre_failed_version = stats.get("genre_failed_version")
+        file_changed = _file_changed(stats, size, mtime)
+        if force or file_changed:
+            if track_id and file_changed:
+                # A changed file gets its failed analysis retried (#119).
+                clear_analysis_failures(conn, track_id)
+                features_failed, genre_failed_version = False, None
             track_rec = _build_track_record(conn, file_path, size, mtime, artist_cache, album_cache)
             upsert_tracks_batch(conn, [track_rec])
             track_id = get_track_stats_by_paths(conn, [path_str])[path_str]["id"]
@@ -143,8 +151,14 @@ def _import_file(
             result.imported += 1
             changed = True
 
-        needs_features = bool(analyzers) and (force or not stats.get("has_features"))
-        needs_genre = genre_model is not None and (force or genre_version != genre_audio.MODEL_VERSION)
+        # Analysis that failed before is skipped unless forced (ADR 0006).
+        needs_features = bool(analyzers) and (
+            force or (not stats.get("has_features") and not features_failed)
+        )
+        needs_genre = genre_model is not None and (
+            force
+            or (genre_version != genre_audio.MODEL_VERSION and genre_failed_version != genre_audio.MODEL_VERSION)
+        )
         if needs_features or needs_genre:
             result.scanned += 1
             changed = True
@@ -153,18 +167,24 @@ def _import_file(
             feature_rec, error = _build_feature_record(conn, file_path, path_str, analyzers)
             if feature_rec:
                 upsert_audio_features_batch(conn, [feature_rec], {path_str: track_id})
+                clear_analysis_failures(conn, track_id, "features")
                 result.features += 1
                 if track_id not in processed_ids:
                     processed_ids.append(track_id)
             if error:
+                record_analysis_failure(conn, track_id, "features", error)
                 result.failed_paths.append(FailedPath(path_str, error))
 
         if needs_genre:
             genres = genre_model.analyze(path_str)
             if genres:
                 upsert_track_audio_genres(conn, track_id, genres)
+                clear_analysis_failures(conn, track_id, "genre")
                 result.model_success += 1
             else:
+                record_analysis_failure(
+                    conn, track_id, "genre", "genre analysis failed", model_version=genre_audio.MODEL_VERSION
+                )
                 result.model_failed += 1
                 result.failed_paths.append(FailedPath(path_str, "genre analysis failed"))
     except Exception as e:

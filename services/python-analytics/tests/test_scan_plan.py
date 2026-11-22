@@ -52,6 +52,21 @@ def test_old_genre_version_needs_import_only_with_the_model_on():
     assert not needs(existing=track(genre_version="genre-model-1"), genre_version=None)
 
 
+def test_failed_features_are_not_retried_until_the_file_changes():
+    failed = track(has_features=False, features_failed=True)
+    assert not needs(existing=failed)
+    assert needs(stat=(101, STAT[1]), existing=failed)
+    assert needs(existing=failed, force=True)
+
+
+def test_failed_genre_is_retried_only_for_a_new_model_version():
+    failed = track(genre_version=None, genre_failed_version=GENRE)
+    assert not needs(existing=failed)
+    assert needs(existing=track(genre_version=None, genre_failed_version="genre-model-1"))
+    assert needs(stat=(100, STAT[1] + 1), existing=failed)
+    assert needs(existing=failed, force=True)
+
+
 def test_force_imports_everything():
     assert needs(force=True)
 

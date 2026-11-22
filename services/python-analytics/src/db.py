@@ -259,9 +259,12 @@ def get_track_stats_by_paths(conn: psycopg.Connection, paths: List[str]) -> dict
     with conn.cursor() as cur:
         cur.execute(
             """
-            SELECT t.id, t.path, t.file_size, t.file_mtime, af.track_id IS NOT NULL AS has_features
+            SELECT t.id, t.path, t.file_size, t.file_mtime, af.track_id IS NOT NULL AS has_features,
+                   ff.track_id IS NOT NULL AS features_failed, gf.model_version
             FROM tracks t
             LEFT JOIN audio_features af ON t.id = af.track_id
+            LEFT JOIN track_analysis_failures ff ON ff.track_id = t.id AND ff.kind = 'features'
+            LEFT JOIN track_analysis_failures gf ON gf.track_id = t.id AND gf.kind = 'genre'
             WHERE t.path = ANY(%s)
             """,
             (paths,),
@@ -272,6 +275,8 @@ def get_track_stats_by_paths(conn: psycopg.Connection, paths: List[str]) -> dict
                 "file_size": row[2],
                 "file_mtime": row[3],
                 "has_features": row[4],
+                "features_failed": row[5],
+                "genre_failed_version": row[6],
             }
             for row in cur.fetchall()
         }
@@ -400,6 +405,31 @@ def upsert_track_audio_genres(conn: psycopg.Connection, track_id: UUID, result) 
         """,
         (track_id, result.model_version, result.activations, str(result.embedding)),
     )
+
+
+def record_analysis_failure(
+    conn: psycopg.Connection, track_id: UUID, kind: str, error: str, model_version: Optional[str] = None
+) -> None:
+    """Remember that analysis of kind ('features' or 'genre') failed for a track (ADR 0006)."""
+    conn.execute(
+        """
+        INSERT INTO track_analysis_failures (track_id, kind, model_version, error, failed_at)
+        VALUES (%s, %s, %s, %s, NOW())
+        ON CONFLICT (track_id, kind) DO UPDATE SET
+            model_version = EXCLUDED.model_version,
+            error = EXCLUDED.error,
+            failed_at = NOW()
+        """,
+        (track_id, kind, model_version, error),
+    )
+
+
+def clear_analysis_failures(conn: psycopg.Connection, track_id: UUID, kind: Optional[str] = None) -> None:
+    """Forget a track's analysis failures: one kind, or all of them when kind is None."""
+    if kind is None:
+        conn.execute("DELETE FROM track_analysis_failures WHERE track_id = %s", (track_id,))
+    else:
+        conn.execute("DELETE FROM track_analysis_failures WHERE track_id = %s AND kind = %s", (track_id, kind))
 
 
 def audio_genre_versions_by_paths(conn: psycopg.Connection, paths: List[str]) -> dict:
