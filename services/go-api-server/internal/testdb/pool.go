@@ -20,6 +20,31 @@ import (
 // OWNWAVE_TEST_MIGRATIONS overrides the migrations directory.
 func NewPool(t *testing.T) *pgxpool.Pool {
 	t.Helper()
+	connStr := freshDatabase(t)
+	require.NoError(t, RunMigrations(connStr, migrationsPath(t)))
+	return openPool(t, connStr)
+}
+
+// NewPoolAt is NewPool with the migrations applied up to version only, for
+// a test of a migration. migrateTo moves the same database up or down to
+// another version and drops the pool's connections, so no cached plan
+// outlives the schema it was made for.
+func NewPoolAt(t *testing.T, version uint) (pool *pgxpool.Pool, migrateTo func(version uint)) {
+	t.Helper()
+	connStr := freshDatabase(t)
+	path := migrationsPath(t)
+	require.NoError(t, MigrateTo(connStr, path, version))
+	pool = openPool(t, connStr)
+	return pool, func(version uint) {
+		t.Helper()
+		require.NoError(t, MigrateTo(connStr, path, version))
+		pool.Reset()
+	}
+}
+
+// freshDatabase returns the connection string of an empty database.
+func freshDatabase(t *testing.T) string {
+	t.Helper()
 	ctx := context.Background()
 
 	connStr := os.Getenv("OWNWAVE_TEST_DATABASE_URL")
@@ -40,10 +65,12 @@ func NewPool(t *testing.T) *pgxpool.Pool {
 		require.NoError(t, err)
 		waitForPostgres(t, ctx, connStr)
 	}
+	return connStr
+}
 
-	require.NoError(t, RunMigrations(connStr, migrationsPath(t)))
-
-	pool, err := pgxpool.New(ctx, connStr)
+func openPool(t *testing.T, connStr string) *pgxpool.Pool {
+	t.Helper()
+	pool, err := pgxpool.New(context.Background(), connStr)
 	require.NoError(t, err)
 	t.Cleanup(pool.Close)
 	return pool

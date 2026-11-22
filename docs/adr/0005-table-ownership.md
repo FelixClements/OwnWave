@@ -7,8 +7,8 @@ Status: accepted, 2026-11-22. Issue #110, map #109. No migration.
 Go (`services/go-api-server`) and Python (`services/python-analytics`) share
 one Postgres database. Nothing said which service may change which table, so
 a rule about a table could end up split across both services. For example,
-Python builds `tracks` from the music folder, but Go also writes
-`tracks.copy_of`.
+Python builds `tracks` from the music folder, but Go also wrote
+`tracks.copy_of` until #112.
 
 This ADR records who writes what today. Each owner below was checked against
 the `INSERT`, `UPDATE` and `DELETE` statements in both services' non-test
@@ -69,6 +69,7 @@ Python).
 | `spotify_track_matches` | `internal/playlists/service.go` |
 | `playlist_library_picks` | `internal/playlists/picks.go` |
 | `playlist_pick_removals` | `internal/playlists/picks.go` |
+| `track_copies` | `internal/playlists/copies.go` (#112, migration 028) |
 
 ### `app_state`, split by key
 
@@ -112,13 +113,17 @@ vanished track is deleted as before.
 Any change to scans keeps this contract. #116 relies on it: prune still sees
 the full listing.
 
-## Rules today's code breaks
+## Rules the code broke
 
-- **Go writes `tracks.copy_of`.** `internal/playlists/copies.go:141,145`
-  sets and clears it. #112 moves `copy_of` into a Go-owned `track_copies`
-  table, after which no Go code writes `tracks`.
+- **Go wrote `tracks.copy_of`.** Fixed by #112: migration 028 moved
+  `copy_of` into the Go-owned `track_copies` table, and
+  `internal/playlists/copies.go` writes that instead. No Go code writes
+  `tracks` now. When prune re-homes a moved file it keeps the old track's
+  id, so that track's `track_copies` rows stay. The fresh row it deletes
+  loses its rows through `ON DELETE CASCADE`, and the next grouping run
+  rebuilds them.
 
-No other table has two writers.
+No table has two writers now.
 
 ## Planned
 
@@ -126,7 +131,6 @@ Tables and columns that approved tickets will add, with their owner:
 
 | Table or column | Owner | Ticket |
 | --- | --- | --- |
-| `track_copies` | Go | #112 |
 | `track_analysis_failures` | Python | #119 |
 | `scan_jobs.rerun_requested` | Python (a column of a Python table) | #120 |
 

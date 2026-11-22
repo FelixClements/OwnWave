@@ -96,8 +96,9 @@ func loadLocal(ctx context.Context, q interface {
 }
 
 // GroupCopies records which library files are copies of one song
-// (tracks.copy_of) and returns how many files changed. It never touches a
-// file on disk. Running it again changes nothing.
+// (track_copies) and returns how many files changed. It never touches a
+// file on disk or the tracks table, which the library scan owns
+// (docs/adr/0005). Running it again changes nothing.
 func (s *Service) GroupCopies(ctx context.Context) (int, error) {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
@@ -113,7 +114,7 @@ func (s *Service) GroupCopies(ctx context.Context) (int, error) {
 	}
 	want := findCopies(local)
 
-	rows, err := tx.Query(ctx, `SELECT id::text, copy_of::text FROM tracks WHERE copy_of IS NOT NULL`)
+	rows, err := tx.Query(ctx, `SELECT track_id::text, copy_of::text FROM track_copies`)
 	if err != nil {
 		return 0, err
 	}
@@ -138,13 +139,17 @@ func (s *Service) GroupCopies(ctx context.Context) (int, error) {
 	if len(unset) == 0 && len(setIDs) == 0 {
 		return 0, nil
 	}
-	if _, err := tx.Exec(ctx, `UPDATE tracks SET copy_of = NULL WHERE id = ANY($1::uuid[])`, unset); err != nil {
+	if _, err := tx.Exec(ctx, `DELETE FROM track_copies WHERE track_id = ANY($1::uuid[])`, unset); err != nil {
 		return 0, err
 	}
+	// The joins skip a file the scan deleted since loadLocal read it.
 	if _, err := tx.Exec(ctx, `
-		UPDATE tracks t SET copy_of = v.best
+		INSERT INTO track_copies (track_id, copy_of)
+		SELECT v.id, v.best
 		FROM unnest($1::uuid[], $2::uuid[]) AS v(id, best)
-		WHERE t.id = v.id
+		JOIN tracks t ON t.id = v.id
+		JOIN tracks b ON b.id = v.best
+		ON CONFLICT (track_id) DO UPDATE SET copy_of = EXCLUDED.copy_of
 	`, setIDs, setTo); err != nil {
 		return 0, err
 	}

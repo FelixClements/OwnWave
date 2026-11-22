@@ -77,13 +77,19 @@ def test_score_library_applies_corrections(db_url):
         artist = conn.execute("INSERT INTO artists (name) VALUES ('Röyksopp feat. Robyn') RETURNING id").fetchone()[0]
 
         def track(path, artist_id=None, copy_of=None):
-            return conn.execute(
+            track_id = conn.execute(
                 """
-                INSERT INTO tracks (path, title, genre_tag, artist_id, copy_of)
-                VALUES (%s, %s, 'Techno', %s, %s) RETURNING id
+                INSERT INTO tracks (path, title, genre_tag, artist_id)
+                VALUES (%s, %s, 'Techno', %s) RETURNING id
                 """,
-                (path, path, artist_id, copy_of),
+                (path, path, artist_id),
             ).fetchone()[0]
+            if copy_of is not None:
+                conn.execute(
+                    "INSERT INTO track_copies (track_id, copy_of) VALUES (%s, %s)",
+                    (track_id, copy_of),
+                )
+            return track_id
 
         best = track("/m/best.flac")
         copy = track("/m/copy.mp3", copy_of=best)
