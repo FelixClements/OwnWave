@@ -38,7 +38,7 @@ fun ScanSummary.phase(): ScanPhase {
         "completed" -> ScanPhase("Completed", 1.0)
         "failed" -> ScanPhase(error?.takeIf { it.isNotBlank() } ?: "Failed", if (total > 0) finished.toDouble() / total else null)
         else -> when {
-            total == 0 -> ScanPhase("Looking for music folders…", null)
+            total == 0 -> ScanPhase("Checking for changes…", null)
             finished < total -> ScanPhase("Importing folders: $finished of $total", finished.toDouble() / total)
             else -> ScanPhase("Finishing scan…", 1.0)
         }

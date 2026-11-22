@@ -183,7 +183,7 @@ def get_scan_job(conn: psycopg.Connection, job_id: UUID) -> Optional[dict]:
 _STAT_COUNTERS = ("total_files", "imported", "scanned", "features", "model_success", "model_failed")
 
 
-def _scan_stats(conn: psycopg.Connection, job_id: UUID) -> dict:
+def scan_stats(conn: psycopg.Connection, job_id: UUID) -> dict:
     """Sum the per-folder progress rows of a master job.
 
     A scan with no music folders only has the master job's own row.
@@ -229,7 +229,7 @@ def get_scan_status(conn: psycopg.Connection, job_id: UUID) -> Optional[dict]:
     job = get_scan_job(conn, job_id)
     if not job:
         return None
-    job["stats"] = _scan_stats(conn, job_id)
+    job["stats"] = scan_stats(conn, job_id)
     job["folders"] = _scan_folders(conn, job_id)
     return job
 
@@ -248,7 +248,7 @@ def list_scan_jobs(conn: psycopg.Connection, limit: int) -> List[dict]:
         jobs = [_scan_job_row(row) for row in cur.fetchall()]
     for job in jobs:
         job_id = UUID(job["id"])
-        stats = _scan_stats(conn, job_id)
+        stats = scan_stats(conn, job_id)
         stats["failed_files"] = len(stats.pop("failed_paths"))
         job["stats"] = stats
         job["folders"] = _scan_folders(conn, job_id)

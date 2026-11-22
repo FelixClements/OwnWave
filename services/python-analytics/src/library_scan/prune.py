@@ -27,11 +27,6 @@ def list_audio_files(root: Path) -> Set[str]:
     return {str(p) for p in root.rglob("*") if is_supported_audio_file(p)}
 
 
-def music_dirs(root: Path) -> List[str]:
-    """Every directory under root (including root) that directly contains audio."""
-    return sorted({str(Path(p).parent) for p in list_audio_files(root)})
-
-
 def match_moved_tracks(missing: List[dict], new: List[dict]) -> List[Tuple[dict, dict]]:
     """Pair tracks whose file vanished with tracks first seen in this scan.
 

@@ -1,6 +1,6 @@
 import logging
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 from uuid import UUID
 
 import psycopg
@@ -21,8 +21,8 @@ from db import (
 )
 from models import FailedPath, ScanResult
 from audio_metadata import (
+    file_mtime,
     get_duration,
-    get_file_stats,
     get_sample_info,
     is_supported_audio_file,
     parse_int_tag,
@@ -30,18 +30,23 @@ from audio_metadata import (
 
 log = logging.getLogger(__name__)
 
-def _file_changed(
-    file_path: Path,
-    stats: dict,
-    force: bool,
-) -> bool:
+# A planned file: path, size in bytes, st_mtime (library_scan.plan).
+PlannedFile = Tuple[str, int, float]
+
+
+def _file_changed(stats: dict, size: int, mtime, force: bool) -> bool:
     if force:
         return True
-    size, mtime = get_file_stats(file_path)
-    return (
-        stats.get("file_size") != size
-        or stats.get("file_mtime") != mtime
-    )
+    return stats.get("file_size") != size or stats.get("file_mtime") != mtime
+
+
+def _list_folder(folder: Path) -> List[PlannedFile]:
+    """The audio files directly inside folder, for callers without a plan."""
+    planned = []
+    for p in sorted(p for p in folder.iterdir() if is_supported_audio_file(p)):
+        st = p.stat()
+        planned.append((str(p), st.st_size, st.st_mtime))
+    return planned
 
 
 def import_folder(
@@ -50,8 +55,13 @@ def import_folder(
     master_job_id: Optional[UUID] = None,
     analyze: bool = True,
     force: bool = False,
+    files: Optional[Sequence[PlannedFile]] = None,
 ) -> ScanResult:
-    """Import the audio files directly inside one folder (not its subfolders).
+    """Import the audio files of one folder (not its subfolders).
+
+    files is the scan plan's list for this folder: (path, size, st_mtime) of
+    each file that needs work. Without it the folder is listed here (folder
+    tasks queued before scan plans existed).
 
     Never deletes tracks: removal of vanished files happens once per scan in
     library_scan.prune, against a full listing of the library.
@@ -60,10 +70,10 @@ def import_folder(
     if not folder.exists():
         raise FileNotFoundError(f"Music path does not exist: {folder}")
 
-    files = sorted(p for p in folder.iterdir() if is_supported_audio_file(p))
-    result = ScanResult(total_files=len(files))
+    planned = [(str(p), int(size), float(mtime)) for p, size, mtime in files] if files is not None else _list_folder(folder)
+    result = ScanResult(total_files=len(planned))
 
-    if not files:
+    if not planned:
         if job_id:
             with get_conn() as conn:
                 upsert_scan_job_progress(conn, job_id, master_job_id, result)
@@ -77,7 +87,7 @@ def import_folder(
     album_cache: Dict[tuple, UUID] = {}
 
     with get_conn() as conn:
-        paths = [str(f) for f in files]
+        paths = [p for p, _, _ in planned]
         existing_stats = get_track_stats_by_paths(conn, paths)
         genre_versions = audio_genre_versions_by_paths(conn, paths) if genre_model else {}
 
@@ -86,12 +96,11 @@ def import_folder(
             conn.commit()
 
         try:
-            for file_path in files:
-                path_str = str(file_path)
+            for path_str, size, mtime in planned:
                 stats = existing_stats.get(path_str, {})
                 if _import_file(
-                    conn, file_path, stats, analyzers, genre_model, genre_versions.get(path_str),
-                    artist_cache, album_cache, force, result, processed_ids,
+                    conn, Path(path_str), size, file_mtime(mtime), stats, analyzers, genre_model,
+                    genre_versions.get(path_str), artist_cache, album_cache, force, result, processed_ids,
                 ):
                     if job_id:
                         upsert_scan_job_progress(conn, job_id, master_job_id, result)
@@ -109,6 +118,8 @@ def import_folder(
 def _import_file(
     conn: psycopg.Connection,
     file_path: Path,
+    size: int,
+    mtime,
     stats: dict,
     analyzers: Optional[List[Any]],
     genre_model,
@@ -124,8 +135,8 @@ def _import_file(
     changed = False
     try:
         track_id = stats.get("id")
-        if _file_changed(file_path, stats, force):
-            track_rec = _build_track_record(conn, file_path, artist_cache, album_cache)
+        if _file_changed(stats, size, mtime, force):
+            track_rec = _build_track_record(conn, file_path, size, mtime, artist_cache, album_cache)
             upsert_tracks_batch(conn, [track_rec])
             track_id = get_track_stats_by_paths(conn, [path_str])[path_str]["id"]
             processed_ids.append(track_id)
@@ -166,6 +177,8 @@ def _import_file(
 def _build_track_record(
     conn: psycopg.Connection,
     file_path: Path,
+    file_size: int,
+    mtime,
     artist_cache: Dict[str, UUID],
     album_cache: Dict[tuple, UUID],
 ) -> dict:
@@ -185,7 +198,6 @@ def _build_track_record(
     album_id = album_cache[album_key]
 
     sample_rate, channels = get_sample_info(path_str)
-    file_size, file_mtime = get_file_stats(file_path)
     return {
         "path": path_str,
         "artist_id": artist_id,
@@ -196,7 +208,7 @@ def _build_track_record(
         "sample_rate": sample_rate,
         "channels": channels,
         "file_size": file_size,
-        "file_mtime": file_mtime,
+        "file_mtime": mtime,
         "genre_tag": tags.get("genre"),
     }
 
