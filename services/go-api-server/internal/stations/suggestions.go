@@ -66,9 +66,9 @@ func (s *Service) loadPools(ctx context.Context) (*poolData, error) {
 		{`SELECT id::text, name FROM playlists ORDER BY lower(name)`, func(id, name string) {
 			d.playlists = append(d.playlists, playlistRef{id, name})
 		}},
-		{`SELECT pi.playlist_id::text, COALESCE(mt.copy_of, mt.id)::text FROM playlist_items pi
+		{`SELECT pi.playlist_id::text, ms.song_id::text FROM playlist_items pi
 		  JOIN spotify_track_matches m ON m.spotify_track_id = pi.spotify_track_id
-		  JOIN tracks mt ON mt.id = m.track_id
+		  JOIN songs ms ON ms.track_id = m.track_id
 		  WHERE NOT pi.hidden`, func(p, t string) {
 			if d.matched[p] == nil {
 				d.matched[p] = map[string]bool{}

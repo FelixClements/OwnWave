@@ -79,16 +79,16 @@ func (s *Service) RebuildPicks(ctx context.Context, followLibrary bool) (int, er
 	if err := s.pool.QueryRow(ctx, `
 		SELECT (SELECT COUNT(*) FROM track_audio_genres WHERE embedding IS NOT NULL)::text
 		       || '|' || COALESCE((SELECT MAX(analyzed_at)::text FROM track_audio_genres), '')
-		       || '|' || (SELECT COUNT(*) FROM tracks WHERE copy_of IS NOT NULL)::text
+		       || '|' || (SELECT COUNT(*) FROM songs WHERE NOT best_copy)::text
 	`).Scan(&library); err != nil {
 		return 0, err
 	}
 	rows, err := s.pool.Query(ctx, `
 		SELECT p.id::text, COALESCE(p.picks_input, ''), md5(COALESCE((
-			SELECT string_agg(DISTINCT COALESCE(mt.copy_of, mt.id)::text, ',' ORDER BY COALESCE(mt.copy_of, mt.id)::text)
+			SELECT string_agg(DISTINCT ms.song_id::text, ',' ORDER BY ms.song_id::text)
 			FROM playlist_items pi
 			JOIN spotify_track_matches m ON m.spotify_track_id = pi.spotify_track_id
-			JOIN tracks mt ON mt.id = m.track_id
+			JOIN songs ms ON ms.track_id = m.track_id
 			WHERE pi.playlist_id = p.id AND NOT pi.hidden), ''))
 		FROM playlists p
 	`)
@@ -126,10 +126,10 @@ func (s *Service) rebuildPlaylistPicks(ctx context.Context, playlistID, input st
 	}
 
 	const seedSQL = `
-		SELECT DISTINCT COALESCE(mt.copy_of, mt.id) AS id
+		SELECT DISTINCT ms.song_id AS id
 		FROM playlist_items pi
 		JOIN spotify_track_matches m ON m.spotify_track_id = pi.spotify_track_id
-		JOIN tracks mt ON mt.id = m.track_id
+		JOIN songs ms ON ms.track_id = m.track_id
 		WHERE pi.playlist_id = $1::uuid AND NOT pi.hidden`
 	rows, err := tx.Query(ctx, `
 		SELECT t.id::text, t.title, COALESCE(a.name, '')
@@ -160,7 +160,7 @@ func (s *Service) rebuildPlaylistPicks(ctx context.Context, playlistID, input st
 			CROSS JOIN LATERAL (
 				SELECT c.track_id, 1 - (c.embedding <=> sg.embedding) AS similarity
 				FROM track_audio_genres c
-				JOIN tracks ct ON ct.id = c.track_id AND ct.copy_of IS NULL
+				JOIN songs cs ON cs.track_id = c.track_id AND cs.best_copy
 				WHERE c.embedding IS NOT NULL
 				  AND c.track_id NOT IN (SELECT id FROM seeds)
 				  AND c.track_id NOT IN (SELECT r.track_id FROM playlist_pick_removals r WHERE r.playlist_id = $1::uuid)

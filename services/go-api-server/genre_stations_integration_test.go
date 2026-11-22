@@ -157,7 +157,7 @@ func TestGenreStationsPlayTheWholeLibraryByMainGenre(t *testing.T) {
 	copyID := song("Domino (2011 Remaster)", "Oxia", "techno", 301)
 	f.refresh()
 	require.Equal(t, []string{"Techno/genre/26"}, f.visible(alice))
-	require.Equal(t, "1", f.one(`SELECT COUNT(*)::text FROM tracks WHERE copy_of IS NOT NULL`))
+	require.Equal(t, "1", f.one(`SELECT COUNT(*)::text FROM songs WHERE NOT best_copy`))
 	require.Equal(t, "2", f.one(`SELECT COUNT(*)::text FROM tracks WHERE title LIKE 'Domino%'`), "both files stay")
 
 	// A hide of one copy keeps the whole song off.

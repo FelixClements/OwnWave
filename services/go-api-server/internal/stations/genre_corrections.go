@@ -61,7 +61,7 @@ func (s *Service) SaveGenreCorrection(ctx context.Context, req GenreCorrectionRe
 		return fmt.Errorf("%w: track_id must be a valid id", ErrInvalid)
 	}
 	var song string
-	err := s.pool.QueryRow(ctx, `SELECT COALESCE(copy_of, id)::text FROM tracks WHERE id = $1::uuid`, req.TrackID).Scan(&song)
+	err := s.pool.QueryRow(ctx, `SELECT song_id::text FROM songs WHERE track_id = $1::uuid`, req.TrackID).Scan(&song)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return fmt.Errorf("%w: unknown track", ErrInvalid)
 	}
@@ -121,26 +121,27 @@ type GenreReviewItem struct {
 func (s *Service) GenreReview(ctx context.Context, limit int) ([]GenreReviewItem, error) {
 	rows, err := s.pool.Query(ctx, `
 		WITH hides AS (
-			SELECT COALESCE(ht.copy_of, ht.id) AS song, COUNT(DISTINCT h.user_id)::int AS users
+			SELECT hs.song_id AS song, COUNT(DISTINCT h.user_id)::int AS users
 			FROM station_hidden_tracks h
-			JOIN tracks ht ON ht.id = h.track_id
+			JOIN songs hs ON hs.track_id = h.track_id
 			JOIN stations st ON st.id = h.station_id AND st.auto_genre IS NOT NULL
 			GROUP BY 1
 		), disagree AS (
-			SELECT DISTINCT c.copy_of AS song
-			FROM tracks c
-			JOIN track_station_genres cg ON cg.track_id = c.id AND cg.is_primary
-			JOIN track_station_genres bg ON bg.track_id = c.copy_of AND bg.is_primary
-			WHERE cg.genre <> bg.genre
+			SELECT DISTINCT c.song_id AS song
+			FROM songs c
+			JOIN track_station_genres cg ON cg.track_id = c.track_id AND cg.is_primary
+			JOIN track_station_genres bg ON bg.track_id = c.song_id AND bg.is_primary
+			WHERE NOT c.best_copy AND cg.genre <> bg.genre
 		)
 		SELECT t.id::text, t.title, a.name, g.genre, g.score,
 		       COALESCE(h.users, 0), d.song IS NOT NULL
 		FROM tracks t
+		JOIN songs s ON s.track_id = t.id
 		JOIN track_station_genres g ON g.track_id = t.id AND g.is_primary AND NOT g.corrected
 		LEFT JOIN artists a ON a.id = t.artist_id
 		LEFT JOIN hides h ON h.song = t.id
 		LEFT JOIN disagree d ON d.song = t.id
-		WHERE t.copy_of IS NULL
+		WHERE s.best_copy
 		  AND NOT EXISTS (SELECT 1 FROM genre_corrections c WHERE c.track_id = t.id)
 		ORDER BY COALESCE(h.users, 0) DESC, d.song IS NOT NULL DESC, g.score, t.id
 		LIMIT $1

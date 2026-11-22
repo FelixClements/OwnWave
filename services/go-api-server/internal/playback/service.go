@@ -53,9 +53,9 @@ func (s *Service) BuildQueue(ctx context.Context, userID, stationID string, def 
 		LEFT JOIN artists a ON t.artist_id = a.id
 		LEFT JOIN albums al ON t.album_id = al.id
 		LEFT JOIN (
-			SELECT COALESCE(ht.copy_of, ht.id) AS song, MAX(h.played_at) AS last_played
+			SELECT hs.song_id AS song, MAX(h.played_at) AS last_played
 			FROM listening_history h
-			JOIN tracks ht ON ht.id = h.track_id
+			JOIN songs hs ON hs.track_id = h.track_id
 			WHERE h.user_id = $1::uuid AND h.station_id = $2::uuid
 			GROUP BY 1
 		) lp ON lp.song = t.id`

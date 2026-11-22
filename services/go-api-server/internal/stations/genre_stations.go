@@ -99,8 +99,8 @@ func autoEnabled(ctx context.Context, q queryer) (bool, error) {
 func genreTrackCounts(ctx context.Context, q queryer) (map[string]int, error) {
 	rows, err := q.Query(ctx, `
 		SELECT g.genre, COUNT(*) FROM track_station_genres g
-		JOIN tracks t ON t.id = g.track_id
-		WHERE g.is_primary AND t.copy_of IS NULL
+		JOIN songs s ON s.track_id = g.track_id
+		WHERE g.is_primary AND s.best_copy
 		GROUP BY g.genre`)
 	if err != nil {
 		return nil, err

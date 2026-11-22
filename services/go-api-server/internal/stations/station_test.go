@@ -111,7 +111,7 @@ func TestWhereGenreStationPlaysTheLibraryByMainGenre(t *testing.T) {
 	require.True(t, d.Library)
 	var args Args
 	sql := d.Where(&args)
-	require.Contains(t, sql, "t.copy_of IS NULL")
+	require.Contains(t, sql, "s.best_copy")
 	require.Contains(t, sql, "g.is_primary")
 	require.NotContains(t, sql, "playlist")
 	require.Equal(t, Args{[]string{"techno"}}, args)
@@ -120,8 +120,8 @@ func TestWhereGenreStationPlaysTheLibraryByMainGenre(t *testing.T) {
 func TestWhereCustomStationPlaysMatchesOfBestCopies(t *testing.T) {
 	var args Args
 	sql := Definition{PlaylistIDs: []string{idA}}.Where(&args)
-	require.Contains(t, sql, "t.copy_of IS NULL")
-	require.Contains(t, sql, "COALESCE(mt.copy_of, mt.id)")
+	require.Contains(t, sql, "t.id IN (\n\t\tSELECT ms.song_id", "plays each match's song, by its best copy")
+	require.Contains(t, sql, "JOIN songs ms ON ms.track_id = m.track_id")
 	require.Contains(t, sql, "pi.playlist_id = ANY($1::uuid[])")
 	require.Contains(t, sql, "NOT pi.hidden", "hidden songs leave the station")
 	require.NotContains(t, sql, "playlist_library_picks", "picks only with Enhance")
@@ -137,6 +137,6 @@ func TestWhereEnhancedStationAlsoPlaysPicks(t *testing.T) {
 
 	args = nil
 	sql = Definition{AllPlaylists: true, Enhance: true}.Where(&args)
-	require.Contains(t, sql, "FROM playlist_library_picks lp)")
+	require.Contains(t, sql, "FROM playlist_library_picks lp JOIN songs ps ON ps.track_id = lp.track_id)", "every pick, by its song")
 	require.Empty(t, args)
 }

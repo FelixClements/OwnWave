@@ -10,7 +10,7 @@
 // main genre is that genre, evaluated live.
 //
 // Every station plays songs: of several copies of a song, its best copy
-// (tracks.copy_of). Bans, likes, history and hides count for the whole song.
+// (the songs view). Bans, likes, history and hides count for the whole song.
 package stations
 
 import (

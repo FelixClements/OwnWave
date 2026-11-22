@@ -21,33 +21,34 @@ func NewService(pool *pgxpool.Pool) *Service {
 	return &Service{pool: pool}
 }
 
-// sameSong is an SQL predicate: tracks a and b are copies of one song.
-func sameSong(a, b string) string {
-	return `COALESCE(` + a + `.copy_of, ` + a + `.id) = COALESCE(` + b + `.copy_of, ` + b + `.id)`
-}
+// The predicates below are on `tracks t` where t is a song's best copy, as
+// Definition.Where yields them, so t.id is the song's id (songs.song_id).
+// Feedback and hides on any copy of the song count.
 
-// NotBanned is an SQL predicate on `tracks t` that drops the songs the
-// user (at placeholder userArg) banned, through any of their copies.
+// NotBanned is an SQL predicate on a best copy `tracks t` that drops the
+// songs the user (at placeholder userArg) banned.
 func NotBanned(userArg string) string {
 	return `NOT EXISTS (
-		SELECT 1 FROM track_feedback b JOIN tracks bt ON bt.id = b.track_id
-		WHERE b.user_id = ` + userArg + `::uuid AND b.feedback = 'ban' AND ` + sameSong("bt", "t") + `)`
+		SELECT 1 FROM track_feedback b JOIN songs bs ON bs.track_id = b.track_id
+		WHERE b.user_id = ` + userArg + `::uuid AND b.feedback = 'ban' AND bs.song_id = t.id)`
 }
 
-// Liked is an SQL predicate on `tracks t`: the user (at placeholder
-// userArg) liked this song, through any of its copies.
+// Liked is an SQL predicate on a best copy `tracks t`: the user (at
+// placeholder userArg) liked this song. It is an uncorrelated IN, which
+// Postgres hashes once; a correlated EXISTS in the queue's select list
+// raised its cost estimate enough to JIT-compile the query (#111).
 func Liked(userArg string) string {
-	return `EXISTS (
-		SELECT 1 FROM track_feedback l JOIN tracks lt ON lt.id = l.track_id
-		WHERE l.user_id = ` + userArg + `::uuid AND l.feedback = 'like' AND ` + sameSong("lt", "t") + `)`
+	return `t.id IN (
+		SELECT ls.song_id FROM track_feedback l JOIN songs ls ON ls.track_id = l.track_id
+		WHERE l.user_id = ` + userArg + `::uuid AND l.feedback = 'like')`
 }
 
-// NotHidden is an SQL predicate on `tracks t` that drops the songs the
-// user hid on the station (at placeholders userArg and stationArg).
+// NotHidden is an SQL predicate on a best copy `tracks t` that drops the
+// songs the user hid on the station (at placeholders userArg and stationArg).
 func NotHidden(userArg, stationArg string) string {
 	return `NOT EXISTS (
-		SELECT 1 FROM station_hidden_tracks h JOIN tracks ht ON ht.id = h.track_id
-		WHERE h.user_id = ` + userArg + `::uuid AND h.station_id = ` + stationArg + `::uuid AND ` + sameSong("ht", "t") + `)`
+		SELECT 1 FROM station_hidden_tracks h JOIN songs hs ON hs.track_id = h.track_id
+		WHERE h.user_id = ` + userArg + `::uuid AND h.station_id = ` + stationArg + `::uuid AND hs.song_id = t.id)`
 }
 
 // stationColumns reads a station; an all-playlists station lists every
