@@ -23,7 +23,7 @@ func (h *Handler) ListTracks(w http.ResponseWriter, r *http.Request) {
 	if limit > 200 {
 		limit = 200
 	}
-	tracks, err := h.db.ListTracks(r.Context(), limit, offset, q)
+	tracks, err := h.library.ListTracks(r.Context(), limit, offset, q)
 	if err != nil {
 		writeInternalError(w, r, "list tracks", err)
 		return
@@ -32,7 +32,7 @@ func (h *Handler) ListTracks(w http.ResponseWriter, r *http.Request) {
 }
 func (h *Handler) Search(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query().Get("q")
-	results, err := h.db.Search(r.Context(), q)
+	results, err := h.library.Search(r.Context(), q)
 	if err != nil {
 		writeInternalError(w, r, "search", err)
 		return
@@ -40,7 +40,7 @@ func (h *Handler) Search(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, results)
 }
 func (h *Handler) ListAlbums(w http.ResponseWriter, r *http.Request) {
-	albums, err := h.db.ListAlbums(r.Context())
+	albums, err := h.library.ListAlbums(r.Context())
 	if err != nil {
 		writeInternalError(w, r, "list albums", err)
 		return
@@ -48,7 +48,7 @@ func (h *Handler) ListAlbums(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]interface{}{"albums": albums})
 }
 func (h *Handler) ListArtists(w http.ResponseWriter, r *http.Request) {
-	artists, err := h.db.ListArtists(r.Context())
+	artists, err := h.library.ListArtists(r.Context())
 	if err != nil {
 		writeInternalError(w, r, "list artists", err)
 		return
@@ -68,7 +68,7 @@ func (h *Handler) RecordPlay(w http.ResponseWriter, r *http.Request) {
 		StationID string `json:"station_id"`
 	}
 	_ = json.NewDecoder(r.Body).Decode(&req)
-	if err := h.playback.Record(r.Context(), user.ID, trackID, req.StationID); err != nil {
+	if err := h.listening.Record(r.Context(), user.ID, trackID, req.StationID); err != nil {
 		writeInternalError(w, r, "record play", err)
 		return
 	}
@@ -97,7 +97,7 @@ func (h *Handler) RecordFeedback(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "feedback must be like or ban", http.StatusBadRequest)
 		return
 	}
-	if err := h.db.RecordFeedback(r.Context(), user.ID, trackID, req.Feedback); err != nil {
+	if err := h.listening.RecordFeedback(r.Context(), user.ID, trackID, req.Feedback); err != nil {
 		writeInternalError(w, r, "record feedback", err)
 		return
 	}
@@ -119,7 +119,7 @@ func (h *Handler) DeleteFeedback(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "feedback must be like or ban", http.StatusBadRequest)
 		return
 	}
-	if err := h.db.DeleteFeedback(r.Context(), user.ID, trackID, req.Feedback); err != nil {
+	if err := h.listening.DeleteFeedback(r.Context(), user.ID, trackID, req.Feedback); err != nil {
 		writeInternalError(w, r, "delete feedback", err)
 		return
 	}
@@ -130,7 +130,7 @@ func (h *Handler) ListHistory(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	entries, err := h.db.ListHistory(r.Context(), user.ID, 50)
+	entries, err := h.listening.ListHistory(r.Context(), user.ID, 50)
 	if err != nil {
 		writeInternalError(w, r, "list history", err)
 		return
@@ -147,7 +147,7 @@ func (h *Handler) ListFeedback(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "feedback must be like or ban", http.StatusBadRequest)
 		return
 	}
-	tracks, err := h.db.ListFeedback(r.Context(), user.ID, feedback, 100)
+	tracks, err := h.listening.ListFeedback(r.Context(), user.ID, feedback, 100)
 	if err != nil {
 		writeInternalError(w, r, "list feedback", err)
 		return
@@ -159,7 +159,7 @@ func (h *Handler) GetTrack(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	track, err := h.db.GetTrackByID(r.Context(), id)
+	track, err := h.library.GetTrackByID(r.Context(), id)
 	if err != nil {
 		http.Error(w, "track not found", 404)
 		return
@@ -195,7 +195,7 @@ func (h *Handler) GetTrackCover(w http.ResponseWriter, r *http.Request) {
 // trackCover returns a track's embedded cover art. Errors: pgx.ErrNoRows for
 // an unknown track, streaming.ErrNoCover when it has no art, else a failure.
 func (h *Handler) trackCover(ctx context.Context, trackID string) ([]byte, error) {
-	track, err := h.db.GetTrackByID(ctx, trackID)
+	track, err := h.library.GetTrackByID(ctx, trackID)
 	if err != nil {
 		return nil, err
 	}

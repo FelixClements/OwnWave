@@ -15,7 +15,7 @@ import (
 
 	"ownwave/api/internal/stations"
 	"ownwave/api/internal/streaming"
-	"ownwave/api/internal/testffmpeg"
+	"ownwave/api/internal/testutil/testffmpeg"
 )
 
 // useFakeCovers points the handler at a fake ffmpeg and a temp music dir,

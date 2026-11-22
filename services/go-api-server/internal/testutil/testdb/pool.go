@@ -82,7 +82,7 @@ func migrationsPath(t *testing.T) string {
 	}
 	_, filename, _, ok := runtime.Caller(0)
 	require.True(t, ok)
-	return filepath.Join(filepath.Dir(filename), "../../../../database/migrations")
+	return filepath.Join(filepath.Dir(filename), "../../../../../database/migrations")
 }
 
 func waitForPostgres(t *testing.T, ctx context.Context, connStr string) {

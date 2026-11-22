@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"log/slog"
 	"net/http"
 	"time"
@@ -9,9 +10,11 @@ import (
 
 	"ownwave/api/internal/analytics"
 	"ownwave/api/internal/auth"
+	"ownwave/api/internal/library"
+	"ownwave/api/internal/listening"
 	"ownwave/api/internal/pipeline"
-	"ownwave/api/internal/playback"
 	"ownwave/api/internal/playlists"
+	"ownwave/api/internal/settings"
 	"ownwave/api/internal/soullite"
 	"ownwave/api/internal/spotify"
 	"ownwave/api/internal/stations"
@@ -19,9 +22,11 @@ import (
 )
 
 type Handler struct {
-	db           *DB
+	db           pinger
 	auth         *auth.Service
-	playback     *playback.Service
+	library      *library.Service
+	listening    *listening.Service
+	settings     *settings.Service
 	playlists    *playlists.Service
 	stations     *stations.Service
 	pipeline     *pipeline.Runner
@@ -35,6 +40,11 @@ type Handler struct {
 	logins       *loginThrottle   // nil: no per-username limit
 	soullite     *soullite.Client // nil: SoulLite integration off
 	setup        *setupToken
+}
+
+// pinger checks that the database answers.
+type pinger interface {
+	Ping(ctx context.Context) error
 }
 
 // Config holds the environment-derived settings for NewHandler.
@@ -71,9 +81,11 @@ func NewHandler(pool *pgxpool.Pool, cfg Config) *Handler {
 	setup := newSetupToken(cfg.SetupToken)
 	return &Handler{
 		transcodes:   transcodes,
-		db:           NewDB(pool),
+		db:           pool,
 		auth:         auth.NewService(pool, auth.WithSetupToken(setup.value)),
-		playback:     playback.NewService(pool),
+		library:      library.NewService(pool),
+		listening:    listening.NewService(pool),
+		settings:     settings.NewService(pool),
 		playlists:    playlistService,
 		stations:     stationService,
 		pipeline:     pipeline.New(pool, playlistService, stationService),

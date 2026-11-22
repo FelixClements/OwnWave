@@ -12,16 +12,18 @@ import (
 	"testing"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/require"
 
 	"ownwave/api/internal/auth"
 	"ownwave/api/internal/stations"
-	"ownwave/api/internal/testdb"
+	"ownwave/api/internal/testutil/testdb"
 )
 
 type stationsFixture struct {
 	t    *testing.T
 	ctx  context.Context
+	pool *pgxpool.Pool
 	h    *Handler
 	exec func(sql string, args ...any)
 	one  func(sql string, args ...any) string
@@ -30,7 +32,7 @@ type stationsFixture struct {
 func newStationsFixture(t *testing.T) *stationsFixture {
 	pool := testdb.NewPool(t)
 	ctx := context.Background()
-	f := &stationsFixture{t: t, ctx: ctx, h: NewHandler(pool, Config{})}
+	f := &stationsFixture{t: t, ctx: ctx, pool: pool, h: NewHandler(pool, Config{})}
 	f.exec = func(sql string, args ...any) {
 		t.Helper()
 		_, err := pool.Exec(ctx, sql, args...)

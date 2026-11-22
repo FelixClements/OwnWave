@@ -6,6 +6,8 @@ import (
 	"strings"
 
 	"github.com/jackc/pgx/v5"
+
+	"ownwave/api/internal/settings"
 )
 
 // Genre stations: one shared station per station genre, playing every song
@@ -25,7 +27,8 @@ const (
 // requests, the background runner and API instances.
 const refreshLock = 4_242_101
 
-const autoStationsKey = "auto_stations"
+// autoStationsKey is the app_state key that switches genre stations on or off.
+const autoStationsKey = string(settings.AutoStations)
 
 // Change kinds reported by Refresh.
 const (

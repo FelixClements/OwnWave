@@ -15,7 +15,7 @@ import (
 
 	"ownwave/api/internal/playlists"
 	"ownwave/api/internal/spotify"
-	"ownwave/api/internal/testdb"
+	"ownwave/api/internal/testutil/testdb"
 )
 
 const spotifyID = "37i9dQZF1DX6J5NfMJS675"

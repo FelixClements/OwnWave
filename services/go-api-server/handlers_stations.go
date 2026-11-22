@@ -10,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"ownwave/api/internal/auth"
+	"ownwave/api/internal/listening"
 	"ownwave/api/internal/stations"
 	"ownwave/api/internal/streaming"
 )
@@ -154,7 +155,7 @@ func (h *Handler) ListHiddenTracks(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	tracks, err := h.stations.HiddenTracks(r.Context(), user.ID, st.ID)
+	tracks, err := h.listening.HiddenTracks(r.Context(), user.ID, st.ID)
 	if err != nil {
 		writeInternalError(w, r, "list hidden tracks", err)
 		return
@@ -178,8 +179,13 @@ func (h *Handler) HideTrack(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid track_id", http.StatusBadRequest)
 		return
 	}
-	if err := h.stations.HideTrack(r.Context(), user.ID, st.ID, req.TrackID); err != nil {
-		writeStationError(w, r, "hide track", err)
+	if err := h.listening.HideTrack(r.Context(), user.ID, st.ID, req.TrackID); err != nil {
+		if errors.Is(err, listening.ErrNotFound) {
+			// The same answer as before the move to listening (#114).
+			http.Error(w, "station not found", http.StatusNotFound)
+			return
+		}
+		writeInternalError(w, r, "hide track", err)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -195,7 +201,7 @@ func (h *Handler) UnhideTrack(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if err := h.stations.UnhideTrack(r.Context(), user.ID, st.ID, trackID); err != nil {
+	if err := h.listening.UnhideTrack(r.Context(), user.ID, st.ID, trackID); err != nil {
 		writeInternalError(w, r, "unhide track", err)
 		return
 	}

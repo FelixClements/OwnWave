@@ -13,7 +13,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"ownwave/api/internal/testdb"
+	"ownwave/api/internal/testutil/testdb"
 )
 
 func setupStatus(t *testing.T, h *Handler, cookies ...*http.Cookie) map[string]any {

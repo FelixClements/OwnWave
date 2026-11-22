@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"ownwave/api/internal/testffmpeg"
+	"ownwave/api/internal/testutil/testffmpeg"
 )
 
 func TestCoverCacheHit(t *testing.T) {

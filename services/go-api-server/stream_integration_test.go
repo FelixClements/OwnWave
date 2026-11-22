@@ -14,7 +14,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"ownwave/api/internal/auth"
-	"ownwave/api/internal/testdb"
+	"ownwave/api/internal/testutil/testdb"
 )
 
 // TestStreamQualitiesWithFFmpeg streams a real file in every quality.

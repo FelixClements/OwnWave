@@ -17,6 +17,10 @@ log = logging.getLogger(__name__)
 # Serialises scan creation so two requests cannot both find no active scan.
 _SCAN_LOCK = 4_242_002
 
+# The app_state key score_genres writes (ADR 0005). Go reads it as
+# settings.GenresScored in internal/settings.
+GENRES_SCORED_KEY = "genres_scored"
+
 
 def active_scan(conn, path: str) -> Optional[UUID]:
     """The pending or running top-level scan of path, if any."""
@@ -296,10 +300,10 @@ def score_genres() -> dict:
         summary = score_library(conn, load_labels(GENRE_MODEL_DIR))
         conn.execute(
             """
-            INSERT INTO app_state (key, value, updated_at) VALUES ('genres_scored', %s, NOW())
+            INSERT INTO app_state (key, value, updated_at) VALUES (%s, %s, NOW())
             ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()
             """,
-            (Jsonb({"tracks": summary["tracks"], "scored": summary["scored"]}),),
+            (GENRES_SCORED_KEY, Jsonb({"tracks": summary["tracks"], "scored": summary["scored"]}),),
         )
         notify_pipeline(conn, "genres_scored")
         conn.commit()

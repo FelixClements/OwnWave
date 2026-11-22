@@ -20,6 +20,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"ownwave/api/internal/playlists"
+	"ownwave/api/internal/settings"
 	"ownwave/api/internal/stations"
 )
 
@@ -295,8 +296,8 @@ func (r *Runner) Status(ctx context.Context, limit int) (Status, error) {
 	var scoring GenreScoring
 	err = r.pool.QueryRow(ctx, `
 		SELECT updated_at, COALESCE((value->>'tracks')::int, 0), COALESCE((value->>'scored')::int, 0)
-		FROM app_state WHERE key = 'genres_scored'
-	`).Scan(&scoring.At, &scoring.Tracks, &scoring.Scored)
+		FROM app_state WHERE key = $1
+	`, string(settings.GenresScored)).Scan(&scoring.At, &scoring.Tracks, &scoring.Scored)
 	switch {
 	case err == nil:
 		out.GenresScored = &scoring
