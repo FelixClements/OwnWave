@@ -1,13 +1,11 @@
 package analytics
 
 import (
-	"bytes"
 	"context"
+	"fmt"
 	"io"
 	"net/http"
-	"net/url"
 	"os"
-	"strconv"
 	"strings"
 	"time"
 )
@@ -35,60 +33,35 @@ func NewHTTPClientWithSecret(baseURL, secret string) *HTTPClient {
 	}
 }
 
-func (c *HTTPClient) Scan(ctx context.Context, body []byte) (*Response, error) {
-	return c.do(ctx, http.MethodPost, "/scan", bytes.NewReader(body))
-}
-
-func (c *HTTPClient) GetJob(ctx context.Context, jobID string) (*Response, error) {
-	return c.do(ctx, http.MethodGet, "/jobs/"+url.PathEscape(jobID), nil)
-}
-
-func (c *HTTPClient) ListJobs(ctx context.Context, limit int) (*Response, error) {
-	return c.do(ctx, http.MethodGet, "/jobs?limit="+strconv.Itoa(limit), nil)
-}
-
-func (c *HTTPClient) Health(ctx context.Context) (*Response, error) {
-	return c.do(ctx, http.MethodGet, "/health", nil)
-}
-
-func (c *HTTPClient) RebuildAnalysis(ctx context.Context) (*Response, error) {
-	return c.do(ctx, http.MethodPost, "/rebuild-analysis", nil)
-}
-
-func (c *HTTPClient) ListGenres(ctx context.Context) (*Response, error) {
-	return c.do(ctx, http.MethodGet, "/genres", nil)
-}
-
-func (c *HTTPClient) GetTrackGenres(ctx context.Context, trackID string) (*Response, error) {
-	return c.do(ctx, http.MethodGet, "/tracks/"+url.PathEscape(trackID)+"/genres", nil)
-}
-
-func (c *HTTPClient) RebuildGenres(ctx context.Context) (*Response, error) {
-	return c.do(ctx, http.MethodPost, "/rebuild-genres", nil)
-}
-
-func (c *HTTPClient) GenreReport(ctx context.Context) (*Response, error) {
-	return c.do(ctx, http.MethodGet, "/genres/report", nil)
-}
-
-func (c *HTTPClient) SetupSummary(ctx context.Context) (*Response, error) {
-	return c.do(ctx, http.MethodGet, "/setup/summary", nil)
-}
-
-func (c *HTTPClient) do(ctx context.Context, method, path string, body io.Reader) (*Response, error) {
-	req, err := http.NewRequestWithContext(ctx, method, c.baseURL+path, body)
-	if err != nil {
-		return nil, err
+func (c *HTTPClient) Health(ctx context.Context) error {
+	status, err := c.do(ctx, http.MethodGet, "/health")
+	if err == nil && status != http.StatusOK {
+		err = fmt.Errorf("status %d", status)
 	}
-	if body != nil {
-		req.Header.Set("Content-Type", "application/json")
+	return err
+}
+
+func (c *HTTPClient) RebuildGenres(ctx context.Context) error {
+	status, err := c.do(ctx, http.MethodPost, "/rebuild-genres")
+	if err == nil && status >= http.StatusBadRequest {
+		err = fmt.Errorf("analytics answered %d", status)
+	}
+	return err
+}
+
+func (c *HTTPClient) do(ctx context.Context, method, path string) (int, error) {
+	req, err := http.NewRequestWithContext(ctx, method, c.baseURL+path, nil)
+	if err != nil {
+		return 0, err
 	}
 	if c.secret != "" {
 		req.Header.Set("X-Internal-Token", c.secret)
 	}
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return nil, err
+		return 0, err
 	}
-	return readResponse(resp)
+	defer resp.Body.Close()
+	_, _ = io.Copy(io.Discard, resp.Body)
+	return resp.StatusCode, nil
 }

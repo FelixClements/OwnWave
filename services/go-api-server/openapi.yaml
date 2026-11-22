@@ -204,10 +204,11 @@ paths:
       operationId: getSetupSummary
       tags: [auth]
       summary: Library summary shown at the end of setup (admin)
+      x-python-path: /setup/summary
       responses:
         "200":
           description: Summary
-          content: { application/json: { schema: { type: object, properties: { total_tracks: { type: integer } } } } }
+          content: { application/json: { schema: { type: object, required: [total_tracks], properties: { total_tracks: { type: integer } } } } }
 
   # --- playback -----------------------------------------------------------
   /api/stream/{id}:
@@ -345,6 +346,7 @@ paths:
       operationId: getTrackGenres
       tags: [genres]
       summary: A track's station genres
+      x-python-path: /tracks/{id}/genres
       parameters: [{ $ref: "#/components/parameters/id" }]
       responses:
         "200":
@@ -353,6 +355,7 @@ paths:
             application/json:
               schema:
                 type: object
+                required: [track_id, genres]
                 properties:
                   track_id: { type: string }
                   genres:
@@ -666,6 +669,7 @@ paths:
       operationId: listGenres
       tags: [genres]
       summary: Station genres with library-wide counts
+      x-python-path: /genres
       responses:
         "200": { description: Distribution, content: { application/json: { schema: { $ref: "#/components/schemas/GenreDistribution" } } } }
 
@@ -675,15 +679,27 @@ paths:
       operationId: startScan
       tags: [admin]
       summary: Start a library scan
+      description: |
+        Without `path`, the analytics service scans its own MUSIC_DIR. SoulLite
+        calls this after each sync (ADR 0003).
+      x-python-path: /scan
       requestBody:
         content: { application/json: { schema: { type: object, properties: { path: { type: string }, force: { type: boolean } } } } }
       responses:
-        "200": { $ref: "#/components/responses/Object" }
+        "200":
+          description: Scan queued
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [job_id, status]
+                properties: { job_id: { type: string }, status: { type: string } }
   /api/admin/scan/{id}:
     get:
       operationId: getScan
       tags: [admin]
       summary: A scan's status
+      x-python-path: /jobs/{id}
       parameters: [{ $ref: "#/components/parameters/id" }]
       responses:
         "200": { $ref: "#/components/responses/Object" }
@@ -692,7 +708,8 @@ paths:
       operationId: listScans
       tags: [admin]
       summary: Recent scans
-      parameters: [{ name: limit, in: query, schema: { type: integer, default: 10, maximum: 50 } }]
+      x-python-path: /jobs
+      parameters: [{ name: limit, in: query, schema: { type: integer, default: 10, minimum: 1, maximum: 50 } }]
       responses:
         "200": { $ref: "#/components/responses/Object" }
   /api/admin/health:
@@ -873,20 +890,32 @@ paths:
       operationId: rebuildAnalysis
       tags: [admin]
       summary: Queue the post-scan step (genre refresh)
+      x-python-path: /rebuild-analysis
       responses:
-        "200": { $ref: "#/components/responses/Object" }
+        "200":
+          description: Queued task
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [task_id, status]
+                properties: { task_id: { type: string }, status: { type: string } }
   /api/admin/rebuild-genres:
     post:
       operationId: refreshGenres
       tags: [admin]
       summary: Refresh MusicBrainz artist tags and re-score every track
+      x-python-path: /rebuild-genres
       responses:
-        "200": { $ref: "#/components/responses/Object" }
+        "200":
+          description: Queued
+          content: { application/json: { schema: { type: object, required: [status], properties: { status: { type: string } } } } }
   /api/admin/genres/report:
     get:
       operationId: getGenreReport
       tags: [admin]
       summary: How well the audio model agrees with file genre tags
+      x-python-path: /genres/report
       responses:
         "200": { $ref: "#/components/responses/Object" }
   /api/admin/playlists:

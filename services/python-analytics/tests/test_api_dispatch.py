@@ -31,3 +31,17 @@ def test_rebuild_queues_task(db_url):
         row = conn.execute("SELECT id, task FROM task_queue").fetchone()
     assert resp == {"task_id": str(row[0]), "status": "queued"}
     assert row[1] == "rebuild_analysis"
+
+
+def test_scan_without_path_scans_music_dir(db_url, monkeypatch, tmp_path):
+    # POST /api/admin/scan forwards {"force": ...} or no body at all (SoulLite,
+    # ADR 0003); Python fills in its own MUSIC_DIR.
+    import api
+
+    monkeypatch.setattr(api, "MUSIC_DIR", str(tmp_path))
+
+    for req in (None, api.ScanRequest(force=True)):
+        resp = api.scan(req)
+        with psycopg.connect(db_url) as conn:
+            path = conn.execute("SELECT path FROM scan_jobs WHERE id = %s", (resp["job_id"],)).fetchone()[0]
+        assert path == str(tmp_path.resolve())

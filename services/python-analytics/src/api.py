@@ -1,7 +1,7 @@
 import os
 import secrets
 from contextlib import asynccontextmanager, contextmanager
-from typing import NoReturn
+from typing import Any, NoReturn
 from uuid import UUID
 
 from fastapi import FastAPI, HTTPException, Query, Request
@@ -87,8 +87,54 @@ def _resolved_scan_path(path: str) -> str:
 
 
 class ScanRequest(BaseModel):
-    path: str = MUSIC_DIR
+    # None scans the whole library: this service's own MUSIC_DIR.
+    path: str | None = None
     force: bool = False
+
+
+# Response models. Go proxies these routes unchanged; openapi.yaml documents
+# them, and tests/test_openapi_contract.py checks the two agree.
+class ScanQueued(BaseModel):
+    job_id: str
+    status: str
+
+
+class TaskQueued(BaseModel):
+    task_id: str
+    status: str
+
+
+class Queued(BaseModel):
+    status: str
+
+
+class GenreCount(BaseModel):
+    genre: str
+    name: str
+    primary_tracks: int
+    tracks: int
+    station: bool
+
+
+class GenreDistribution(BaseModel):
+    scored_tracks: int
+    genres: list[GenreCount]
+    warnings: list[str]
+
+
+class TrackGenre(BaseModel):
+    genre: str
+    score: float
+    is_primary: bool
+
+
+class TrackGenres(BaseModel):
+    track_id: str
+    genres: list[TrackGenre]
+
+
+class SetupSummary(BaseModel):
+    total_tracks: int
 
 
 @contextmanager
@@ -109,22 +155,23 @@ def health():
     return {"status": "ok"}
 
 
-@app.post("/scan")
-def scan(req: ScanRequest):
-    scan_path = _resolved_scan_path(req.path)
+@app.post("/scan", response_model=ScanQueued)
+def scan(req: ScanRequest | None = None):
+    req = req or ScanRequest()
+    scan_path = _resolved_scan_path(req.path or MUSIC_DIR)
     with _db_conn() as conn:
         job_id = tasks.queue_library_scan(conn, scan_path, req.force)
         conn.commit()
     return {"job_id": str(job_id), "status": "queued"}
 
 
-@app.get("/jobs")
+@app.get("/jobs", response_model=dict[str, Any])
 def list_jobs(limit: int = Query(10, ge=1, le=50)):
     with _db_conn() as conn:
         return {"jobs": db.list_scan_jobs(conn, limit)}
 
 
-@app.get("/jobs/{job_id}")
+@app.get("/jobs/{job_id}", response_model=dict[str, Any])
 def get_job(job_id: UUID):
     with _db_conn() as conn:
         status = db.get_scan_status(conn, job_id)
@@ -140,12 +187,12 @@ def _enqueue(task: str, **args):
     return {"task_id": str(task_id), "status": "queued"}
 
 
-@app.post("/rebuild-analysis")
+@app.post("/rebuild-analysis", response_model=TaskQueued)
 def rebuild_analysis():
     return _enqueue("rebuild_analysis")
 
 
-@app.post("/rebuild-genres")
+@app.post("/rebuild-genres", response_model=Queued)
 def rebuild_genres():
     """Refresh MusicBrainz artist tags, then re-blend every track's genres.
 
@@ -157,7 +204,7 @@ def rebuild_genres():
     return {"status": "queued"}
 
 
-@app.get("/genres")
+@app.get("/genres", response_model=GenreDistribution)
 def list_genres():
     """Station genres with track counts, plus a warning when one genre dominates."""
     from genre_scoring import distribution
@@ -166,7 +213,7 @@ def list_genres():
         return distribution(conn)
 
 
-@app.get("/genres/report")
+@app.get("/genres/report", response_model=dict[str, Any])
 def genre_report():
     """How well the audio model alone agrees with file genre tags."""
     from genre_audio import load_labels
@@ -176,13 +223,13 @@ def genre_report():
         return agreement_report(conn, load_labels(GENRE_MODEL_DIR))
 
 
-@app.get("/tracks/{track_id}/genres")
+@app.get("/tracks/{track_id}/genres", response_model=TrackGenres)
 def track_genres(track_id: UUID):
     with _db_conn() as conn:
         return {"track_id": str(track_id), "genres": db.get_track_station_genres(conn, track_id)}
 
 
-@app.get("/setup/summary")
+@app.get("/setup/summary", response_model=SetupSummary)
 def setup_summary():
     with _db_conn() as conn:
         return {"total_tracks": db.count_tracks(conn)}

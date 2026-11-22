@@ -121,3 +121,24 @@ func TestOpenAPIOperationIDsAreUnique(t *testing.T) {
 		}
 	}
 }
+
+// TestOpenAPIMarksEveryProxiedRoute: each analytics.Routes entry is marked
+// with x-python-path in openapi.yaml, and nothing else is. The Python contract
+// test (services/python-analytics/tests/test_openapi_contract.py) compares the
+// marked responses with FastAPI's schema.
+func TestOpenAPIMarksEveryProxiedRoute(t *testing.T) {
+	doc, _ := loadSpec(t)
+	marked := map[string]string{}
+	for path, ops := range doc.Paths {
+		for method, op := range ops {
+			if py, ok := op.(map[string]any)["x-python-path"].(string); ok && httpMethods[method] {
+				marked[strings.ToUpper(method)+" "+path] = py
+			}
+		}
+	}
+	want := map[string]string{}
+	for _, rt := range analytics.Routes {
+		want[rt.Method+" /api"+rt.Public] = rt.Python
+	}
+	require.Equal(t, want, marked)
+}
