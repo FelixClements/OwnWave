@@ -12,43 +12,36 @@ import (
 	"ownwave/api/internal/auth"
 )
 
-// Service stores stations and works out their pools and suggestions.
+// Service stores stations and works out their pools, queues and
+// suggestions.
 type Service struct {
-	pool *pgxpool.Pool
+	pool        *pgxpool.Pool
+	recentHours int
 }
 
-func NewService(pool *pgxpool.Pool) *Service {
-	return &Service{pool: pool}
+// defaultRecentHours is the recent-play window when no option sets one.
+const defaultRecentHours = 24
+
+// Option configures a Service.
+type Option func(*Service)
+
+// WithRecentHours sets the recent-play window: songs played on a station
+// within the last hours go to the end of its queue. Zero or less keeps the
+// default of 24.
+func WithRecentHours(hours int) Option {
+	return func(s *Service) {
+		if hours > 0 {
+			s.recentHours = hours
+		}
+	}
 }
 
-// The predicates below are on `tracks t` where t is a song's best copy, as
-// Definition.Where yields them, so t.id is the song's id (songs.song_id).
-// Feedback and hides on any copy of the song count.
-
-// NotBanned is an SQL predicate on a best copy `tracks t` that drops the
-// songs the user (at placeholder userArg) banned.
-func NotBanned(userArg string) string {
-	return `NOT EXISTS (
-		SELECT 1 FROM track_feedback b JOIN songs bs ON bs.track_id = b.track_id
-		WHERE b.user_id = ` + userArg + `::uuid AND b.feedback = 'ban' AND bs.song_id = t.id)`
-}
-
-// Liked is an SQL predicate on a best copy `tracks t`: the user (at
-// placeholder userArg) liked this song. It is an uncorrelated IN, which
-// Postgres hashes once; a correlated EXISTS in the queue's select list
-// raised its cost estimate enough to JIT-compile the query (#111).
-func Liked(userArg string) string {
-	return `t.id IN (
-		SELECT ls.song_id FROM track_feedback l JOIN songs ls ON ls.track_id = l.track_id
-		WHERE l.user_id = ` + userArg + `::uuid AND l.feedback = 'like')`
-}
-
-// NotHidden is an SQL predicate on a best copy `tracks t` that drops the
-// songs the user hid on the station (at placeholders userArg and stationArg).
-func NotHidden(userArg, stationArg string) string {
-	return `NOT EXISTS (
-		SELECT 1 FROM station_hidden_tracks h JOIN songs hs ON hs.track_id = h.track_id
-		WHERE h.user_id = ` + userArg + `::uuid AND h.station_id = ` + stationArg + `::uuid AND hs.song_id = t.id)`
+func NewService(pool *pgxpool.Pool, opts ...Option) *Service {
+	s := &Service{pool: pool, recentHours: defaultRecentHours}
+	for _, opt := range opts {
+		opt(s)
+	}
+	return s
 }
 
 // stationColumns reads a station; an all-playlists station lists every
@@ -105,12 +98,7 @@ func (s *Service) List(ctx context.Context, userID string) ([]Station, error) {
 // Get returns the station if the user may play it. A hidden genre station
 // is not found.
 func (s *Service) Get(ctx context.Context, userID, id string) (Station, error) {
-	st, err := scanStation(s.pool.QueryRow(ctx, `
-		SELECT `+stationColumns+` FROM stations s
-		WHERE s.id = $1::uuid AND `+visibleTo("$2"), id, userID))
-	if errors.Is(err, pgx.ErrNoRows) {
-		return st, ErrNotFound
-	}
+	st, err := s.visible(ctx, userID, id)
 	if err != nil {
 		return st, err
 	}
@@ -118,14 +106,26 @@ func (s *Service) Get(ctx context.Context, userID, id string) (Station, error) {
 	return st, err
 }
 
+// visible reads the station if the user may play it, without its track
+// count; ErrNotFound otherwise.
+func (s *Service) visible(ctx context.Context, userID, id string) (Station, error) {
+	st, err := scanStation(s.pool.QueryRow(ctx, `
+		SELECT `+stationColumns+` FROM stations s
+		WHERE s.id = $1::uuid AND `+visibleTo("$2"), id, userID))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return st, ErrNotFound
+	}
+	return st, err
+}
+
 // PoolSize counts the songs the station plays for the user (bans and hides
 // excluded).
 func (s *Service) PoolSize(ctx context.Context, userID, stationID string, d Definition) (int, error) {
-	args := Args{userID, stationID}
+	args := sqlArgs{userID, stationID}
 	var n int
 	err := s.pool.QueryRow(ctx, `
 		SELECT COUNT(*) FROM tracks t
-		WHERE `+NotBanned("$1")+` AND `+NotHidden("$1", "$2")+` AND `+d.Where(&args), args...).Scan(&n)
+		WHERE `+notBanned("$1")+` AND `+notHidden("$1", "$2")+` AND `+d.where(&args), args...).Scan(&n)
 	return n, err
 }
 

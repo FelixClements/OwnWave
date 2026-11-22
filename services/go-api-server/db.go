@@ -6,8 +6,6 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
-
-	"ownwave/api/internal/playback"
 )
 
 type DB struct {
@@ -18,7 +16,18 @@ func NewDB(pool *pgxpool.Pool) *DB {
 	return &DB{pool: pool}
 }
 
-type Track = playback.Track
+type Track struct {
+	ID              string   `json:"id"`
+	Title           string   `json:"title"`
+	Artist          *string  `json:"artist,omitempty"`
+	Album           *string  `json:"album,omitempty"`
+	Path            string   `json:"-"`
+	TrackNumber     *int     `json:"track_number,omitempty"`
+	DurationSeconds *float64 `json:"duration_seconds,omitempty"`
+	SampleRate      *int     `json:"sample_rate,omitempty"`
+	Channels        *int     `json:"channels,omitempty"`
+	Loudness        *float64 `json:"loudness,omitempty"`
+}
 
 func (db *DB) GetTrackByID(ctx context.Context, id string) (Track, error) {
 	var t Track

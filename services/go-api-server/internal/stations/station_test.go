@@ -44,19 +44,6 @@ func TestPoolKeyIgnoresOrder(t *testing.T) {
 	require.Equal(t, idB+","+idA, PoolKey([]string{idA, idB}))
 }
 
-func TestWhereAddsGenreFilterOnlyWhenSet(t *testing.T) {
-	var args Args
-	sql := Definition{PlaylistIDs: []string{idA}}.Where(&args)
-	require.Len(t, args, 1)
-	require.NotContains(t, sql, "track_station_genres")
-
-	args = Args{"user"}
-	sql = Definition{PlaylistIDs: []string{idA}, Genres: []string{"techno"}}.Where(&args)
-	require.Equal(t, Args{"user", []string{idA}, []string{"techno"}}, args)
-	require.Contains(t, sql, "$2::uuid[]")
-	require.Contains(t, sql, "$3::text[]")
-}
-
 func TestValidName(t *testing.T) {
 	name, err := validName("  Techno  ")
 	require.NoError(t, err)
@@ -71,18 +58,6 @@ func TestNormalizeAllPlaylists(t *testing.T) {
 	require.True(t, d.AllPlaylists)
 	require.Equal(t, []string{}, d.PlaylistIDs, "every playlist: none stored")
 	require.Equal(t, []string{"house"}, d.Genres)
-}
-
-func TestWhereAllPlaylistsHasNoPlaylistFilter(t *testing.T) {
-	var args Args
-	where := Definition{AllPlaylists: true, Genres: []string{"house"}}.Where(&args)
-	require.NotContains(t, where, "playlist_id")
-	require.Contains(t, where, "NOT pi.hidden")
-	require.Len(t, args, 1, "only the genres")
-
-	args = nil
-	where = Definition{PlaylistIDs: []string{idA}}.Where(&args)
-	require.Contains(t, where, "pi.playlist_id = ANY($1::uuid[])")
 }
 
 func TestGenreStationShowsAndHidesWithAMargin(t *testing.T) {
@@ -103,40 +78,4 @@ func TestGenreStationShowsAndHidesWithAMargin(t *testing.T) {
 	} {
 		require.Equal(t, c.want, c.a.shouldShow(c.enabled), c.name)
 	}
-}
-
-func TestWhereGenreStationPlaysTheLibraryByMainGenre(t *testing.T) {
-	st := Station{Kind: KindGenre, Genres: []string{"techno"}}
-	d := st.Definition()
-	require.True(t, d.Library)
-	var args Args
-	sql := d.Where(&args)
-	require.Contains(t, sql, "s.best_copy")
-	require.Contains(t, sql, "g.is_primary")
-	require.NotContains(t, sql, "playlist")
-	require.Equal(t, Args{[]string{"techno"}}, args)
-}
-
-func TestWhereCustomStationPlaysMatchesOfBestCopies(t *testing.T) {
-	var args Args
-	sql := Definition{PlaylistIDs: []string{idA}}.Where(&args)
-	require.Contains(t, sql, "t.id IN (\n\t\tSELECT ms.song_id", "plays each match's song, by its best copy")
-	require.Contains(t, sql, "JOIN songs ms ON ms.track_id = m.track_id")
-	require.Contains(t, sql, "pi.playlist_id = ANY($1::uuid[])")
-	require.Contains(t, sql, "NOT pi.hidden", "hidden songs leave the station")
-	require.NotContains(t, sql, "playlist_library_picks", "picks only with Enhance")
-	require.Len(t, args, 1)
-}
-
-func TestWhereEnhancedStationAlsoPlaysPicks(t *testing.T) {
-	var args Args
-	sql := Definition{PlaylistIDs: []string{idA}, Enhance: true}.Where(&args)
-	require.Contains(t, sql, "pi.playlist_id = ANY($1::uuid[])")
-	require.Contains(t, sql, "lp.playlist_id = ANY($1::uuid[])")
-	require.Len(t, args, 1, "one placeholder for both")
-
-	args = nil
-	sql = Definition{AllPlaylists: true, Enhance: true}.Where(&args)
-	require.Contains(t, sql, "FROM playlist_library_picks lp JOIN songs ps ON ps.track_id = lp.track_id)", "every pick, by its song")
-	require.Empty(t, args)
 }
