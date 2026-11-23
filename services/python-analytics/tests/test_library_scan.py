@@ -158,6 +158,23 @@ def folder_jobs(url: str, master) -> list:
         return [r[0] for r in conn.execute("SELECT path FROM scan_jobs WHERE parent_id = %s", (master,)).fetchall()]
 
 
+def scan_planned_folders(url: str, path: Path):
+    """Queue and run a scan; return its id and the folders it planned.
+
+    Folder jobs are deleted when the scan ends (ADR 0006), so they are read
+    right after trigger_library_scan has run.
+    """
+    import db
+    import task_queue
+
+    job_id = queue_scan(path)
+    with db.get_conn() as conn:
+        assert task_queue.run_one(conn)  # trigger_library_scan
+    planned = folder_jobs(url, job_id)
+    drain_queue()
+    return job_id, planned
+
+
 def test_scan_with_no_changes_queues_nothing_and_sends_no_notify(db_url, tmp_path, monkeypatch):
     import db
     import task_queue
@@ -193,10 +210,9 @@ def test_queued_scan_of_one_new_file_imports_one_folder(db_url, tmp_path, monkey
     drain_queue()
 
     new = write_flac(tmp_path / "C" / "c.flac", "C", freq=660.0)
-    job_id = queue_scan(tmp_path)
-    drain_queue()
+    _, planned = scan_planned_folders(db_url, tmp_path)
 
-    assert folder_jobs(db_url, job_id) == [str(tmp_path / "C")]
+    assert planned == [str(tmp_path / "C")]
     assert str(new) in tracks(db_url)
 
 
@@ -213,14 +229,13 @@ def test_queued_scan_keeps_track_id_of_file_moved_between_folders(db_url, tmp_pa
     moved = tmp_path / "B" / "song.flac"
     moved.parent.mkdir()
     original.rename(moved)
-    job_id = queue_scan(tmp_path)
-    drain_queue()
+    job_id, planned = scan_planned_folders(db_url, tmp_path)
 
     after = tracks(db_url)
     assert after[str(moved)] == track_id
     assert str(original) not in after
     # Only the destination is imported; prune sees the source from the full listing.
-    assert folder_jobs(db_url, job_id) == [str(tmp_path / "B")]
+    assert planned == [str(tmp_path / "B")]
     with db.get_conn() as conn:
         assert db.get_scan_status(conn, job_id)["status"] == "completed"
 
@@ -235,11 +250,10 @@ def test_queued_scan_of_only_deleted_files_prunes_without_folder_tasks(db_url, t
     drain_queue()
 
     gone.unlink()
-    job_id = queue_scan(tmp_path)
-    drain_queue()
+    job_id, planned = scan_planned_folders(db_url, tmp_path)
 
     assert set(tracks(db_url)) == {str(kept)}
-    assert folder_jobs(db_url, job_id) == []
+    assert planned == []
     with db.get_conn() as conn:
         assert db.get_scan_status(conn, job_id)["status"] == "completed"
 
@@ -283,6 +297,140 @@ def test_scan_whose_planned_folder_changes_nothing_skips_downstream(db_url, tmp_
     assert notices == []
 
     # With the failure on record again, the next scan has nothing to do.
-    job_id = queue_scan(tmp_path)
+    _, planned = scan_planned_folders(db_url, tmp_path)
+    assert planned == []
+
+
+def run_task(name: str):
+    """Run the next queued task, which must be `name`."""
+    import db
+    import task_queue
+
+    with db.get_conn() as conn:
+        task = conn.execute("SELECT task FROM task_queue ORDER BY id LIMIT 1").fetchone()
+        assert task and task[0] == name, task
+        assert task_queue.run_one(conn)
+
+
+def masters(url: str) -> list:
+    with psycopg.connect(url) as conn:
+        return conn.execute(
+            "SELECT id, status FROM scan_jobs WHERE parent_id IS NULL ORDER BY created_at"
+        ).fetchall()
+
+
+def test_requests_during_a_running_scan_give_exactly_one_rerun(db_url, tmp_path, monkeypatch):
+    import db
+
+    monkeypatch.setattr("config.MUSICBRAINZ_ENABLED", False)
+    write_flac(tmp_path / "A" / "a.flac", "A")
+    first = queue_scan(tmp_path)
+    run_task("trigger_library_scan")
+
+    # A file lands after its folder was planned; three requests come in.
+    late = write_flac(tmp_path / "B" / "b.flac", "B", freq=550.0)
+    assert {queue_scan(tmp_path) for _ in range(3)} == {first}
     drain_queue()
-    assert folder_jobs(db_url, job_id) == []
+
+    jobs = masters(db_url)
+    assert [status for _, status in jobs] == ["completed", "completed"]
+    assert jobs[0][0] == first
+    assert str(late) in tracks(db_url)
+    with db.get_conn() as conn:
+        assert conn.execute("SELECT count(*) FROM task_queue").fetchone()[0] == 0
+        # The rerun ran without asking for another one.
+        assert conn.execute("SELECT rerun_requested FROM scan_jobs WHERE id = %s", (jobs[1][0],)).fetchone()[0] is False
+
+
+def test_request_during_a_scan_that_stops_early_gives_one_rerun(db_url, tmp_path, monkeypatch):
+    import db
+    import task_queue
+    import tasks
+
+    monkeypatch.setattr("config.MUSICBRAINZ_ENABLED", False)
+    write_flac(tmp_path / "A" / "a.flac", "A")
+    queue_scan(tmp_path)
+    drain_queue()
+
+    # Nothing changed, so the scan stops in trigger_library_scan. The
+    # requests come in while it is planning (status running, no plan yet).
+    first = queue_scan(tmp_path)
+    real_plan = tasks.plan_scan
+
+    def plan_with_requests(*args, **kwargs):
+        for _ in range(2):
+            assert queue_scan(tmp_path) == first
+        return real_plan(*args, **kwargs)
+
+    monkeypatch.setattr(tasks, "plan_scan", plan_with_requests)
+    run_task("trigger_library_scan")
+    monkeypatch.setattr(tasks, "plan_scan", real_plan)
+
+    jobs = masters(db_url)
+    assert [status for _, status in jobs][-2:] == ["completed", "pending"]
+    assert jobs[-2][0] == first
+    with db.get_conn() as conn:
+        queued = [r[0] for r in conn.execute("SELECT task FROM task_queue").fetchall()]
+    assert queued == ["trigger_library_scan"]
+
+    drain_queue()
+    assert [status for _, status in masters(db_url)][-1] == "completed"
+    with db.get_conn() as conn:
+        assert not task_queue.run_one(conn)
+
+
+def test_request_during_a_failed_scan_gives_one_rerun(db_url, tmp_path):
+    import db
+
+    missing = tmp_path / "gone"
+    first = queue_scan(missing)
+    with db.get_conn() as conn:
+        # As if trigger_library_scan had started: the request flags the scan.
+        db.update_scan_job(conn, first, "running")
+        conn.commit()
+    assert queue_scan(missing) == first
+    run_task("trigger_library_scan")
+
+    jobs = masters(db_url)
+    assert [status for _, status in jobs] == ["failed", "pending"]
+    with db.get_conn() as conn:
+        assert db.get_scan_job(conn, first)["error"].startswith("not a directory")
+        queued = [r[0] for r in conn.execute("SELECT task FROM task_queue").fetchall()]
+    assert queued == ["trigger_library_scan"]
+
+
+def test_finished_scan_keeps_its_totals_without_its_folder_jobs(db_url, tmp_path, monkeypatch):
+    import db
+
+    monkeypatch.setattr("config.MUSICBRAINZ_ENABLED", False)
+    write_flac(tmp_path / "A" / "a.flac", "A")
+    write_flac(tmp_path / "B" / "b.flac", "B", freq=550.0)
+    broken = tmp_path / "C" / "broken.flac"
+    broken.parent.mkdir()
+    broken.write_bytes(b"not audio")
+
+    job_id = queue_scan(tmp_path)
+    run_task("trigger_library_scan")
+    with db.get_conn() as conn:
+        for _ in range(3):
+            run_task("process_audio_folder")
+        # Every folder ran; finalize_scan has not. These are the children's totals.
+        running = db.get_scan_status(conn, job_id)
+    drain_queue()
+
+    with db.get_conn() as conn:
+        done = db.get_scan_status(conn, job_id)
+        listed = db.list_scan_jobs(conn, 10)[0]
+        children = conn.execute("SELECT count(*) FROM scan_jobs WHERE parent_id = %s", (job_id,)).fetchone()[0]
+        progress = conn.execute("SELECT count(*) FROM scan_job_progress").fetchone()[0]
+
+    assert children == 0
+    assert progress == 1  # only the master's own row is left
+    assert done["status"] == "completed"
+    assert done["stats"] == running["stats"]
+    assert done["stats"]["total_files"] == 3
+    assert len(done["stats"]["failed_paths"]) == 1
+    assert done["folders"] == running["folders"] == {"total": 3, "done": 3, "failed": 0}
+    assert listed["folders"] == done["folders"]
+    assert listed["stats"]["failed_files"] == 1
+    assert listed["stats"]["imported"] == done["stats"]["imported"] > 0

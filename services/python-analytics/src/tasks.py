@@ -24,32 +24,78 @@ _SCAN_LOCK = 4_242_002
 GENRES_SCORED_KEY = "genres_scored"
 
 
-def active_scan(conn, path: str) -> Optional[UUID]:
-    """The pending or running top-level scan of path, if any."""
-    row = conn.execute(
+def active_scan(conn, path: str) -> Optional[tuple]:
+    """The (id, status) of the pending or running top-level scan of path, if any."""
+    return conn.execute(
         """
-        SELECT id FROM scan_jobs
+        SELECT id, status FROM scan_jobs
         WHERE parent_id IS NULL AND path = %s AND status IN ('pending', 'running')
         ORDER BY created_at DESC LIMIT 1
         """,
         (path,),
     ).fetchone()
-    return row[0] if row else None
 
 
 def queue_library_scan(conn, path: str, force: bool = False) -> UUID:
     """Create a scan job and queue it inside the caller's transaction.
 
-    A scan of the same path that is still pending or running is returned
-    instead: a second one would only queue every folder again behind it.
+    Requests are coalesced (ADR 0006):
+    - a pending scan of the same path is returned as it is: it has not
+      looked at the files yet;
+    - a running one is returned with rerun_requested set, so it queues one
+      follow-up scan when it ends, however many requests came in;
+    - otherwise a new scan is created.
+
+    The advisory lock serialises this with _end_scan, so a request either
+    sets the flag before the scan ends or finds no active scan after.
     """
     conn.execute("SELECT pg_advisory_xact_lock(%s)", (_SCAN_LOCK,))
     existing = active_scan(conn, path)
     if existing:
-        return existing
+        job_id, status = existing
+        if status == "running":
+            conn.execute("UPDATE scan_jobs SET rerun_requested = true WHERE id = %s", (job_id,))
+        return job_id
     job_id = db.create_scan_job(conn, path)
     task_queue.enqueue(conn, "trigger_library_scan", master_job_id=str(job_id), path=path, force=force)
     return job_id
+
+
+def _end_scan(conn, master: UUID, status: str, error: Optional[str] = None) -> Optional[UUID]:
+    """Finish a scan (master job) inside the caller's transaction.
+
+    Every place a scan ends calls this: the early stop and the bad root in
+    trigger_library_scan, finalize_scan, rebuild_analysis, and the give-up
+    handlers. It
+    - marks the master completed or failed, only if it is still active, so
+      a re-run ends nothing twice;
+    - folds its folder jobs into its own progress row and deletes them;
+    - deletes finished scans beyond the newest db.SCAN_JOBS_KEPT;
+    - queues one follow-up scan if a request came in while it ran.
+
+    The advisory lock is taken before the master row is touched: a request
+    in queue_library_scan holds it while it waits for that row, so the other
+    order would deadlock. Returns the follow-up scan's id, if one was queued.
+    """
+    conn.execute("SELECT pg_advisory_xact_lock(%s)", (_SCAN_LOCK,))
+    row = conn.execute(
+        """
+        UPDATE scan_jobs SET status = %s, error = %s, finished_at = NOW()
+        WHERE id = %s AND status IN ('pending', 'running')
+        RETURNING path, rerun_requested
+        """,
+        (status, error, master),
+    ).fetchone()
+    if row is None:
+        return None
+    path, rerun = row
+    db.roll_up_scan(conn, master)
+    db.prune_scan_jobs(conn)
+    if not rerun:
+        return None
+    follow_up = queue_library_scan(conn, path)
+    log.info("scan %s ended with a rerun requested: queued scan %s", master, follow_up)
+    return follow_up
 
 
 def _scan_dispatched(conn, master: UUID) -> bool:
@@ -91,7 +137,7 @@ def trigger_library_scan(master_job_id: str, path: str, force: bool = False) -> 
 
         root = Path(path).expanduser().resolve()
         if not root.is_dir():
-            db.update_scan_job(conn, master, "failed", error=f"not a directory: {root}")
+            _end_scan(conn, master, "failed", error=f"not a directory: {root}")
             conn.commit()
             return nothing
 
@@ -99,6 +145,9 @@ def trigger_library_scan(master_job_id: str, path: str, force: bool = False) -> 
         plan = plan_scan(conn, root, force=force, genre_version=genre_version)
         conn.commit()
 
+        if plan.empty:
+            # _end_scan's lock order: the scan lock before the master row.
+            conn.execute("SELECT pg_advisory_xact_lock(%s)", (_SCAN_LOCK,))
         conn.execute("SELECT 1 FROM scan_jobs WHERE id = %s FOR UPDATE", (master,))
         if _scan_dispatched(conn, master):
             conn.rollback()
@@ -106,7 +155,7 @@ def trigger_library_scan(master_job_id: str, path: str, force: bool = False) -> 
         db.upsert_scan_job_progress(conn, master, None, ScanResult(total_files=len(plan.files)))
 
         if plan.empty:
-            db.update_scan_job(conn, master, "completed")
+            _end_scan(conn, master, "completed")
         elif not plan.folders:
             # Only vanished files: prune them, nothing to import.
             task_queue.enqueue(conn, "finalize_scan", master_job_id=master_job_id, root_path=str(root))
@@ -144,8 +193,9 @@ def process_audio_folder(
     jid = UUID(job_id)
     with db.get_conn() as conn:
         job = db.get_scan_job(conn, jid)
-        if job and job["status"] in ("completed", "failed"):
-            # Re-run after the worker died between finishing and acknowledging.
+        if job is None or job["status"] in ("completed", "failed"):
+            # Re-run after the worker died between finishing and acknowledging
+            # (the job is gone once its scan ended and was rolled up).
             return {"folder": folder_path, "job_id": job_id, "skipped": True}
         db.update_scan_job(conn, jid, "running")
         conn.commit()
@@ -197,13 +247,14 @@ def finalize_scan(master_job_id: str, root_path: str) -> dict:
     When something changed the master job stays running until
     rebuild_analysis completes it. When nothing did (every planned file
     failed or was already up to date), the scan completes here with no
-    analysis refresh and no NOTIFY.
+    analysis refresh and no NOTIFY. A failed prune raises so the queue
+    retries it; the give-up handler fails the scan.
     """
     job_id = UUID(master_job_id)
 
     with db.get_conn() as conn:
         job = db.get_scan_job(conn, job_id)
-        if job is None or job["status"] == "completed":
+        if job is None or job["status"] in ("completed", "failed"):
             # Re-run after the worker died between finishing and acknowledging.
             return {"master_job_id": master_job_id, "skipped": True}
 
@@ -214,27 +265,25 @@ def finalize_scan(master_job_id: str, root_path: str) -> dict:
         stats = db.scan_stats(conn, job_id)
         summary = {"master_job_id": master_job_id, "total": total, "failed": failed}
 
-        if failed:
-            # Skip pruning: a moved file whose new folder failed to import
-            # would otherwise lose its history.
-            db.update_scan_job(conn, job_id, "failed", error=f"{failed} / {total} folder tasks failed")
-        else:
+        if not failed:
+            # Skipped when a folder failed: a moved file whose new folder
+            # failed to import would otherwise lose its history.
             try:
                 summary.update(prune_library(conn, Path(root_path), _job_started_at(conn, job_id)))
-            except Exception as exc:
+            except Exception:
                 conn.rollback()
-                db.update_scan_job(conn, job_id, "failed", error=f"prune failed: {exc}")
-                conn.commit()
                 raise
 
         changed = any(stats[k] for k in _CHANGE_COUNTERS) or summary.get("moved") or summary.get("deleted")
         summary["changed"] = bool(changed)
         if changed:
-            # A failed scan is already finished; still refresh analysis for
-            # the folders that did import.
+            # A failed scan ends here; still refresh analysis for the folders
+            # that did import.
             task_queue.enqueue(conn, "rebuild_analysis", scan_job_id=None if failed else master_job_id)
-        elif not failed:
-            db.update_scan_job(conn, job_id, "completed")
+        if failed:
+            _end_scan(conn, job_id, "failed", error=f"{failed} / {total} folder tasks failed")
+        elif not changed:
+            _end_scan(conn, job_id, "completed")
         conn.commit()
     log.info("scan %s finalized: %s", master_job_id, summary)
     return summary
@@ -265,7 +314,7 @@ def rebuild_analysis(scan_job_id: Optional[str] = None) -> dict:
     """
     with db.get_conn() as conn:
         if scan_job_id:
-            db.update_scan_job(conn, UUID(scan_job_id), "completed")
+            _end_scan(conn, UUID(scan_job_id), "completed")
         queue_genre_refresh(conn)
         notify_pipeline(conn, "scan_finished")
         conn.commit()
@@ -390,5 +439,26 @@ TASKS = {
     )
 }
 
+def _scan_task_failed(error: str, master_job_id: str, **_) -> None:
+    """A scan's own task is out of attempts: fail the scan so it ends.
+
+    Without this a scan whose trigger or finalize task gave up stays
+    running, and every later request would only flag it for a rerun.
+    """
+    with db.get_conn() as conn:
+        _end_scan(conn, UUID(master_job_id), "failed", error=error)
+        conn.commit()
+
+
+def _rebuild_analysis_failed(error: str, scan_job_id: Optional[str] = None, **_) -> None:
+    if scan_job_id:
+        _scan_task_failed(f"analysis refresh failed: {error}", scan_job_id)
+
+
 # Called with the error and the task's args once a task is out of attempts.
-ON_FAILURE = {"process_audio_folder": _process_audio_folder_failed}
+ON_FAILURE = {
+    "process_audio_folder": _process_audio_folder_failed,
+    "trigger_library_scan": _scan_task_failed,
+    "finalize_scan": lambda error, **args: _scan_task_failed(f"finalize failed: {error}", **args),
+    "rebuild_analysis": _rebuild_analysis_failed,
+}

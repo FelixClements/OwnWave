@@ -67,4 +67,10 @@ describe('scanPhase', () => {
     expect(scanPhase(scan('running', 4, 4)).label).toBe('Finishing scan…');
     expect(scanPhase(scan('completed', 4, 4)).progress).toBe(1);
   });
+  it('shows a finished scan from its saved totals', () => {
+    // A finished scan has no folder jobs left; `folders` holds its totals.
+    expect(scanPhase(scan('completed', 0, 0))).toEqual({ label: 'Completed', progress: 1 });
+    const failed = { ...scan('failed', 4, 3), error: '1 / 4 folder tasks failed', folders: { total: 4, done: 3, failed: 1 } };
+    expect(scanPhase(failed)).toEqual({ label: '1 / 4 folder tasks failed', progress: 1 });
+  });
 });

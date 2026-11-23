@@ -91,7 +91,13 @@ made cheap instead of being split.
 
    When a scan finishes (in `finalize_scan` or the early stop) with
    `rerun_requested` set, it queues exactly one follow-up scan, however many
-   requests came in.
+   requests came in. As built (#120), every way a scan ends goes through
+   `_end_scan` in `tasks.py`: the early stop, a bad root, `finalize_scan`,
+   `rebuild_analysis`, a failed scan, and a scan task that runs out of
+   attempts. It takes the scan lock before the master row (the order
+   `queue_library_scan` uses), so a request either sets the flag before the
+   scan ends or finds no active scan afterwards. A `force` request that
+   arrives during a running scan gets an ordinary follow-up scan.
 6. **Retention** (#120). At the end of each scan:
    - the summed child progress is written to the master's
      `scan_job_progress` row;
@@ -99,7 +105,10 @@ made cheap instead of being split.
      the cascade);
    - master jobs beyond the newest 100 are deleted.
 
-   The same migration cleans up existing rows the same way.
+   Migration 031 cleans up existing rows the same way (030 adds the
+   column). It copies the kept rows aside and truncates both tables instead
+   of deleting row by row: 1.77 million folder jobs took 2.7 s that way
+   (51 s with `DELETE`), measured locally on 2026-11-22.
 
 ### Why not partial scans
 
@@ -134,9 +143,10 @@ vanished row as before.
   child rows are deleted. Progress while a scan runs still uses the children.
   #120 checks `apps/web/src/lib/scan.ts` and the Python jobs API.
 - **Two new Python-owned schema items**, `track_analysis_failures` and
-  `scan_jobs.rerun_requested`, are listed under "Planned" in ADR 0005.
-- **The watcher's timings stay** (60 s quiet, 900 s max wait, 30 s cooldown).
-  Map #116 decided they become env settings; that has no ticket yet.
+  `scan_jobs.rerun_requested`, are listed in ADR 0005 (both landed).
+- **The watcher's timings stay** (60 s quiet, 900 s max wait, 30 s cooldown)
+  as defaults. #120 made them env settings, as map #116 decided:
+  `WATCH_QUIET_SECONDS`, `WATCH_MAX_WAIT_SECONDS`, `WATCH_COOLDOWN_SECONDS`.
 
 ### Open questions
 

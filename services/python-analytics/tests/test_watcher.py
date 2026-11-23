@@ -141,3 +141,19 @@ def test_library_changes_still_queue_a_scan(monkeypatch, tmp_path):
     finally:
         observer.stop()
         observer.join()
+
+
+def test_watcher_timings_come_from_the_environment(monkeypatch):
+    import importlib
+
+    try:
+        monkeypatch.setenv("WATCH_QUIET_SECONDS", "5")
+        monkeypatch.setenv("WATCH_MAX_WAIT_SECONDS", "120")
+        monkeypatch.setenv("WATCH_COOLDOWN_SECONDS", "")
+        reloaded = importlib.reload(watcher)
+        handler = reloaded.MusicEventHandler("/music")
+        assert (handler.debounce_seconds, handler.max_wait_seconds, handler.cooldown_seconds) == (5.0, 120.0, 30.0)
+    finally:
+        monkeypatch.undo()
+        importlib.reload(watcher)
+    assert (watcher.QUIET_SECONDS, watcher.MAX_WAIT_SECONDS, watcher.COOLDOWN_SECONDS) == (60.0, 900.0, 30.0)

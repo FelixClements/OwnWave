@@ -46,8 +46,8 @@ Python).
 | `musicbrainz_artists` | `tasks.py` |
 | `track_station_genres` | `genre_scoring.py` (including `corrected`, which it derives from Go's `genre_corrections`) |
 | `station_genres` | `genre_scoring.py` |
-| `scan_jobs` | `db.py`, `tasks.py` |
-| `scan_job_progress` | `db.py` |
+| `scan_jobs` | `db.py`, `tasks.py` (including `rerun_requested`, #120, migration 030; retention deletes folder jobs and keeps 100 scans, migration 031) |
+| `scan_job_progress` | `db.py` (a finished scan's folder totals are rolled into its own row, #120) |
 | `task_queue` | `task_queue.py` |
 
 ### Go owns: users, listening, taste, stations and playlists
@@ -135,12 +135,12 @@ Tables and columns that approved tickets will add, with their owner:
 
 | Table or column | Owner | Ticket |
 | --- | --- | --- |
-| `scan_jobs.rerun_requested` | Python (a column of a Python table) | #120 |
+| (none) | | |
 
-ADR 0006 (`0006-incremental-scans.md`, #117) adds it and relies on it being
-Python's. When a ticket lands, its row leaves this table.
-`track_analysis_failures` (#119) has landed and is listed in the Python table
-above.
+When a ticket lands, its row leaves this table. Both items ADR 0006
+(`0006-incremental-scans.md`, #117) planned have landed and are listed in the
+Python table above: `track_analysis_failures` (#119) and
+`scan_jobs.rerun_requested` (#120).
 
 ## Consequences
 
