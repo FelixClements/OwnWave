@@ -78,7 +78,10 @@ belong to several playlists.
    analysed track, so the database stayed busy. They now go through an HNSW
    index (migration 032). The rebuild forces the index because the planner
    still prefers an exact scan at this size. On the live library the index
-   gave the same picks as the exact scans.
+   gave the same picks as the exact scans. Superseded by
+   [ADR 0007](0007-incremental-picks.md): each song now keeps a list of its
+   nearest songs, the library signature is gone, and a library change
+   rebuilds only the playlists it reaches.
 
 ## Consequences
 

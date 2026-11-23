@@ -67,7 +67,8 @@ type Library interface {
 	// MatchPending matches playlist tracks without a local file.
 	MatchPending(ctx context.Context) (int, error)
 	// RebuildPicks refreshes the library picks of playlists that changed;
-	// with followLibrary also after the library changed.
+	// with followLibrary it first updates the songs' neighbour lists, so
+	// library changes reach the playlists they affect.
 	RebuildPicks(ctx context.Context, followLibrary bool) (int, error)
 }
 

@@ -270,17 +270,20 @@ func TestGroupCopiesRecordsAndFollowsTheLibrary(t *testing.T) {
 	require.Equal(t, high, copyOf(low))
 }
 
-// vec is a unit embedding at the given angle (degrees) in the first plane:
-// the cosine similarity of two is the cosine of their angle's difference.
-func vec(deg float64) string {
+// vecIn is a unit embedding at the given angle (degrees) in one plane of
+// the embedding space: the cosine similarity of two in the same plane is
+// the cosine of their angle's difference, and of two in different planes 0.
+func vecIn(plane int, deg float64) string {
 	parts := make([]string, 1280)
 	for i := range parts {
 		parts[i] = "0"
 	}
-	parts[0] = fmt.Sprint(math.Cos(deg * math.Pi / 180))
-	parts[1] = fmt.Sprint(math.Sin(deg * math.Pi / 180))
+	parts[2*plane] = fmt.Sprint(math.Cos(deg * math.Pi / 180))
+	parts[2*plane+1] = fmt.Sprint(math.Sin(deg * math.Pi / 180))
 	return "[" + strings.Join(parts, ",") + "]"
 }
+
+func vec(deg float64) string { return vecIn(0, deg) }
 
 func TestRebuildPicksFindsSimilarLibrarySongs(t *testing.T) {
 	ctx := context.Background()
@@ -291,20 +294,31 @@ func TestRebuildPicksFindsSimilarLibrarySongs(t *testing.T) {
 		_, err := pool.Exec(ctx, sql, args...)
 		require.NoError(t, err)
 	}
-	add := func(title string, deg float64) string {
+	addIn := func(plane int, title string, deg float64) string {
 		t.Helper()
 		var id string
 		require.NoError(t, pool.QueryRow(ctx, `INSERT INTO tracks (path, title) VALUES ($1, $2) RETURNING id::text`, "/m/"+title, title).Scan(&id))
-		exec(`INSERT INTO track_audio_genres (track_id, model_version, activations, embedding) VALUES ($1::uuid, 'test', '{}', $2::vector)`, id, vec(deg))
+		exec(`INSERT INTO track_audio_genres (track_id, model_version, activations, embedding) VALUES ($1::uuid, 'test', '{}', $2::vector)`, id, vecIn(plane, deg))
 		return id
 	}
-	var playlist string
-	require.NoError(t, pool.QueryRow(ctx, `INSERT INTO playlists (spotify_id, name) VALUES ('s', 'List') RETURNING id::text`).Scan(&playlist))
-	seed := func(id, sp string) {
+	add := func(title string, deg float64) string { return addIn(0, title, deg) }
+	trackID := func(title string) string {
+		t.Helper()
+		var id string
+		require.NoError(t, pool.QueryRow(ctx, `SELECT id::text FROM tracks WHERE title = $1`, title).Scan(&id))
+		return id
+	}
+	newPlaylist := func(name string) string {
+		t.Helper()
+		var id string
+		require.NoError(t, pool.QueryRow(ctx, `INSERT INTO playlists (spotify_id, name) VALUES ($1, $1) RETURNING id::text`, name).Scan(&id))
+		return id
+	}
+	seedIn := func(playlist, id, sp string) {
 		exec(`INSERT INTO playlist_items (playlist_id, spotify_track_id, title) VALUES ($1::uuid, $2, $2)`, playlist, sp)
 		exec(`INSERT INTO spotify_track_matches (spotify_track_id, track_id, method) VALUES ($1, $2::uuid, 'exact')`, sp, id)
 	}
-	picked := func() []string {
+	pickedIn := func(playlist string) []string {
 		t.Helper()
 		list, err := svc.Picks(ctx, playlist)
 		require.NoError(t, err)
@@ -314,7 +328,72 @@ func TestRebuildPicksFindsSimilarLibrarySongs(t *testing.T) {
 		}
 		return out
 	}
+	// exactPicks follows the rules by brute force, as rebuilds did before
+	// the neighbour lists: each playlist song's nearest songs by an exact
+	// scan. Titles here are unique, so choosePicks only applies the limit.
+	exactPicks := func(playlist string) []string {
+		t.Helper()
+		tx, err := pool.Begin(ctx)
+		require.NoError(t, err)
+		defer tx.Rollback(ctx)
+		_, err = tx.Exec(ctx, `SET LOCAL enable_indexscan = off`)
+		require.NoError(t, err)
+		rows, err := tx.Query(ctx, `
+			WITH seeds AS (
+				SELECT DISTINCT ms.song_id AS id
+				FROM playlist_items pi
+				JOIN spotify_track_matches m ON m.spotify_track_id = pi.spotify_track_id
+				JOIN songs ms ON ms.track_id = m.track_id
+				WHERE pi.playlist_id = $1::uuid AND NOT pi.hidden)
+			SELECT t.title, (SELECT COUNT(*) FROM seeds)
+			FROM (
+				SELECT nb.track_id, COUNT(*) AS hits, MAX(nb.similarity)::real AS best
+				FROM seeds s
+				JOIN track_audio_genres sg ON sg.track_id = s.id AND sg.embedding IS NOT NULL
+				CROSS JOIN LATERAL (
+					SELECT c.track_id, 1 - (c.embedding <=> sg.embedding) AS similarity
+					FROM track_audio_genres c
+					WHERE c.track_id NOT IN (SELECT id FROM seeds)
+					  AND c.track_id NOT IN (SELECT r.track_id FROM playlist_pick_removals r WHERE r.playlist_id = $1::uuid)
+					  AND NOT EXISTS (SELECT 1 FROM track_copies x WHERE x.track_id = c.track_id)
+					ORDER BY c.embedding <=> sg.embedding
+					LIMIT 5
+				) nb
+				WHERE nb.similarity >= 0.7
+				GROUP BY nb.track_id
+			) n
+			JOIN tracks t ON t.id = n.track_id
+			ORDER BY n.hits DESC, n.best DESC, t.id
+		`, playlist)
+		require.NoError(t, err)
+		out := []string{}
+		var title string
+		var limit int
+		for rows.Next() {
+			require.NoError(t, rows.Scan(&title, &limit))
+			if len(out) < limit {
+				out = append(out, title)
+			}
+		}
+		require.NoError(t, rows.Err())
+		return out
+	}
+	rebuild := func(followLibrary bool) int {
+		t.Helper()
+		n, err := svc.RebuildPicks(ctx, followLibrary)
+		require.NoError(t, err)
+		return n
+	}
+	input := func(playlist string) string {
+		t.Helper()
+		var in string
+		require.NoError(t, pool.QueryRow(ctx, `SELECT COALESCE(picks_input, '') FROM playlists WHERE id = $1::uuid`, playlist).Scan(&in))
+		return in
+	}
 
+	playlist := newPlaylist("List")
+	seed := func(id, sp string) { seedIn(playlist, id, sp) }
+	picked := func() []string { return pickedIn(playlist) }
 	one, two := add("seed-1", 0), add("seed-2", 10)
 	seed(one, "sp1")
 	seed(two, "sp2")
@@ -323,52 +402,104 @@ func TestRebuildPicksFindsSimilarLibrarySongs(t *testing.T) {
 	add("third", 20)
 	add("far", 80) // below the similarity floor: cos(70) is about 0.34
 
-	n, err := svc.RebuildPicks(ctx, true)
-	require.NoError(t, err)
-	require.Equal(t, 1, n)
+	// A second playlist sounds different: no song is near both.
+	other := newPlaylist("Other")
+	seedIn(other, addIn(1, "other-1", 0), "sq1")
+	seedIn(other, addIn(1, "other-2", 10), "sq2")
+	addIn(1, "other-near", 5)
+
+	require.Equal(t, 2, rebuild(true))
 	require.Equal(t, []string{"near", "close"}, picked(), "no more picks than the playlist has songs")
+	require.Equal(t, exactPicks(playlist), picked())
+	require.Equal(t, []string{"other-near"}, pickedIn(other))
+	require.Zero(t, rebuild(true), "same input, no rebuild")
 
-	n, err = svc.RebuildPicks(ctx, true)
-	require.NoError(t, err)
-	require.Zero(t, n, "same input, no rebuild")
-
-	// A library change waits for a background run; a playlist's own does not.
+	// A song near no playlist song rebuilds nothing.
 	add("later", 170)
-	n, err = svc.RebuildPicks(ctx, false)
-	require.NoError(t, err)
-	require.Zero(t, n)
-	n, err = svc.RebuildPicks(ctx, true)
-	require.NoError(t, err)
-	require.Equal(t, 1, n)
+	require.Zero(t, rebuild(false))
+	require.Zero(t, rebuild(true))
+
+	// A library change waits for a background run; then it rebuilds only
+	// the playlists whose songs it is near.
+	otherInput := input(other)
+	add("fresh", 2)
+	require.Zero(t, rebuild(false))
+	require.Equal(t, 1, rebuild(true))
+	require.Equal(t, []string{"fresh", "near"}, picked())
+	require.Equal(t, exactPicks(playlist), picked())
+	require.Equal(t, otherInput, input(other), "the other playlist was not rebuilt")
+
+	addIn(1, "other-close", 3)
+	require.Equal(t, 1, rebuild(true))
+	require.Equal(t, []string{"other-close", "other-near"}, pickedIn(other))
+	require.Equal(t, exactPicks(other), pickedIn(other))
 
 	got, err := svc.Get(ctx, playlist)
 	require.NoError(t, err)
 	require.Equal(t, 2, got.PickCount)
 
-	// An admin's removal lasts, and the next song takes the place.
-	var near string
-	require.NoError(t, pool.QueryRow(ctx, `SELECT id::text FROM tracks WHERE title = 'near'`).Scan(&near))
-	require.NoError(t, svc.RemovePick(ctx, playlist, near))
-	require.ErrorIs(t, svc.RemovePick(ctx, playlist, near), playlists.ErrNotFound)
-	exec(`UPDATE playlists SET picks_input = NULL`)
-	_, err = svc.RebuildPicks(ctx, true)
-	require.NoError(t, err)
+	// An admin's removal lasts, and the next song takes the place, also
+	// in a request: the removal is the playlist's own change.
+	fresh := trackID("fresh")
+	require.NoError(t, svc.RemovePick(ctx, playlist, fresh))
+	require.ErrorIs(t, svc.RemovePick(ctx, playlist, fresh), playlists.ErrNotFound)
+	require.Equal(t, 1, rebuild(false))
+	require.Equal(t, []string{"near", "close"}, picked())
+	require.Equal(t, exactPicks(playlist), picked())
+
+	// A deleted song leaves the lists it was in.
+	exec(`DELETE FROM tracks WHERE id = $1::uuid`, trackID("near"))
+	require.Equal(t, 1, rebuild(true))
 	require.Equal(t, []string{"close", "third"}, picked())
+	require.Equal(t, exactPicks(playlist), picked())
 
 	// A copy of a pick plays as that pick; a copy never is a pick itself.
-	var close string
-	require.NoError(t, pool.QueryRow(ctx, `SELECT id::text FROM tracks WHERE title = 'close'`).Scan(&close))
-	third := ""
-	require.NoError(t, pool.QueryRow(ctx, `SELECT id::text FROM tracks WHERE title = 'third'`).Scan(&third))
-	exec(`INSERT INTO track_copies (track_id, copy_of) VALUES ($1::uuid, $2::uuid)`, third, close)
-	_, err = svc.RebuildPicks(ctx, true)
-	require.NoError(t, err)
+	exec(`INSERT INTO track_copies (track_id, copy_of) VALUES ($1::uuid, $2::uuid)`, trackID("third"), trackID("close"))
+	require.Equal(t, 1, rebuild(true))
 	require.Equal(t, []string{"close"}, picked())
+	require.Equal(t, exactPicks(playlist), picked())
+
+	// A song analysed again moves to where its new embedding is.
+	exec(`UPDATE track_audio_genres SET embedding = $2::vector, analyzed_at = NOW() WHERE track_id = $1::uuid`, trackID("later"), vec(12))
+	require.Equal(t, 1, rebuild(true))
+	require.Equal(t, []string{"later", "close"}, picked())
+	require.Equal(t, exactPicks(playlist), picked())
 
 	// New matches change the seeds: a pick that became a seed stops being a pick.
-	seed(close, "sp3")
-	n, err = svc.RebuildPicks(ctx, false)
-	require.NoError(t, err)
-	require.Equal(t, 1, n, "new seeds rebuild even in a request")
+	seed(trackID("close"), "sp3")
+	require.Equal(t, 1, rebuild(false), "new seeds rebuild even in a request")
 	require.NotContains(t, picked(), "close")
+	require.Equal(t, exactPicks(playlist), picked())
+
+	// A playlist of songs that all sound alike: each song's nearest are the
+	// playlist's own, so the lists of the first songs grow until they reach
+	// songs that are not in the playlist.
+	dense := newPlaylist("Dense")
+	for i := range 24 {
+		seedIn(dense, addIn(2, fmt.Sprintf("dense-%02d", i), float64(i)/10), fmt.Sprintf("sd%d", i))
+	}
+	addIn(2, "dense-pick", 3)
+	addIn(2, "dense-pick-2", 3.2)
+	require.Equal(t, 1, rebuild(true))
+	require.Equal(t, []string{"dense-pick", "dense-pick-2"}, pickedIn(dense))
+	require.Equal(t, exactPicks(dense), pickedIn(dense))
+	var depth int
+	require.NoError(t, pool.QueryRow(ctx, `SELECT depth FROM song_neighbour_lists WHERE song_id = $1::uuid`, trackID("dense-00")).Scan(&depth))
+	require.Greater(t, depth, 20, "the list grew")
+	require.Zero(t, rebuild(true), "a grown list rebuilds no other playlist")
+
+	// The lists can be rebuilt from nothing, and new rules rebuild them all:
+	// the picks stay the same.
+	all := map[string][]string{}
+	for _, p := range []string{playlist, other, dense} {
+		all[p] = pickedIn(p)
+	}
+	exec(`DELETE FROM song_neighbour_lists`)
+	require.Equal(t, 3, rebuild(true))
+	exec(`UPDATE song_neighbour_lists SET version = 0`)
+	rebuild(true)
+	for p, want := range all {
+		require.Equal(t, want, pickedIn(p))
+	}
+	require.Zero(t, rebuild(true))
 }
