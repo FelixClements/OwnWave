@@ -148,10 +148,29 @@ func (s *Service) rebuildPlaylistPicks(ctx context.Context, playlistID, input st
 		return err
 	}
 
+	seedIDs := make([]string, len(seeds))
+	for i, s := range seeds {
+		seedIDs[i] = s.ID
+	}
+
+	// The neighbour search has to go through the HNSW index (migration 032).
+	// On a few thousand songs the planner still picks an exact scan, which
+	// reads every embedding for each playlist track: about 0.15 s each
+	// instead of 1 ms. strict_order keeps the index searching, nearest
+	// first, past songs the filters drop (seeds, copies, removed picks).
+	for _, set := range []string{
+		`SET LOCAL enable_seqscan = off`,
+		`SET LOCAL hnsw.ef_search = 100`,
+		`SET LOCAL hnsw.iterative_scan = strict_order`,
+	} {
+		if _, err := tx.Exec(ctx, set); err != nil {
+			return err
+		}
+	}
 	// A song can be a pick of any playlist it is not already in, also when
-	// another playlist matches it.
+	// another playlist matches it. A copy is never a pick: its best copy is.
 	rows, err = tx.Query(ctx, `
-		WITH seeds AS (`+seedSQL+`)
+		WITH seeds AS (SELECT unnest($4::uuid[]) AS id)
 		SELECT t.id::text, t.title, COALESCE(a.name, ''), n.hits, n.best
 		FROM (
 			SELECT nb.track_id, COUNT(*)::int AS hits, MAX(nb.similarity)::real AS best
@@ -160,10 +179,9 @@ func (s *Service) rebuildPlaylistPicks(ctx context.Context, playlistID, input st
 			CROSS JOIN LATERAL (
 				SELECT c.track_id, 1 - (c.embedding <=> sg.embedding) AS similarity
 				FROM track_audio_genres c
-				JOIN songs cs ON cs.track_id = c.track_id AND cs.best_copy
-				WHERE c.embedding IS NOT NULL
-				  AND c.track_id NOT IN (SELECT id FROM seeds)
+				WHERE c.track_id NOT IN (SELECT id FROM seeds)
 				  AND c.track_id NOT IN (SELECT r.track_id FROM playlist_pick_removals r WHERE r.playlist_id = $1::uuid)
+				  AND NOT EXISTS (SELECT 1 FROM track_copies x WHERE x.track_id = c.track_id)
 				ORDER BY c.embedding <=> sg.embedding
 				LIMIT $2
 			) nb
@@ -173,7 +191,7 @@ func (s *Service) rebuildPlaylistPicks(ctx context.Context, playlistID, input st
 		JOIN tracks t ON t.id = n.track_id
 		LEFT JOIN artists a ON a.id = t.artist_id
 		ORDER BY n.hits DESC, n.best DESC, t.id
-	`, playlistID, pickNeighbours, minPickSimilarity)
+	`, playlistID, pickNeighbours, minPickSimilarity, seedIDs)
 	if err != nil {
 		return err
 	}
@@ -183,6 +201,9 @@ func (s *Service) rebuildPlaylistPicks(ctx context.Context, playlistID, input st
 		return c, err
 	})
 	if err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx, `SET LOCAL enable_seqscan = on`); err != nil {
 		return err
 	}
 

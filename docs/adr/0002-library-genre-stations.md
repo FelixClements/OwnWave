@@ -72,8 +72,13 @@ belong to several playlists.
    signature and a hash of the playlist's songs; unchanged input means no rebuild.
    A new match rebuilds that playlist in the request. A library change rebuilds
    every playlist, which measured about 40 seconds of database time on the live
-   library, so only background runs do it. Searches are exact scans: at this size
-   no vector index is needed.
+   library, so only background runs do it. Searches first used exact scans. At
+   7k songs and 4.7k playlist tracks that grew to about 0.15 s per track and
+   14 minutes per full rebuild, and the library's signature changes with every
+   analysed track, so the database stayed busy. They now go through an HNSW
+   index (migration 032). The rebuild forces the index because the planner
+   still prefers an exact scan at this size. On the live library the index
+   gave the same picks as the exact scans.
 
 ## Consequences
 
