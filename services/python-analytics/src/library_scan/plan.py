@@ -16,6 +16,7 @@ from typing import Dict, List, Optional, Tuple
 import psycopg
 
 from audio_metadata import SUPPORTED_EXTS, file_mtime
+from tags import TAGS_VERSION
 
 log = logging.getLogger(__name__)
 
@@ -72,13 +73,14 @@ def walk_audio_files(root: Path) -> Dict[str, FileStat]:
 
 
 def load_tracks(conn: psycopg.Connection, root: Path) -> Dict[str, dict]:
-    """path -> size, mtime, features, genre model version and analysis failures
-    of every track under root."""
+    """path -> size, mtime, tag reader version, features, genre model version
+    and analysis failures of every track under root."""
     rows = conn.execute(
         """
         SELECT t.path, t.file_size, t.file_mtime,
                af.track_id IS NOT NULL AS has_features, g.model_version,
-               ff.track_id IS NOT NULL AS features_failed, gf.model_version
+               ff.track_id IS NOT NULL AS features_failed, gf.model_version,
+               t.tags_version
         FROM tracks t
         LEFT JOIN audio_features af ON af.track_id = t.id
         LEFT JOIN track_audio_genres g ON g.track_id = t.id
@@ -96,6 +98,7 @@ def load_tracks(conn: psycopg.Connection, root: Path) -> Dict[str, dict]:
             "genre_version": r[4],
             "features_failed": r[5],
             "genre_failed_version": r[6],
+            "tags_version": r[7],
         }
         for r in rows
     }
@@ -117,11 +120,16 @@ def needs_import(
     Analysis that failed before is not retried (#119): features with any
     failure on record, genre with a failure for the current model version.
     A changed file (its failures are cleared on import) or force retries both.
+
+    A track whose tags were read by an older tag reader (tags.TAGS_VERSION)
+    is imported again, so new tags reach files that did not change.
     """
     if force or track is None:
         return True
     size, mtime = stat
     if track["file_size"] != size or track["file_mtime"] != file_mtime(mtime):
+        return True
+    if track.get("tags_version") != TAGS_VERSION:
         return True
     if not analyze:
         return False

@@ -7,15 +7,17 @@ import psycopg
 
 from analyzers import analyze_file, get_analyzers
 import genre_audio
-from tags import read_tags
+from tags import TAGS_VERSION, read_tags, tagged_compilation
 from db import (
     audio_genre_versions_by_paths,
     clear_analysis_failures,
     get_conn,
     get_or_create_album,
     get_or_create_artist,
+    get_or_create_release,
     get_track_stats_by_paths,
     record_analysis_failure,
+    refresh_releases,
     upsert_audio_features_batch,
     upsert_scan_job_progress,
     upsert_track_audio_genres,
@@ -86,6 +88,7 @@ def import_folder(
     processed_ids: List[UUID] = []
     artist_cache: Dict[str, UUID] = {}
     album_cache: Dict[tuple, UUID] = {}
+    release_cache: Dict[tuple, UUID] = {}
 
     with get_conn() as conn:
         paths = [p for p, _, _ in planned]
@@ -101,7 +104,8 @@ def import_folder(
                 stats = existing_stats.get(path_str, {})
                 if _import_file(
                     conn, Path(path_str), size, file_mtime(mtime), stats, analyzers, genre_model,
-                    genre_versions.get(path_str), artist_cache, album_cache, force, result, processed_ids,
+                    genre_versions.get(path_str), artist_cache, album_cache, release_cache, force, result,
+                    processed_ids,
                 ):
                     if job_id:
                         upsert_scan_job_progress(conn, job_id, master_job_id, result)
@@ -127,6 +131,7 @@ def _import_file(
     genre_version: Optional[str],
     artist_cache: Dict[str, UUID],
     album_cache: Dict[tuple, UUID],
+    release_cache: Dict[tuple, UUID],
     force: bool,
     result: ScanResult,
     processed_ids: List[UUID],
@@ -139,13 +144,16 @@ def _import_file(
         features_failed = stats.get("features_failed", False)
         genre_failed_version = stats.get("genre_failed_version")
         file_changed = _file_changed(stats, size, mtime)
-        if force or file_changed:
+        # A track read by an older tag reader gets its tags read again.
+        tags_outdated = stats.get("tags_version") != TAGS_VERSION
+        if force or file_changed or tags_outdated:
             if track_id and file_changed:
                 # A changed file gets its failed analysis retried (#119).
                 clear_analysis_failures(conn, track_id)
                 features_failed, genre_failed_version = False, None
-            track_rec = _build_track_record(conn, file_path, size, mtime, artist_cache, album_cache)
+            track_rec = _build_track_record(conn, file_path, size, mtime, artist_cache, album_cache, release_cache)
             upsert_tracks_batch(conn, [track_rec])
+            refresh_releases(conn, {track_rec["release_id"], stats.get("release_id")})
             track_id = get_track_stats_by_paths(conn, [path_str])[path_str]["id"]
             processed_ids.append(track_id)
             result.imported += 1
@@ -201,6 +209,7 @@ def _build_track_record(
     mtime,
     artist_cache: Dict[str, UUID],
     album_cache: Dict[tuple, UUID],
+    release_cache: Dict[tuple, UUID],
 ) -> dict:
     path_str = str(file_path)
     tags = read_tags(path_str)
@@ -217,6 +226,22 @@ def _build_track_record(
         album_cache[album_key] = get_or_create_album(conn, album_title, artist_id, year)
     album_id = album_cache[album_key]
 
+    # One release per MusicBrainz release, else per folder and album title.
+    mb_release_id = tags.get("mb_release_id")
+    folder = str(file_path.parent)
+    release_key = ("mb", mb_release_id) if mb_release_id else ("folder", folder, album_title)
+    if release_key not in release_cache:
+        release_cache[release_key] = get_or_create_release(
+            conn,
+            mb_release_id=mb_release_id,
+            folder=folder,
+            title=album_title,
+            album_artist=tags.get("albumartist"),
+            mb_release_group_id=tags.get("mb_release_group_id"),
+            mb_release_type=tags.get("releasetype"),
+            tagged_compilation=tagged_compilation(tags),
+        )
+
     sample_rate, channels = get_sample_info(path_str)
     return {
         "path": path_str,
@@ -230,6 +255,11 @@ def _build_track_record(
         "file_size": file_size,
         "file_mtime": mtime,
         "genre_tag": tags.get("genre"),
+        "release_id": release_cache[release_key],
+        "isrc": tags.get("isrc"),
+        "mb_recording_id": tags.get("mb_recording_id"),
+        "mb_artist_ids": tags.get("mb_artist_ids"),
+        "tags_version": TAGS_VERSION,
     }
 
 
