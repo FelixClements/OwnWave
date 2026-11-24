@@ -87,6 +87,84 @@ def get_or_create_album(
 
 
 
+def get_or_create_release(
+    conn: psycopg.Connection,
+    *,
+    mb_release_id: Optional[str],
+    folder: str,
+    title: str,
+    album_artist: Optional[str] = None,
+    mb_release_group_id: Optional[str] = None,
+    mb_release_type: Optional[str] = None,
+    tagged_compilation: bool = False,
+) -> UUID:
+    """The release of a file: its MusicBrainz release when it names one,
+    otherwise the folder and album title. Updates the release's other tags.
+
+    is_compilation is left alone: refresh_releases sets it once the
+    release's tracks are stored.
+    """
+    if mb_release_id:
+        conflict = "(mb_release_id) WHERE mb_release_id IS NOT NULL"
+    else:
+        conflict = "(folder, title) WHERE mb_release_id IS NULL"
+    row = conn.execute(
+        f"""
+        INSERT INTO releases
+            (mb_release_id, folder, title, album_artist, mb_release_group_id,
+             mb_release_type, tagged_compilation)
+        VALUES (%s, %s, %s, %s, %s, %s, %s)
+        ON CONFLICT {conflict} DO UPDATE SET
+            title = EXCLUDED.title,
+            album_artist = EXCLUDED.album_artist,
+            mb_release_group_id = EXCLUDED.mb_release_group_id,
+            mb_release_type = EXCLUDED.mb_release_type,
+            tagged_compilation = EXCLUDED.tagged_compilation,
+            updated_at = NOW()
+        RETURNING id
+        """,
+        (
+            mb_release_id,
+            folder,
+            title,
+            album_artist,
+            mb_release_group_id,
+            mb_release_type,
+            tagged_compilation,
+        ),
+    ).fetchone()
+    return row[0]
+
+
+# A release with more distinct track artists than this is a compilation.
+COMPILATION_MIN_ARTISTS = 3
+
+
+def refresh_releases(conn: psycopg.Connection, release_ids) -> None:
+    """After tracks joined or left these releases: delete the ones left with
+    no tracks and work out is_compilation for the rest (tagged as one, or
+    more than COMPILATION_MIN_ARTISTS distinct track artists)."""
+    ids = [r for r in set(release_ids) if r]
+    if not ids:
+        return
+    conn.execute(
+        """
+        DELETE FROM releases r
+        WHERE r.id = ANY(%s)
+          AND NOT EXISTS (SELECT 1 FROM tracks t WHERE t.release_id = r.id)
+        """,
+        (ids,),
+    )
+    conn.execute(
+        """
+        UPDATE releases r
+        SET is_compilation = r.tagged_compilation
+                OR (SELECT count(DISTINCT t.artist_id) FROM tracks t WHERE t.release_id = r.id) > %s
+        WHERE r.id = ANY(%s)
+        """,
+        (COMPILATION_MIN_ARTISTS, ids),
+    )
+
 
 def get_track_by_path(conn: psycopg.Connection, path: str) -> Optional[UUID]:
     with conn.cursor() as cur:
@@ -322,7 +400,8 @@ def get_track_stats_by_paths(conn: psycopg.Connection, paths: List[str]) -> dict
         cur.execute(
             """
             SELECT t.id, t.path, t.file_size, t.file_mtime, af.track_id IS NOT NULL AS has_features,
-                   ff.track_id IS NOT NULL AS features_failed, gf.model_version
+                   ff.track_id IS NOT NULL AS features_failed, gf.model_version,
+                   t.tags_version, t.release_id
             FROM tracks t
             LEFT JOIN audio_features af ON t.id = af.track_id
             LEFT JOIN track_analysis_failures ff ON ff.track_id = t.id AND ff.kind = 'features'
@@ -339,6 +418,8 @@ def get_track_stats_by_paths(conn: psycopg.Connection, paths: List[str]) -> dict
                 "has_features": row[4],
                 "features_failed": row[5],
                 "genre_failed_version": row[6],
+                "tags_version": row[7],
+                "release_id": row[8],
             }
             for row in cur.fetchall()
         }
@@ -360,6 +441,11 @@ def upsert_tracks_batch(conn: psycopg.Connection, records: List[dict]) -> None:
             rec.get("file_size"),
             rec.get("file_mtime"),
             rec.get("genre_tag"),
+            rec.get("release_id"),
+            rec.get("isrc"),
+            rec.get("mb_recording_id"),
+            rec.get("mb_artist_ids"),
+            rec.get("tags_version", 0),
         )
         for rec in records
     ]
@@ -368,8 +454,9 @@ def upsert_tracks_batch(conn: psycopg.Connection, records: List[dict]) -> None:
             """
             INSERT INTO tracks
                 (path, artist_id, album_id, title, track_number, duration_seconds,
-                 sample_rate, channels, file_size, file_mtime, genre_tag, updated_at)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())
+                 sample_rate, channels, file_size, file_mtime, genre_tag,
+                 release_id, isrc, mb_recording_id, mb_artist_ids, tags_version, updated_at)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())
             ON CONFLICT (path) DO UPDATE SET
                 artist_id = EXCLUDED.artist_id,
                 album_id = EXCLUDED.album_id,
@@ -381,6 +468,11 @@ def upsert_tracks_batch(conn: psycopg.Connection, records: List[dict]) -> None:
                 file_size = EXCLUDED.file_size,
                 file_mtime = EXCLUDED.file_mtime,
                 genre_tag = EXCLUDED.genre_tag,
+                release_id = EXCLUDED.release_id,
+                isrc = EXCLUDED.isrc,
+                mb_recording_id = EXCLUDED.mb_recording_id,
+                mb_artist_ids = EXCLUDED.mb_artist_ids,
+                tags_version = EXCLUDED.tags_version,
                 updated_at = NOW()
             """,
             values,
@@ -448,9 +540,11 @@ def delete_tracks(conn: psycopg.Connection, track_ids: List[UUID]) -> None:
         return
     with conn.cursor() as cur:
         cur.execute(
-            "DELETE FROM tracks WHERE id = ANY(%s)",
+            "DELETE FROM tracks WHERE id = ANY(%s) RETURNING release_id",
             (track_ids,),
         )
+        release_ids = {row[0] for row in cur.fetchall() if row[0]}
+    refresh_releases(conn, release_ids)
 
 
 def upsert_track_audio_genres(conn: psycopg.Connection, track_id: UUID, result) -> None:

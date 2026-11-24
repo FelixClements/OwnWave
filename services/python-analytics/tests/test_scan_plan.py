@@ -10,6 +10,7 @@ from audio_metadata import file_mtime
 from library_scan import scan_library
 from library_scan.options import ScanOptions
 from library_scan.plan import needs_import, plan_scan, walk_audio_files
+from tags import TAGS_VERSION
 from test_library_scan import write_flac
 
 GENRE = "genre-model-2"
@@ -17,7 +18,13 @@ STAT = (100, 1_700_000_000.25)
 
 
 def track(**overrides) -> dict:
-    t = {"file_size": 100, "file_mtime": file_mtime(STAT[1]), "has_features": True, "genre_version": GENRE}
+    t = {
+        "file_size": 100,
+        "file_mtime": file_mtime(STAT[1]),
+        "has_features": True,
+        "genre_version": GENRE,
+        "tags_version": TAGS_VERSION,
+    }
     t.update(overrides)
     return t
 
@@ -65,6 +72,12 @@ def test_failed_genre_is_retried_only_for_a_new_model_version():
     assert needs(existing=track(genre_version=None, genre_failed_version="genre-model-1"))
     assert needs(stat=(100, STAT[1] + 1), existing=failed)
     assert needs(existing=failed, force=True)
+
+
+def test_tags_read_by_an_older_tag_reader_need_import_even_without_analysis():
+    assert needs(existing=track(tags_version=TAGS_VERSION - 1))
+    assert needs(existing=track(tags_version=TAGS_VERSION - 1), analyze=False)
+    assert not needs(analyze=False)
 
 
 def test_force_imports_everything():
