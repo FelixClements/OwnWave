@@ -40,6 +40,7 @@ var Routes = []Route{
 	{http.MethodGet, "/admin/scans", "/jobs", AdminOnly},
 	{http.MethodPost, "/admin/rebuild-analysis", "/rebuild-analysis", AdminOnly},
 	{http.MethodPost, "/admin/rebuild-genres", "/rebuild-genres", AdminOnly},
+	{http.MethodPost, "/admin/outside-genres/refetch", "/outside-genres/refetch", AdminOnly},
 	{http.MethodGet, "/admin/genres/report", "/genres/report", AdminOnly},
 	{http.MethodGet, "/genres", "/genres", AnyUser},
 	{http.MethodGet, "/tracks/{id}/genres", "/tracks/{id}/genres", AnyUser},

@@ -910,6 +910,16 @@ paths:
         "200":
           description: Queued
           content: { application/json: { schema: { type: object, required: [status], properties: { status: { type: string } } } } }
+  /api/admin/outside-genres/refetch:
+    post:
+      operationId: refetchOutsideGenres
+      tags: [admin]
+      summary: Fetch every MusicBrainz, Discogs and Last.fm genre again, in the background
+      x-python-path: /outside-genres/refetch
+      responses:
+        "200":
+          description: Queued
+          content: { application/json: { schema: { type: object, required: [status], properties: { status: { type: string } } } } }
   /api/admin/genres/report:
     get:
       operationId: getGenreReport

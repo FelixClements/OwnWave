@@ -204,6 +204,21 @@ def rebuild_genres():
     return {"status": "queued"}
 
 
+@app.post("/outside-genres/refetch", response_model=Queued)
+def refetch_outside_genres():
+    """Fetch every outside genre (MusicBrainz, Discogs, Last.fm) again, in the background.
+
+    Lookups are otherwise repeated only once they are about 6 months old.
+    """
+    from outside_genres import mark_all_due
+
+    with _db_conn() as conn:
+        mark_all_due(conn)
+        tasks.queue_outside_genres(conn)
+        conn.commit()
+    return {"status": "queued"}
+
+
 @app.get("/genres", response_model=GenreDistribution)
 def list_genres():
     """Station genres with track counts, plus a warning when one genre dominates."""

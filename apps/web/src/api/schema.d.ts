@@ -1032,6 +1032,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/admin/outside-genres/refetch": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Fetch every MusicBrainz, Discogs and Last.fm genre again, in the background */
+        post: operations["refetchOutsideGenres"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/admin/genres/report": {
         parameters: {
             query?: never;
@@ -3004,6 +3021,28 @@ export interface operations {
         };
     };
     refreshGenres: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Queued */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        status: string;
+                    };
+                };
+            };
+        };
+    };
+    refetchOutsideGenres: {
         parameters: {
             query?: never;
             header?: never;
