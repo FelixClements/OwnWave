@@ -901,6 +901,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/admin/genre-overview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Songs per genre and style, unsure and flagged songs, and the classifier's test score
+         * @description Counts best copies (one per song). Before the genre v2 switch
+         *     (`switched: false`) the counts come from the v1 blend, there are no
+         *     styles, and unsure, flagged and the test score are null.
+         */
+        get: operations["getGenreOverview"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/admin/genre-review": {
         parameters: {
             query?: never;
@@ -909,12 +931,57 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * Songs whose main genre is most worth checking
-         * @description Most often hidden on a genre station first, then songs whose copies disagree, then the lowest scores. Corrected songs are left out.
+         * The genre review queue, grouped by release and paged by groups
+         * @description Ranked (ADR 0008): songs listeners hid on a genre station, then unsure
+         *     songs, then classifier-versus-tag disagreements, then the least sure
+         *     songs on stations. A release's songs stay together, placed by its
+         *     best-ranked song; a song without a release is a group of its own.
+         *     Songs decided by a correction are never on it. Before the genre v2
+         *     switch it lists the v1 blend's songs, hidden first, then lowest score.
          */
         get: operations["getGenreReview"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/tracks/{id}/genre-decision": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** How the genre engine decided one song, with its "why" breakdown */
+        get: operations["getGenreDecision"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/releases/{id}/outside-genres/refetch": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Fetch a release's MusicBrainz, Discogs and Last.fm genres again, in the background
+         * @description Marks the release's cached lookups (release, release group, its songs'
+         *     recordings and Last.fm tracks, its Discogs release) due and queues a
+         *     fetch for each switched-on source; a rescore follows when they bring
+         *     new genres.
+         */
+        post: operations["refetchReleaseOutsideGenres"];
         delete?: never;
         options?: never;
         head?: never;
@@ -932,10 +999,12 @@ export interface paths {
         get: operations["listGenreCorrections"];
         put?: never;
         /**
-         * Correct the genre of a song or of an artist
-         * @description A song's correction wins over its artist's, which wins over the
-         *     blended score. Saving twice replaces it. Queues genre scoring; if
+         * Correct the genre (and style) of a song, a release or an artist
+         * @description A correction beats every other source; the most specific one (song,
+         *     then release, then artist) wins, and it becomes a trusted label for
+         *     the classifier. Saving twice replaces it. Queues genre scoring; if
          *     queueing fails the correction is saved, and saving again retries.
+         *     Release corrections and styles need the genre v2 switch (400 before).
          */
         post: operations["saveGenreCorrection"];
         delete?: never;
@@ -955,7 +1024,7 @@ export interface paths {
         put?: never;
         post?: never;
         /**
-         * Take a genre correction back
+         * Take a genre correction back (undo)
          * @description Queues genre scoring; if queueing fails the correction is gone, and deleting again retries.
          */
         delete: operations["deleteGenreCorrection"];
@@ -1587,26 +1656,162 @@ export interface components {
             title: string;
             artist?: string;
         };
-        GenreReviewItem: {
+        GenreReviewSong: {
             track_id: string;
             title: string;
             artist?: string;
-            genre: string;
-            score: number;
-            /** @description How many users hid it on a genre station */
+            /** @description The decided genre; null for an unsure song */
+            genre: string | null;
+            style?: string;
+            /** @description strong_sources, release, classifier or unsure; blend before the genre v2 switch */
+            source: string;
+            /** @description Release share */
+            confidence?: number;
+            unsure_reason?: string;
+            review_reason?: string;
+            /** @description A genre the engine leans to but did not pick: the classifier's, else the release lean's */
+            suggestion?: string;
+            /** @description How many listeners hid it on a genre station */
             hidden_by: number;
-            /** @description Another copy of the song has a different main genre */
-            copies_disagree: boolean;
+            /** @description 1 hidden by listeners, 2 unsure, 3 classifier versus tag, 4 least sure on a station */
+            priority: number;
+        };
+        GenreReviewGroup: {
+            release_id?: string;
+            release_title?: string;
+            release_artist?: string;
+            compilation: boolean;
+            /** @description The best rank of its songs */
+            priority: number;
+            songs: components["schemas"]["GenreReviewSong"][];
+        };
+        GenreReviewPage: {
+            /** @description The genre v2 engine decides genres (release corrections and styles available) */
+            switched: boolean;
+            groups: components["schemas"]["GenreReviewGroup"][];
+            /** @description Groups on the whole queue */
+            total: number;
+            /** @description Songs on the whole queue */
+            songs: number;
+            offset: number;
+            limit: number;
+        };
+        GenreDecision: {
+            track_id: string;
+            title: string;
+            artist?: string;
+            genre_tag?: string;
+            release_id?: string;
+            release_title?: string;
+            genre: string | null;
+            style?: string;
+            source: string;
+            confidence?: number;
+            unsure_reason?: string;
+            review_reason?: string;
+            /** @description Genres the song may get; left out when nothing narrowed it */
+            fence?: string[];
+            why: components["schemas"]["GenreWhy"];
+            /** Format: date-time */
+            decided_at: string;
+        };
+        /** @description The engine's "why" breakdown (genre_engine.py); every part is optional. */
+        GenreWhy: {
+            /** @description Each source's view, by name (genre_tag, discogs, mb_recording, mb_release, artist, lastfm) */
+            sources?: {
+                [key: string]: {
+                    genre?: string;
+                    fence?: string[];
+                    styles?: string[];
+                };
+            };
+            fence?: string[];
+            correction?: {
+                scope?: string;
+                value?: string;
+            };
+            agreeing?: string[];
+            release?: {
+                genre?: string;
+                share?: number;
+                decided?: number;
+            };
+            /** @description Also runner_ups: [genre, share] pairs, left out here as mixed-type arrays */
+            classifier?: {
+                genre?: string | null;
+                share?: number;
+            };
+            style?: {
+                style?: string;
+                from?: string;
+                activation?: number;
+            };
+        };
+        GenreCatalogEntry: {
+            id: string;
+            name: string;
+            station: boolean;
+            songs: number;
+            styles?: components["schemas"]["GenreCatalogEntry"][];
+        };
+        /** @description unsure, flagged, with_style, to_review and by_source are left out before the genre v2 switch; test_score until the first rescore. */
+        GenreOverview: {
+            switched: boolean;
+            /** @description Songs (best copies) in the library */
+            songs: number;
+            /** @description Songs with a genre */
+            decided: number;
+            unsure?: number;
+            /** @description Kept their tag but the classifier disagrees */
+            flagged?: number;
+            with_style?: number;
+            /** @description Songs on the review queue */
+            to_review?: number;
+            /** @description Songs by what decided them */
+            by_source?: {
+                [key: string]: number;
+            };
+            genres: components["schemas"]["GenreCatalogEntry"][];
+            test_score?: components["schemas"]["GenreTestScore"];
+            /** Format: date-time */
+            test_score_at?: string;
+        };
+        /** @description Leave-one-out accuracy of the classifier on the trusted labels */
+        GenreTestScore: {
+            labels?: number;
+            k?: number;
+            decides_at?: number;
+            accuracy?: number | null;
+            /** @description Share of labels it decides (vote at decides_at or more) */
+            decides?: number | null;
+            accuracy_when_deciding?: number | null;
+            catalog_version?: string;
+            per_genre?: {
+                [key: string]: {
+                    labels?: number;
+                    accuracy?: number | null;
+                    decides?: number | null;
+                    accuracy_when_deciding?: number | null;
+                };
+            };
         };
         GenreCorrection: {
             id: string;
+            /** @enum {string} */
+            scope: "song" | "release" | "artist";
             /** @description Set when it corrects a song */
             track_id?: string;
             track_title?: string;
             track_artist?: string;
+            /** @description Set when it corrects a release */
+            release_id?: string;
+            release_title?: string;
+            release_artist?: string;
             /** @description Set when it corrects an artist */
             artist?: string;
             genre: string;
+            /** @description Set when it names a style of the genre */
+            style?: string;
             /** Format: date-time */
             created_at: string;
         };
@@ -1799,7 +2004,7 @@ export interface components {
                 "application/json": components["schemas"]["Station"];
             };
         };
-        /** @description Every genre correction */
+        /** @description The genre corrections (matching the search, if any) */
         GenreCorrections: {
             headers: {
                 [name: string]: unknown;
@@ -1807,6 +2012,8 @@ export interface components {
             content: {
                 "application/json": {
                     corrections: components["schemas"]["GenreCorrection"][];
+                    /** @description After a save: the saved correction's id, to undo it */
+                    saved_id?: string;
                 };
             };
         };
@@ -3041,9 +3248,32 @@ export interface operations {
             404: components["responses"]["Error"];
         };
     };
+    getGenreOverview: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Overview */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GenreOverview"];
+                };
+            };
+        };
+    };
     getGenreReview: {
         parameters: {
             query?: {
+                /** @description Groups to skip */
+                offset?: number;
+                /** @description Groups per page */
                 limit?: number;
             };
             header?: never;
@@ -3052,23 +3282,79 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Review list */
+            /** @description One page of the queue */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GenreReviewPage"];
+                };
+            };
+            400: components["responses"]["Error"];
+        };
+    };
+    getGenreDecision: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["id"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The decision */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GenreDecision"];
+                };
+            };
+            400: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    refetchReleaseOutsideGenres: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["id"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Queued */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
                     "application/json": {
-                        items: components["schemas"]["GenreReviewItem"][];
+                        status: string;
                     };
                 };
             };
-            400: components["responses"]["Error"];
+            /** @description Unknown release */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
         };
     };
     listGenreCorrections: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Keep corrections whose song, release, artist, genre or style contains this */
+                q?: string;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -3088,12 +3374,16 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": {
-                    /** @description The song; give this or artist */
+                    /** @description The song; give exactly one of track_id, release_id and artist */
                     track_id?: string;
-                    /** @description Every track of this artist; give this or track_id */
+                    /** @description Every song of this release */
+                    release_id?: string;
+                    /** @description Every song of this artist */
                     artist?: string;
-                    /** @description A station genre */
+                    /** @description A genre of the catalog */
                     genre: string;
+                    /** @description Optional: a style of that genre */
+                    style?: string;
                 };
             };
         };

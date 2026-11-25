@@ -326,6 +326,23 @@ def refetch_outside_genres():
     return {"status": "queued"}
 
 
+@app.post("/releases/{release_id}/outside-genres/refetch", response_model=Queued)
+def refetch_release_outside_genres(release_id: UUID):
+    """Fetch one release's outside genres again, in the background.
+
+    Its cached lookups become due and each switched-on source gets a fetch;
+    a rescore follows when they bring new genres.
+    """
+    from outside_genres import mark_release_due
+
+    with _db_conn() as conn:
+        if mark_release_due(conn, release_id) is None:
+            raise HTTPException(status_code=404, detail="unknown release")
+        tasks.queue_outside_genres(conn)
+        conn.commit()
+    return {"status": "queued"}
+
+
 @app.get("/outside-sources", response_model=OutsideSources)
 def outside_sources_status():
     """Switches, key status (never the key), last run and match stats of each outside source."""

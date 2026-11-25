@@ -200,19 +200,39 @@ func TestGenreReviewAndCorrections(t *testing.T) {
 	rec := f.call(f.h.HideTrack, alice, http.MethodPost, "/h", stationID, `{"track_id":"`+hiddenTrack+`"}`)
 	require.Equal(t, http.StatusNoContent, rec.Code, rec.Body.String())
 
-	review := func() []stations.GenreReviewItem {
-		rec := f.call(f.h.AdminGenreReview, admin, http.MethodGet, "/r", "", "")
+	review := func(target string) stations.GenreReviewPage {
+		rec := f.call(f.h.AdminGenreReview, admin, http.MethodGet, target, "", "")
 		require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
-		return decode[struct {
-			Items []stations.GenreReviewItem `json:"items"`
-		}](t, rec).Items
+		return decode[stations.GenreReviewPage](t, rec)
 	}
-	items := review()
-	require.Len(t, items, 30)
-	require.Equal(t, hiddenTrack, items[0].TrackID, "most hidden first")
-	require.Equal(t, 1, items[0].HiddenBy)
-	require.Equal(t, low, items[1].TrackID, "then the lowest score")
+	// Before the genre v2 switch the queue lists the v1 blend's songs, one
+	// group per song without a release, paged by groups.
+	page := review("/r")
+	require.False(t, page.Switched)
+	require.Equal(t, 30, page.Total)
+	require.Equal(t, 30, page.Songs)
+	require.Len(t, page.Groups, 20, "20 groups a page by default")
+	first := page.Groups[0]
+	require.Len(t, first.Songs, 1)
+	require.Equal(t, hiddenTrack, first.Songs[0].TrackID, "most hidden first")
+	require.Equal(t, 1, first.Songs[0].HiddenBy)
+	require.Equal(t, 1, first.Priority)
+	require.Equal(t, "blend", first.Songs[0].Source)
+	require.Equal(t, low, page.Groups[1].Songs[0].TrackID, "then the lowest score")
+	rest := review("/r?offset=20&limit=20")
+	require.Len(t, rest.Groups, 10)
+	require.Equal(t, 30, review("/r?offset=40").Total, "past the end still counts")
 	require.Equal(t, http.StatusBadRequest, f.call(f.h.AdminGenreReview, admin, http.MethodGet, "/r?limit=999", "", "").Code)
+	require.Equal(t, http.StatusBadRequest, f.call(f.h.AdminGenreReview, admin, http.MethodGet, "/r?offset=-1", "", "").Code)
+	require.Equal(t, http.StatusNotFound, f.call(f.h.AdminGenreDecision, admin, http.MethodGet, "/d", low, "").Code, "no v2 decision yet")
+	rec = f.call(f.h.AdminGenreOverview, admin, http.MethodGet, "/o", "", "")
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	overview := decode[stations.GenreOverview](t, rec)
+	require.False(t, overview.Switched)
+	require.Equal(t, 30, overview.Songs)
+	require.Equal(t, 30, overview.Decided)
+	require.Nil(t, overview.Unsure, "no unsure songs before the switch")
+	require.Nil(t, overview.TestScore)
 
 	// Bad requests save nothing.
 	save := func(body string) int {
@@ -223,6 +243,9 @@ func TestGenreReviewAndCorrections(t *testing.T) {
 	require.Equal(t, http.StatusBadRequest, save(`{"track_id":"`+low+`","genre":"nope"}`))
 	require.Equal(t, http.StatusBadRequest, save(`{"track_id":"nope","genre":"techno"}`))
 	require.Equal(t, http.StatusBadRequest, save(`{"track_id":"`+stationID+`","genre":"techno"}`), "unknown track")
+	release := f.one(`INSERT INTO releases (folder, title) VALUES ('/m/r', 'R') RETURNING id::text`)
+	require.Equal(t, http.StatusBadRequest, save(`{"release_id":"`+release+`","genre":"techno"}`), "no release scope before the switch")
+	require.Equal(t, http.StatusBadRequest, save(`{"track_id":"`+low+`","genre":"techno","style":"minimal"}`), "no styles before the switch")
 	require.Equal(t, "0", f.one(`SELECT COUNT(*)::text FROM genre_corrections`))
 
 	// Saving stores the correction and queues scoring; saving again replaces it.
@@ -245,7 +268,7 @@ func TestGenreReviewAndCorrections(t *testing.T) {
 
 	// A song scored from a correction leaves the review list.
 	f.exec(`UPDATE track_station_genres SET corrected = TRUE WHERE track_id = $1::uuid`, low)
-	require.Len(t, review(), 29)
+	require.Equal(t, 29, review("/r").Songs)
 
 	// When scoring cannot be queued the admin hears it; the change is saved.
 	stub.Errors["RebuildGenres"] = errors.New("worker down")
