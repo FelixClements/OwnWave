@@ -1049,6 +1049,70 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/admin/outside-sources": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Outside genre sources (MusicBrainz, Discogs, Last.fm) with key status and match stats
+         * @description Never returns a saved token or key: only whether one is set, where it
+         *     comes from (page or env) and its last 4 characters.
+         */
+        get: operations["getOutsideSources"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/outside-sources/settings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Save a source's switch or key; page values override the stack env
+         * @description Fields left out stay as they are. `enabled: null` goes back to the env
+         *     switch; `key: null` removes the key saved on the page, so the env key
+         *     (if any) is used again. The key is stored encrypted and never returned.
+         *     A source that is now usable starts fetching right away.
+         */
+        post: operations["updateOutsideSource"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/outside-sources/test": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * One cheap real request to a source, with the given key or the key in use
+         * @description The given key is only tried, not saved. The message never contains the key.
+         */
+        post: operations["testOutsideSource"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/admin/genres/report": {
         parameters: {
             query?: never;
@@ -1553,6 +1617,87 @@ export interface components {
             manual: boolean;
             /** @description Left out of the playlist's stations and picks */
             hidden: boolean;
+        };
+        OutsideSources: {
+            library: {
+                songs: number;
+                releases: number;
+            };
+            /** @description Lookups are repeated once this old (OUTSIDE_GENRES_MAX_AGE_DAYS) */
+            max_age_days: number;
+            sources: components["schemas"]["OutsideSource"][];
+        };
+        OutsideSource: {
+            /** @enum {string} */
+            source: "musicbrainz" | "discogs" | "lastfm";
+            name: string;
+            /** @enum {string} */
+            state: "on" | "off" | "missing_key" | "refused_key";
+            enabled: boolean;
+            /** @enum {string} */
+            enabled_from: "page" | "env";
+            /** @description The env var the page switch overrides */
+            env_switch: string;
+            /** @description Null for sources that need no key (MusicBrainz) */
+            key: components["schemas"]["OutsideSourceKey"] | null;
+            running: boolean;
+            queued: boolean;
+            requests_per_run: number;
+            last_run: components["schemas"]["OutsideSourceLastRun"] | null;
+            /** Format: date-time */
+            last_refresh: string | null;
+            songs: components["schemas"]["OutsideSourceMatch"];
+            releases: components["schemas"]["OutsideSourceMatch"];
+            genre_yield: components["schemas"]["OutsideGenreYield"];
+        };
+        /** @description Never the key itself */
+        OutsideSourceKey: {
+            set: boolean;
+            /** @enum {string|null} */
+            source: "page" | "env" | null;
+            last4: string | null;
+            /** @description A key is saved on the page but the encryption key changed; save it again */
+            unreadable: boolean;
+            env_var: string;
+        };
+        OutsideSourceLastRun: {
+            /** @description ok, refused_key or failed */
+            status: string;
+            requests: number;
+            stored: number;
+            failures: number;
+            /** @description The run's budget ran out with lookups left */
+            more: boolean;
+            /** Format: date-time */
+            at: string | null;
+        };
+        /**
+         * @description covered: could be looked up at all; looked_up = found + not_found;
+         *     due: not looked up yet, or old enough to be looked up again.
+         */
+        OutsideSourceMatch: {
+            covered: number;
+            looked_up: number;
+            found: number;
+            not_found: number;
+            due: number;
+        };
+        OutsideGenreYield: {
+            found_rows: number;
+            with_genres: number;
+            /** @description Distinct raw values */
+            values: number;
+            translated_values: number | null;
+            untranslated_values: number | null;
+            top: components["schemas"]["OutsideGenreValue"][];
+            untranslated: components["schemas"]["OutsideGenreValue"][];
+        };
+        OutsideGenreValue: {
+            name: string;
+            /** @description genre, style or tag */
+            kind: string;
+            rows: number;
+            translated_to: string | null;
         };
         GenreDistribution: {
             scored_tracks: number;
@@ -3059,6 +3204,103 @@ export interface operations {
                 content: {
                     "application/json": {
                         status: string;
+                    };
+                };
+            };
+        };
+    };
+    getOutsideSources: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Settings, state, last run and match stats of each source */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OutsideSources"];
+                };
+            };
+        };
+    };
+    updateOutsideSource: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @enum {string} */
+                    source: "musicbrainz" | "discogs" | "lastfm";
+                    enabled?: boolean | null;
+                    /** @description Discogs personal token or Last.fm API key */
+                    key?: string | null;
+                };
+            };
+        };
+        responses: {
+            /** @description Saved */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        status: string;
+                    };
+                };
+            };
+            /** @description Invalid key */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description No encryption key configured (SECRETS_KEY or ANALYTICS_API_SECRET) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    testOutsideSource: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @enum {string} */
+                    source: "musicbrainz" | "discogs" | "lastfm";
+                    key?: string | null;
+                };
+            };
+        };
+        responses: {
+            /** @description Whether the source accepted the request */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        ok: boolean;
+                        message: string;
                     };
                 };
             };

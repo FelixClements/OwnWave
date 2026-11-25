@@ -6,6 +6,7 @@ import type {
   GenreCorrection,
   GenreReport,
   GenreStationSettings,
+  OutsideSource,
   QueueTrack,
   ScanStatus,
   ScanSummary,
@@ -45,6 +46,7 @@ export const keys = {
   genreReview: ['genreReview'] as const,
   genreCorrections: ['genreCorrections'] as const,
   pipeline: ['pipeline'] as const,
+  outsideSources: ['outsideSources'] as const,
 };
 
 // --- stations -----------------------------------------------------------
@@ -372,6 +374,42 @@ export const useGenreReport = (enabled: boolean) =>
     queryFn: () => callAs<GenreReport>(api.GET('/api/admin/genres/report')),
     enabled,
   });
+
+// --- outside genre sources (admin) ------------------------------------
+
+export const useOutsideSources = () =>
+  useQuery({
+    queryKey: keys.outsideSources,
+    queryFn: () => call(api.GET('/api/admin/outside-sources')),
+    // Poll while a fetch is queued or running, so the counts move.
+    refetchInterval: (q) => (q.state.data?.sources.some((s) => s.running || s.queued) ? 5000 : false),
+  });
+
+type SourceId = OutsideSource['source'];
+
+/** Save a source's switch and/or key. `enabled: null` goes back to env; `key: null` removes the page key. */
+export function useUpdateOutsideSource() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: { source: SourceId; enabled?: boolean | null; key?: string | null }) =>
+      call(api.POST('/api/admin/outside-sources/settings', { body })),
+    onSettled: () => void qc.invalidateQueries({ queryKey: keys.outsideSources }),
+  });
+}
+
+/** One cheap real request to the source, with the typed key (not saved) or the key in use. */
+export const useTestOutsideSource = () =>
+  useMutation({
+    mutationFn: (body: { source: SourceId; key?: string | null }) => call(api.POST('/api/admin/outside-sources/test', { body })),
+  });
+
+export function useRefetchOutsideGenres() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => call(api.POST('/api/admin/outside-genres/refetch')),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: keys.outsideSources }),
+  });
+}
 
 export const useUsers = () =>
   useQuery({ queryKey: keys.users, queryFn: () => call(api.GET('/api/admin/users')).then((r) => r.users ?? []) });

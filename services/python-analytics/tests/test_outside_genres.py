@@ -380,29 +380,37 @@ def all_on(monkeypatch):
     monkeypatch.setattr("config.MUSICBRAINZ_ENABLED", True)
     monkeypatch.setattr("config.DISCOGS_ENABLED", True)
     monkeypatch.setattr("config.LASTFM_ENABLED", True)
+    monkeypatch.setattr("config.DISCOGS_TOKEN", "fake-discogs-token")
+    monkeypatch.setattr("config.LASTFM_API_KEY", "fake-lastfm-key")
 
 
-def test_sources_without_credentials_are_switched_off(monkeypatch):
+def test_sources_without_credentials_are_switched_off(db_url, monkeypatch):
+    import outside_sources
+
     monkeypatch.setattr("config.MUSICBRAINZ_ENABLED", True)
-    monkeypatch.setattr("config.DISCOGS_ENABLED", False)
-    monkeypatch.setattr("config.LASTFM_ENABLED", False)
-    assert og.enabled_sources() == ["musicbrainz"]
+    monkeypatch.setattr("config.DISCOGS_ENABLED", True)
+    monkeypatch.setattr("config.LASTFM_ENABLED", True)
+    monkeypatch.setattr("config.DISCOGS_TOKEN", "")
+    monkeypatch.setattr("config.LASTFM_API_KEY", "")
+    with psycopg.connect(db_url) as c:
+        assert outside_sources.enabled_sources(c) == ["musicbrainz"]
     assert tasks.fetch_outside_genres("lastfm") == {"source": "lastfm", "skipped": "switched off"}
 
 
-def test_config_switches_off_sources_without_credentials(monkeypatch):
+def test_config_reads_the_env_switches_and_keys(monkeypatch):
     import importlib
 
     import config
 
     monkeypatch.delenv("DISCOGS_TOKEN", raising=False)
     monkeypatch.setenv("LASTFM_API_KEY", "  ")
+    monkeypatch.setenv("DISCOGS_ENABLED", "false")
     try:
         importlib.reload(config)
-        assert config.DISCOGS_ENABLED is False and config.LASTFM_ENABLED is False
-        monkeypatch.setenv("DISCOGS_TOKEN", "t")
-        importlib.reload(config)
-        assert config.DISCOGS_ENABLED is True
+        # The switches are read as set; a missing key is checked per source
+        # (outside_sources), because the admin page may supply one.
+        assert config.DISCOGS_ENABLED is False and config.LASTFM_ENABLED is True
+        assert config.DISCOGS_TOKEN == "" and config.LASTFM_API_KEY == ""
     finally:
         monkeypatch.undo()
         importlib.reload(config)
@@ -421,7 +429,7 @@ def test_task_runs_on_until_done_then_queues_a_rescore(db_url, all_on, monkeypat
     with psycopg.connect(db_url) as c:
         add_library(c)
     monkeypatch.setitem(og.REQUESTS_PER_RUN, og.MUSICBRAINZ, 2)
-    monkeypatch.setattr(og, "make_client", lambda source: mb(FakeHttp(mb_routes())))
+    monkeypatch.setattr(og, "make_client", lambda source, key=None: mb(FakeHttp(mb_routes())))
 
     first = tasks.fetch_outside_genres("musicbrainz")
     assert first["more"] is True
@@ -439,7 +447,7 @@ def test_task_runs_on_until_done_then_queues_a_rescore(db_url, all_on, monkeypat
 
 
 def test_no_rescore_without_new_data(db_url, all_on, monkeypatch):
-    monkeypatch.setattr(og, "make_client", lambda source: mb(FakeHttp()))
+    monkeypatch.setattr(og, "make_client", lambda source, key=None: mb(FakeHttp()))
     assert tasks.fetch_outside_genres("musicbrainz")["stored"] == 0
     assert queued(db_url) == []
 

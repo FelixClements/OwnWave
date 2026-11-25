@@ -52,6 +52,10 @@ _Avoid_: primary source, authoritative source
 A source that only narrows a song's fence and never picks its genre: a broad tag, the artist's genres, or Last.fm tags.
 _Avoid_: hint, secondary source
 
+**Outside source**:
+A web service whose genres are looked up by ID only and cached: MusicBrainz, Discogs and Last.fm. Each can be switched off, and Discogs and Last.fm need a key; the admin "Outside sources" page overrides the server's environment for both.
+_Avoid_: external API, provider, online source
+
 **Classifier**:
 The part that guesses a song's genre from how it sounds, by comparing it with similar-sounding songs that have trusted labels. It only decides when no strong source does.
 _Avoid_: audio model, AI, genre model

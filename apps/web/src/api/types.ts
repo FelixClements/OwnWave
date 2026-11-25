@@ -28,6 +28,10 @@ export type HiddenTrack = S['HiddenTrack'];
 export type GenreReviewItem = S['GenreReviewItem'];
 export type GenreCorrection = S['GenreCorrection'];
 export type GenreDistribution = S['GenreDistribution'];
+export type OutsideSources = S['OutsideSources'];
+export type OutsideSource = S['OutsideSource'];
+export type OutsideSourceMatch = S['OutsideSourceMatch'];
+export type OutsideGenreValue = S['OutsideGenreValue'];
 export type Quality = S['Quality'];
 export type Feedback = 'like' | 'ban';
 

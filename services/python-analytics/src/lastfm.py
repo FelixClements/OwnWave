@@ -49,6 +49,18 @@ class LastfmClient:
     def requests(self) -> int:
         return self.http.requests
 
+    def check_key(self) -> None:
+        """One cheap request that raises LastfmError when Last.fm refuses the key."""
+        params = {"method": "chart.getTopTags", "limit": "1", "api_key": self.api_key, "format": "json"}
+        try:
+            data = self.http.get(self.base_url, params)
+        except urllib.error.HTTPError as exc:
+            data = _error_body(exc)
+            if data is None:
+                raise
+        if data and "error" in data:
+            raise LastfmError(int(data.get("error") or 0), str(data.get("message", "")))
+
     def track_top_tags(self, artist: str, title: str) -> Optional[List[dict]]:
         """[{"name", "count"}] for the exact artist and title, or None when Last.fm does not know the track."""
         params = {

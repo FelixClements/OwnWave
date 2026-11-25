@@ -920,6 +920,73 @@ paths:
         "200":
           description: Queued
           content: { application/json: { schema: { type: object, required: [status], properties: { status: { type: string } } } } }
+  /api/admin/outside-sources:
+    get:
+      operationId: getOutsideSources
+      tags: [admin]
+      summary: Outside genre sources (MusicBrainz, Discogs, Last.fm) with key status and match stats
+      description: |
+        Never returns a saved token or key: only whether one is set, where it
+        comes from (page or env) and its last 4 characters.
+      x-python-path: /outside-sources
+      responses:
+        "200":
+          description: Settings, state, last run and match stats of each source
+          content: { application/json: { schema: { $ref: "#/components/schemas/OutsideSources" } } }
+  /api/admin/outside-sources/settings:
+    post:
+      operationId: updateOutsideSource
+      tags: [admin]
+      summary: Save a source's switch or key; page values override the stack env
+      description: |
+        Fields left out stay as they are. `enabled: null` goes back to the env
+        switch; `key: null` removes the key saved on the page, so the env key
+        (if any) is used again. The key is stored encrypted and never returned.
+        A source that is now usable starts fetching right away.
+      x-python-path: /outside-sources/settings
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [source]
+              properties:
+                source: { type: string, enum: [musicbrainz, discogs, lastfm] }
+                enabled: { type: [boolean, "null"] }
+                key: { type: [string, "null"], writeOnly: true, description: Discogs personal token or Last.fm API key }
+      responses:
+        "200":
+          description: Saved
+          content: { application/json: { schema: { type: object, required: [status], properties: { status: { type: string } } } } }
+        "400": { description: Invalid key }
+        "409": { description: No encryption key configured (SECRETS_KEY or ANALYTICS_API_SECRET) }
+  /api/admin/outside-sources/test:
+    post:
+      operationId: testOutsideSource
+      tags: [admin]
+      summary: One cheap real request to a source, with the given key or the key in use
+      description: The given key is only tried, not saved. The message never contains the key.
+      x-python-path: /outside-sources/test
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [source]
+              properties:
+                source: { type: string, enum: [musicbrainz, discogs, lastfm] }
+                key: { type: [string, "null"], writeOnly: true }
+      responses:
+        "200":
+          description: Whether the source accepted the request
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, message]
+                properties: { ok: { type: boolean }, message: { type: string } }
   /api/admin/genres/report:
     get:
       operationId: getGenreReport
@@ -1438,6 +1505,93 @@ components:
         match_method: { type: string, enum: [exact, fuzzy, manual] }
         manual: { type: boolean, description: "An admin set the match: picked track_id, or marked it as having no local file when track_id is absent" }
         hidden: { type: boolean, description: Left out of the playlist's stations and picks }
+    OutsideSources:
+      type: object
+      required: [library, max_age_days, sources]
+      properties:
+        library:
+          type: object
+          required: [songs, releases]
+          properties: { songs: { type: integer }, releases: { type: integer } }
+        max_age_days: { type: integer, description: Lookups are repeated once this old (OUTSIDE_GENRES_MAX_AGE_DAYS) }
+        sources: { type: array, items: { $ref: "#/components/schemas/OutsideSource" } }
+    OutsideSource:
+      type: object
+      required: [source, name, state, enabled, enabled_from, env_switch, key, running, queued, requests_per_run, last_run, last_refresh, songs, releases, genre_yield]
+      properties:
+        source: { type: string, enum: [musicbrainz, discogs, lastfm] }
+        name: { type: string }
+        state: { type: string, enum: ["on", "off", missing_key, refused_key] }
+        enabled: { type: boolean }
+        enabled_from: { type: string, enum: [page, env] }
+        env_switch: { type: string, description: The env var the page switch overrides }
+        key:
+          description: Null for sources that need no key (MusicBrainz)
+          oneOf:
+            - $ref: "#/components/schemas/OutsideSourceKey"
+            - type: "null"
+        running: { type: boolean }
+        queued: { type: boolean }
+        requests_per_run: { type: integer }
+        last_run:
+          oneOf:
+            - $ref: "#/components/schemas/OutsideSourceLastRun"
+            - type: "null"
+        last_refresh: { type: [string, "null"], format: date-time }
+        songs: { $ref: "#/components/schemas/OutsideSourceMatch" }
+        releases: { $ref: "#/components/schemas/OutsideSourceMatch" }
+        genre_yield: { $ref: "#/components/schemas/OutsideGenreYield" }
+    OutsideSourceKey:
+      type: object
+      description: Never the key itself
+      required: [set, source, last4, unreadable, env_var]
+      properties:
+        set: { type: boolean }
+        source: { type: [string, "null"], enum: [page, env, null] }
+        last4: { type: [string, "null"] }
+        unreadable: { type: boolean, description: A key is saved on the page but the encryption key changed; save it again }
+        env_var: { type: string }
+    OutsideSourceLastRun:
+      type: object
+      required: [status, requests, stored, failures, more, at]
+      properties:
+        status: { type: string, description: "ok, refused_key or failed" }
+        requests: { type: integer }
+        stored: { type: integer }
+        failures: { type: integer }
+        more: { type: boolean, description: The run's budget ran out with lookups left }
+        at: { type: [string, "null"], format: date-time }
+    OutsideSourceMatch:
+      type: object
+      description: |
+        covered: could be looked up at all; looked_up = found + not_found;
+        due: not looked up yet, or old enough to be looked up again.
+      required: [covered, looked_up, found, not_found, due]
+      properties:
+        covered: { type: integer }
+        looked_up: { type: integer }
+        found: { type: integer }
+        not_found: { type: integer }
+        due: { type: integer }
+    OutsideGenreYield:
+      type: object
+      required: [found_rows, with_genres, values, translated_values, untranslated_values, top, untranslated]
+      properties:
+        found_rows: { type: integer }
+        with_genres: { type: integer }
+        values: { type: integer, description: Distinct raw values }
+        translated_values: { type: [integer, "null"] }
+        untranslated_values: { type: [integer, "null"] }
+        top: { type: array, items: { $ref: "#/components/schemas/OutsideGenreValue" } }
+        untranslated: { type: array, items: { $ref: "#/components/schemas/OutsideGenreValue" } }
+    OutsideGenreValue:
+      type: object
+      required: [name, kind, rows, translated_to]
+      properties:
+        name: { type: string }
+        kind: { type: string, description: "genre, style or tag" }
+        rows: { type: integer }
+        translated_to: { type: [string, "null"] }
     GenreDistribution:
       type: object
       required: [scored_tracks, genres, warnings]

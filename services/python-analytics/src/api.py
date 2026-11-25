@@ -1,10 +1,12 @@
 import os
 import secrets
 from contextlib import asynccontextmanager, contextmanager
-from typing import Any, NoReturn
+from datetime import datetime
+from typing import Any, Literal, NoReturn
 from uuid import UUID
 
 from fastapi import FastAPI, HTTPException, Query, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
@@ -28,6 +30,13 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="OwnWave Analytics", lifespan=lifespan)
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_error(request: Request, exc: RequestValidationError):
+    """FastAPI's 422 without the submitted values: a body may hold an API key."""
+    errors = [{"loc": e.get("loc"), "msg": e.get("msg"), "type": e.get("type")} for e in exc.errors()]
+    return JSONResponse({"detail": errors}, status_code=422)
 
 
 @app.middleware("http")
@@ -137,6 +146,103 @@ class SetupSummary(BaseModel):
     total_tracks: int
 
 
+# Outside sources page (issue #148). No model here ever carries a secret.
+SourceId = Literal["musicbrainz", "discogs", "lastfm"]
+
+
+class OutsideSourceKey(BaseModel):
+    set: bool
+    source: Literal["page", "env"] | None
+    last4: str | None
+    unreadable: bool
+    env_var: str
+
+
+class OutsideSourceMatch(BaseModel):
+    covered: int
+    looked_up: int
+    found: int
+    not_found: int
+    due: int
+
+
+class OutsideSourceLastRun(BaseModel):
+    status: str
+    requests: int
+    stored: int
+    failures: int
+    more: bool
+    at: datetime | None
+
+
+class OutsideGenreValue(BaseModel):
+    name: str
+    kind: str
+    rows: int
+    translated_to: str | None
+
+
+class OutsideGenreYield(BaseModel):
+    found_rows: int
+    with_genres: int
+    values: int
+    translated_values: int | None
+    untranslated_values: int | None
+    top: list[OutsideGenreValue]
+    untranslated: list[OutsideGenreValue]
+
+
+class OutsideSource(BaseModel):
+    source: SourceId
+    name: str
+    state: Literal["on", "off", "missing_key", "refused_key"]
+    enabled: bool
+    enabled_from: Literal["page", "env"]
+    env_switch: str
+    key: OutsideSourceKey | None
+    running: bool
+    queued: bool
+    requests_per_run: int
+    last_run: OutsideSourceLastRun | None
+    last_refresh: datetime | None
+    songs: OutsideSourceMatch
+    releases: OutsideSourceMatch
+    genre_yield: OutsideGenreYield
+
+
+class OutsideLibrary(BaseModel):
+    songs: int
+    releases: int
+
+
+class OutsideSources(BaseModel):
+    library: OutsideLibrary
+    max_age_days: int
+    sources: list[OutsideSource]
+
+
+class OutsideSourceUpdate(BaseModel):
+    """Fields left out stay as they are. enabled null goes back to the env
+    switch; key null removes the key saved on the page (the env key, if any,
+    is used again)."""
+
+    source: SourceId
+    enabled: bool | None = None
+    key: str | None = None
+
+
+class OutsideSourceTestRequest(BaseModel):
+    """key is tried instead of the key in use, without saving it."""
+
+    source: SourceId
+    key: str | None = None
+
+
+class OutsideSourceTestResult(BaseModel):
+    ok: bool
+    message: str
+
+
 @contextmanager
 def _db_conn():
     conn = db.get_conn()
@@ -217,6 +323,53 @@ def refetch_outside_genres():
         tasks.queue_outside_genres(conn)
         conn.commit()
     return {"status": "queued"}
+
+
+@app.get("/outside-sources", response_model=OutsideSources)
+def outside_sources_status():
+    """Switches, key status (never the key), last run and match stats of each outside source."""
+    import outside_sources
+    from config import OUTSIDE_GENRES_MAX_AGE_DAYS
+
+    with _db_conn() as conn:
+        return outside_sources.status(conn, OUTSIDE_GENRES_MAX_AGE_DAYS)
+
+
+@app.post("/outside-sources/settings", response_model=Queued)
+def update_outside_source(req: OutsideSourceUpdate):
+    """Save a source's switch and/or key on the page; they override the env.
+
+    A source that is now usable starts fetching right away.
+    """
+    import outside_sources
+
+    with _db_conn() as conn:
+        try:
+            if "enabled" in req.model_fields_set:
+                outside_sources.save_switch(conn, req.source, req.enabled)
+            if "key" in req.model_fields_set:
+                outside_sources.save_key(conn, req.source, req.key)
+        except ValueError as exc:  # never echo the key back
+            raise HTTPException(status_code=400, detail=str(exc)) from None
+        except RuntimeError:
+            raise HTTPException(
+                status_code=409, detail="set SECRETS_KEY or ANALYTICS_API_SECRET to save keys on this page"
+            ) from None
+        tasks.queue_outside_genres(conn, [req.source])
+        conn.commit()
+    return {"status": "saved"}
+
+
+@app.post("/outside-sources/test", response_model=OutsideSourceTestResult)
+def test_outside_source(req: OutsideSourceTestRequest):
+    """One cheap real request to the source with the given key, or the key in use."""
+    import outside_sources
+
+    with _db_conn() as conn:
+        try:
+            return outside_sources.check_connection(conn, req.source, req.key)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from None
 
 
 @app.get("/genres", response_model=GenreDistribution)

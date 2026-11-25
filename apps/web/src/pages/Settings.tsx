@@ -4,6 +4,7 @@ import clsx from 'clsx';
 import {
   Activity,
   AudioLines,
+  Globe,
   Library,
   ListChecks,
   Lock,
@@ -30,6 +31,7 @@ import { Slider } from '@/components/player-ui';
 import { Block, Note, Row, Section, SelectControl, Switch, Tag, table } from '@/components/settings-ui';
 import { Button, ErrorText, Spinner } from '@/components/ui';
 import { GenreReviewPane, GenresPane, GenreStationsPane, LibraryPane, OverviewPane, PeoplePane, StationRefreshPane, useAdminBadges } from './Admin';
+import { OutsideSourcesPane } from './OutsideSources';
 
 const QUALITIES = (Object.keys(QUALITY_LABELS) as Quality[]).map((q) => ({ value: q, label: QUALITY_LABELS[q] }));
 
@@ -274,6 +276,7 @@ export const SETTINGS_PAGES: Page[] = [
   { path: 'library', label: 'Library', icon: Library, group: 'Server', keywords: 'scan rescan import files', element: <LibraryPane />, admin: true, badge: 'library' },
   { path: 'people', label: 'People', icon: Users, group: 'Server', keywords: 'users invite admin accounts', element: <PeoplePane />, admin: true },
   { path: 'genres', label: 'Genres', icon: TagIcon, group: 'Stations & genres', keywords: 'refresh report model tags', element: <GenresPane />, admin: true },
+  { path: 'outside-sources', label: 'Outside sources', icon: Globe, group: 'Stations & genres', keywords: 'musicbrainz discogs last.fm lastfm api key token genres fetch', element: <OutsideSourcesPane />, admin: true },
   { path: 'genre-stations', label: 'Genre stations', icon: Radio, group: 'Stations & genres', keywords: 'hide show rename', element: <GenreStationsPane />, admin: true },
   { path: 'genre-review', label: 'Genre review', icon: ListChecks, group: 'Stations & genres', keywords: 'corrections check songs', element: <GenreReviewPane />, admin: true, badge: 'review' },
   { path: 'station-refresh', label: 'Station refresh', icon: RefreshCw, group: 'Stations & genres', keywords: 'pipeline update playlists match', element: <StationRefreshPane />, admin: true },
