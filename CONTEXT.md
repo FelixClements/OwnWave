@@ -37,7 +37,7 @@ A genre tag that names only a wide area (such as "Electronic", "Pop/Rock" or "Da
 _Avoid_: generic tag
 
 **Correction**:
-An admin's choice of genre for one song or for all of an artist's songs. It beats every other source.
+An admin's choice of genre for one song, for all songs of a release, or for all of an artist's songs. It beats every other source; the most specific one wins.
 _Avoid_: override, manual genre
 
 **Trusted label**:
@@ -55,6 +55,10 @@ _Avoid_: hint, secondary source
 **Classifier**:
 The part that guesses a song's genre from how it sounds, by comparing it with similar-sounding songs that have trusted labels. It only decides when no strong source does.
 _Avoid_: audio model, AI, genre model
+
+**Release lean**:
+A song with no strong source takes the genre that at least 70% of its release's decided songs share, if that genre is inside its fence. Compilations never lean.
+_Avoid_: album vote, album genre
 
 **Unsure song**:
 A song whose sources do not agree well enough to pick a genre. It joins no genre station until an admin reviews it.

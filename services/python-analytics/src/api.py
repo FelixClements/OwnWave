@@ -19,7 +19,7 @@ async def lifespan(app: FastAPI):
     if problem:
         raise RuntimeError(problem)
     db.wait_for_db()
-    from genre_scoring import sync_catalog
+    from genre_engine import sync_catalog
 
     with db.get_conn() as conn:
         sync_catalog(conn)

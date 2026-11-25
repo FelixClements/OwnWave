@@ -28,3 +28,26 @@ The up migration:
 3. At the release, write the real migration with the next free number and
    delete the pending copies:
    `python services/python-analytics/src/genre_catalog.py --number NNN`.
+
+## The engine follows the switch
+
+The genre engine v2 (`services/python-analytics/src/genre_engine.py`, issue
+#137) is wired in but only runs once this migration is in: `score_genres`
+and the API's startup catalog sync check `station_genres.kind`
+(`genre_engine.switched`). Until then the live app keeps the v1 blend. So
+moving this file into `database/migrations/` at the release is the switch;
+nothing else needs flipping.
+
+Migration `036_genre_decisions` (already in `database/migrations/`, harmless
+before the switch) adds where the engine stores its results:
+`track_genre_decisions`, release-scope `genre_corrections.release_id`, and the
+`genre_review_queue` view.
+
+Before the release, run the engine in bulk on a copy of the database (#138):
+
+    DATABASE_URL=<copy> PYTHONPATH=services/python-analytics/src \
+        python services/python-analytics/src/main.py genre-engine [--write]
+
+It prints counts, the classifier's test score and the agreement with the v1
+engine as JSON. It is read only unless `--write`, which stores the decisions
+and the test score but never `track_station_genres`.

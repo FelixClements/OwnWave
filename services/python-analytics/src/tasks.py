@@ -479,17 +479,23 @@ def fetch_artist_genres() -> dict:
 
 
 def score_genres() -> dict:
-    """Blend all genre sources into track_station_genres for the whole library.
+    """Decide every track's genre into track_station_genres for the whole library.
+
+    Uses the genre engine v2 (genre_engine) once the genre v2 switch
+    migration is in, the v1 blend (genre_scoring) until then: the new engine
+    replaces the old one in one release (ADR 0008 decision 6).
 
     Records when scoring ran (admin pipeline view) and tells the API, which
     then refreshes the genre stations.
     """
+    import genre_engine
+    import genre_scoring
     from config import GENRE_MODEL_DIR
     from genre_audio import load_labels
-    from genre_scoring import score_library
 
     with db.get_conn() as conn:
-        summary = score_library(conn, load_labels(GENRE_MODEL_DIR))
+        engine = genre_engine if genre_engine.switched(conn) else genre_scoring
+        summary = engine.score_library(conn, load_labels(GENRE_MODEL_DIR))
         conn.execute(
             """
             INSERT INTO app_state (key, value, updated_at) VALUES (%s, %s, NOW())
