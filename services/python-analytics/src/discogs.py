@@ -51,6 +51,10 @@ class DiscogsClient:
     def requests(self) -> int:
         return self.http.requests
 
+    def identity(self) -> Optional[dict]:
+        """Who the token belongs to: one cheap request that fails with 401 for a bad token."""
+        return self.http.get(f"{self.base_url}/oauth/identity")
+
     def release(self, release_id: str) -> Optional[dict]:
         """{"genres": [...], "styles": [...]} of a release, or None if Discogs does not know it."""
         data = self.http.get(f"{self.base_url}/releases/{release_id}")

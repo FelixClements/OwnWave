@@ -61,25 +61,18 @@ REQUESTS_PER_RUN = {
 }
 
 
-def enabled_sources() -> List[str]:
-    """The sources switched on in config (with their credentials set)."""
-    import config
-
-    on = {MUSICBRAINZ: config.MUSICBRAINZ_ENABLED, DISCOGS: config.DISCOGS_ENABLED, LASTFM: config.LASTFM_ENABLED}
-    return [s for s in SOURCES if on[s]]
-
-
-def make_client(source: str):
-    """A client for one source, configured from config."""
+def make_client(source: str, key: Optional[str] = None, opener=None):
+    """A client for one source; key is its Discogs token or Last.fm API key
+    (see outside_sources.settings for where it comes from)."""
     import config
 
     ua = config.OUTSIDE_USER_AGENT
     if source == MUSICBRAINZ:
-        return MusicBrainzClient(config.MUSICBRAINZ_URL, ua)
+        return MusicBrainzClient(config.MUSICBRAINZ_URL, ua, opener=opener)
     if source == DISCOGS:
-        return DiscogsClient(config.DISCOGS_TOKEN, ua)
+        return DiscogsClient(key or "", ua, opener=opener)
     if source == LASTFM:
-        return LastfmClient(config.LASTFM_API_KEY, ua)
+        return LastfmClient(key or "", ua, opener=opener)
     raise ValueError(f"unknown outside genre source {source!r}")
 
 
@@ -90,6 +83,7 @@ class Budget:
     requests: int
     failures: int = 0
     stopped: bool = False  # too many failures, or a bad credential
+    refused: bool = False  # the source refused the token or key
     exhausted: bool = False  # the budget ran out with work left
 
     def left(self, client) -> bool:
@@ -118,9 +112,22 @@ class RunSummary:
     failures: int = 0
     # Work is left for a next run (the budget ran out).
     more: bool = False
+    # The source refused the token or key; the run stopped.
+    refused: bool = False
+    # Requests sent, retries included.
+    requests: int = 0
+
+    @property
+    def status(self) -> str:
+        """ok, refused_key, or failed (stopped after MAX_FAILURES failed lookups)."""
+        if self.refused:
+            return "refused_key"
+        return "failed" if self.failures >= MAX_FAILURES else "ok"
 
     def as_dict(self) -> dict:
         return {
+            "status": self.status,
+            "requests": self.requests,
             "stored": self.stored,
             "new_data": self.new_data,
             "by_source": self.by_source,
@@ -283,6 +290,8 @@ def fetch_due(conn, source: str, client, max_age: int) -> RunSummary:
     fetch = {MUSICBRAINZ: _fetch_musicbrainz, DISCOGS: _fetch_discogs, LASTFM: _fetch_lastfm}[source]
     fetch(conn, client, budget, summary, max_age)
     summary.failures = budget.failures
+    summary.refused = budget.refused
+    summary.requests = client.requests
     summary.more = budget.exhausted and not budget.stopped
     return summary
 
@@ -341,8 +350,11 @@ def _fetch_discogs(conn, discogs: DiscogsClient, budget: Budget, summary: RunSum
             release = discogs.release(release_id)
         except Exception as exc:
             if getattr(exc, "code", None) in (401, 403):
-                log.warning("outside genres: Discogs refused the token (%s); check DISCOGS_TOKEN", exc)
-                budget.stopped = True
+                log.warning(
+                    "outside genres: Discogs refused the token (HTTP %s); check it on the admin"
+                    " Outside sources page or in DISCOGS_TOKEN", exc.code,
+                )
+                budget.stopped = budget.refused = True
                 return
             budget.failed(f"Discogs release {release_id}", exc)
             continue
@@ -357,8 +369,11 @@ def _fetch_lastfm(conn, lastfm: LastfmClient, budget: Budget, summary: RunSummar
             tags = lastfm.track_top_tags(artist, title)
         except LastfmError as exc:
             if exc.bad_key:
-                log.warning("outside genres: Last.fm refused the API key (%s); check LASTFM_API_KEY", exc)
-                budget.stopped = True
+                log.warning(
+                    "outside genres: Last.fm refused the API key (error %s); check it on the admin"
+                    " Outside sources page or in LASTFM_API_KEY", exc.code,
+                )
+                budget.stopped = budget.refused = True
                 return
             budget.failed("Last.fm track", exc)
             continue

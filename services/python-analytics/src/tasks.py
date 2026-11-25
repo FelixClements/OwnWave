@@ -340,9 +340,10 @@ def queue_genre_refresh(conn) -> None:
     scoring does not wait for it, and it queues a rescore when it brings new
     data.
     """
-    from config import MUSICBRAINZ_ENABLED
+    import outside_sources
 
-    if MUSICBRAINZ_ENABLED:
+    # The MusicBrainz switch (admin page, else MUSICBRAINZ_ENABLED) covers artist tags too.
+    if outside_sources.settings(conn, "musicbrainz").enabled:
         task_queue.enqueue(conn, "fetch_artist_genres")
     else:
         task_queue.enqueue(conn, "score_genres")
@@ -351,10 +352,10 @@ def queue_genre_refresh(conn) -> None:
 
 def queue_outside_genres(conn, sources: Optional[list] = None) -> list:
     """Queue a fetch for each switched-on source that has none queued or running."""
-    from outside_genres import enabled_sources
+    from outside_sources import enabled_sources
 
     queued = []
-    for source in enabled_sources():
+    for source in enabled_sources(conn):
         if sources is not None and source not in sources:
             continue
         busy = conn.execute(
@@ -381,12 +382,15 @@ def fetch_outside_genres(source: str, new_data: int = 0) -> dict:
     the Discogs fetch.
     """
     import outside_genres as og
+    import outside_sources
     from config import OUTSIDE_GENRES_MAX_AGE_DAYS
 
-    if source not in og.enabled_sources():
-        return {"source": source, "skipped": "switched off"}
     lock = _SOURCE_LOCKS[source]
     with db.get_conn() as conn:
+        cfg = outside_sources.settings(conn, source)
+        if not cfg.usable:
+            conn.rollback()
+            return {"source": source, "skipped": "switched off"}
         if not conn.execute("SELECT pg_try_advisory_lock(%s)", (lock,)).fetchone()[0]:
             # Another fetch holds the source's rate limit (for MusicBrainz,
             # possibly the artist tag fetch): try again shortly.
@@ -394,7 +398,8 @@ def fetch_outside_genres(source: str, new_data: int = 0) -> dict:
             conn.commit()
             return {"source": source, "skipped": "another fetch is running"}
         try:
-            summary = og.fetch_due(conn, source, og.make_client(source), OUTSIDE_GENRES_MAX_AGE_DAYS)
+            summary = og.fetch_due(conn, source, og.make_client(source, cfg.key), OUTSIDE_GENRES_MAX_AGE_DAYS)
+            outside_sources.record_run(conn, source, summary.as_dict())
             total = new_data + summary.new_data
             if summary.more:
                 task_queue.enqueue(conn, "fetch_outside_genres", source=source, new_data=total)
