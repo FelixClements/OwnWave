@@ -272,6 +272,7 @@ function LastRun({ source: s }: { source: OutsideSource }) {
           <>
             {run.at ? timeAgo(run.at) : 'unknown time'}, {RUN_STATUS[run.status] ?? run.status}. {plural(run.requests, 'request')},{' '}
             {plural(run.stored, 'lookup')} stored{run.failures ? `, ${plural(run.failures, 'failed lookup')}` : ''}
+            {run.retries ? `; ${plural(run.retries, 'request')} retried because the service was busy` : ''}
             {run.more ? '; more runs follow' : ''}.
           </>
         ) : (

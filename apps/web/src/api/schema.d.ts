@@ -1663,7 +1663,10 @@ export interface components {
         OutsideSourceLastRun: {
             /** @description ok, refused_key or failed */
             status: string;
+            /** @description Requests sent */
             requests: number;
+            /** @description Requests sent again after a busy answer (HTTP 429 or 503 */
+            retries: number;
             stored: number;
             failures: number;
             /** @description The run's budget ran out with lookups left */

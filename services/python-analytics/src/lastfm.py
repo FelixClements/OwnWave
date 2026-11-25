@@ -19,6 +19,7 @@ MIN_INTERVAL = 0.25  # seconds between requests (4 a second)
 # Last.fm error codes (https://www.last.fm/api/errorcodes).
 NOT_FOUND = 6  # "Track not found" (also artist not found)
 BAD_KEY_ERRORS = {4, 9, 10, 14, 26}  # authentication failed, invalid or suspended key
+RATE_LIMITED = 29  # "Rate limit exceeded": the client backs off and retries
 
 
 class LastfmError(Exception):
@@ -43,11 +44,17 @@ class LastfmClient:
     ):
         self.api_key = api_key
         self.base_url = base_url
-        self.http = JsonClient(user_agent, MIN_INTERVAL, opener=opener, sleep=sleep, clock=clock)
+        self.http = JsonClient(
+            user_agent, MIN_INTERVAL, opener=opener, sleep=sleep, clock=clock, busy_body=_rate_limited
+        )
 
     @property
     def requests(self) -> int:
         return self.http.requests
+
+    @property
+    def retries(self) -> int:
+        return self.http.retries
 
     def check_key(self) -> None:
         """One cheap request that raises LastfmError when Last.fm refuses the key."""
@@ -93,6 +100,13 @@ class LastfmClient:
             for t in tags
             if isinstance(t, dict) and t.get("name")
         ]
+
+
+def _rate_limited(data: dict) -> bool:
+    try:
+        return int(data.get("error") or 0) == RATE_LIMITED
+    except (TypeError, ValueError):
+        return False
 
 
 def _error_body(exc: urllib.error.HTTPError) -> Optional[dict]:

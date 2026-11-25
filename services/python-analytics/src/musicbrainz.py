@@ -58,12 +58,17 @@ class MusicBrainzClient:
     ):
         self.base_url = base_url.rstrip("/")
         self.user_agent = user_agent
-        # 503 is MusicBrainz's rate-limit answer: the client backs off and retries.
+        # 503 is MusicBrainz's rate-limit answer: the client honours Retry-After or
+        # backs off, and retries.
         self.http = JsonClient(user_agent, MIN_INTERVAL, opener=opener, sleep=sleep, clock=clock)
 
     @property
     def requests(self) -> int:
         return self.http.requests
+
+    @property
+    def retries(self) -> int:
+        return self.http.retries
 
     def _get(self, path: str, params: dict) -> Optional[dict]:
         return self.http.get(f"{self.base_url}{path}", {**params, "fmt": "json"})

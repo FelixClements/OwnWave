@@ -10,6 +10,7 @@ import urllib.parse
 import psycopg
 import pytest
 
+import http_json
 import outside_genres as og
 import task_queue
 import tasks
@@ -88,10 +89,10 @@ def test_json_client_answers_none_on_404_and_retries_when_busy():
         return http(req, timeout)
 
     slept = []
-    c = JsonClient("ua", 1.0, opener=opener, sleep=slept.append, busy_wait=3.0)
+    c = JsonClient("ua", 1.0, opener=opener, sleep=slept.append, busy_wait=3.0, rand=lambda: 0.0)
     assert c.get("https://h.test/x") == {"ok": 1}
     assert c.get("https://h.test/missing") is None
-    assert c.requests == 3
+    assert c.requests == 3 and c.retries == 1
     assert 3.0 in slept
 
 
@@ -325,6 +326,41 @@ def test_failures_are_not_cached_and_stop_the_source(conn, monkeypatch):
     http = FakeHttp({route(f"/ws/2/release/{REL}"): down})
     summary = og.fetch_due(conn, og.MUSICBRAINZ, mb(http), max_age=180)
     assert summary.failures == 1 and summary.more is False
+    assert cached(conn) == {}
+
+
+class Busy:
+    """Answers busy (503) the first `times` requests to each path, then like `http`."""
+
+    def __init__(self, http, times):
+        self.http, self.times, self.seen = http, times, {}
+
+    def __call__(self, req, timeout):
+        path = urllib.parse.urlsplit(req.full_url).path
+        self.seen[path] = self.seen.get(path, 0) + 1
+        if self.seen[path] <= self.times:
+            raise urllib.error.HTTPError(req.full_url, 503, "busy", {}, None)
+        return self.http(req, timeout)
+
+
+def test_busy_answers_that_succeed_on_retry_are_not_failures(conn, monkeypatch):
+    add_library(conn)
+    monkeypatch.setattr(og, "MAX_FAILURES", 1)
+    summary = og.fetch_due(conn, og.MUSICBRAINZ, mb(Busy(FakeHttp(mb_routes()), times=2)), max_age=180)
+    assert summary.failures == 0 and summary.status == "ok"
+    assert summary.retries == 2 * 4  # release, its recordings, and the two loose recordings
+    assert summary.requests == 3 * 4
+    assert summary.as_dict()["retries"] == 8
+    assert len(cached(conn, "mb_recording")) == 4
+
+
+def test_busy_after_every_attempt_is_a_failure(conn, monkeypatch):
+    add_library(conn)
+    monkeypatch.setattr(og, "MAX_FAILURES", 1)
+    http = Busy(FakeHttp(mb_routes()), times=99)
+    summary = og.fetch_due(conn, og.MUSICBRAINZ, mb(http), max_age=180)
+    assert summary.failures == 1 and summary.status == "failed"
+    assert summary.requests == http_json.ATTEMPTS and summary.retries == http_json.ATTEMPTS - 1
     assert cached(conn) == {}
 
 

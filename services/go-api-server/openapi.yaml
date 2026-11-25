@@ -1553,10 +1553,11 @@ components:
         env_var: { type: string }
     OutsideSourceLastRun:
       type: object
-      required: [status, requests, stored, failures, more, at]
+      required: [status, requests, retries, stored, failures, more, at]
       properties:
         status: { type: string, description: "ok, refused_key or failed" }
-        requests: { type: integer }
+        requests: { type: integer, description: Requests sent, retries included }
+        retries: { type: integer, description: Requests sent again after a busy answer (HTTP 429 or 503, Last.fm error 29) }
         stored: { type: integer }
         failures: { type: integer }
         more: { type: boolean, description: The run's budget ran out with lookups left }

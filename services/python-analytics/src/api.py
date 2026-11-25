@@ -169,6 +169,7 @@ class OutsideSourceMatch(BaseModel):
 class OutsideSourceLastRun(BaseModel):
     status: str
     requests: int
+    retries: int
     stored: int
     failures: int
     more: bool

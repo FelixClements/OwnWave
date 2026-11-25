@@ -483,6 +483,7 @@ def _last_run(run: dict) -> dict:
     return {
         "status": str(run.get("status") or "ok"),
         "requests": int(run.get("requests") or 0),
+        "retries": int(run.get("retries") or 0),
         "stored": int(run.get("stored") or 0),
         "failures": int(run.get("failures") or 0),
         "more": bool(run.get("more")),
