@@ -69,14 +69,16 @@ def test_most_discogs400_labels_name_a_style():
         ("Electronic---Hard Techno", genre("techno", "hard_techno")),
         ("Electronic---Deep House", genre("house", "deep_house")),
         ("Electronic---Psy-Trance", genre("trance", "psy_trance")),
-        ("Electronic---Drum n Bass", genre("drum_and_bass")),
+        ("Electronic---Drum n Bass", genre("drum_and_bass", "drum_n_bass")),
         ("Electronic---Hardcore", genre("hard_dance", "hardcore")),
         ("Rock---Hardcore", genre("punk", "hardcore_punk")),
         ("Rock---Black Metal", genre("metal", "black_metal")),
         ("Rock---Deathcore", genre("metal", "deathcore")),
         ("Hip Hop---Trap", genre("hip_hop", "trap")),
-        ("Funk / Soul---Disco", genre("dance", "disco")),
-        ("Electronic---Disco", genre("dance", "disco")),
+        ("Funk / Soul---Disco", genre("house", "disco")),
+        ("Electronic---Disco", genre("house", "disco")),
+        ("Electronic---Dubstep", genre("drum_and_bass", "dubstep")),
+        ("Pop---K-pop", genre("asian_pop", "k_pop")),
         ("Latin---Bossanova", genre("latin", "bossa_nova")),
         ("Jazz---Bossa Nova", genre("latin", "bossa_nova")),
         ("Non-Music---Comedy", genre("other", "comedy")),
@@ -112,9 +114,9 @@ def test_discogs_genres_only_fence():
         ("Techno; Hard Techno", [genre("techno"), genre("techno", "hard_techno")]),
         ("Deep House", [genre("house", "deep_house")]),
         ("Big Room", [genre("house")]),
-        ("Drum & Bass", [genre("drum_and_bass")]),
-        ("Drum 'n' Bass", [genre("drum_and_bass")]),
-        ("Liquid Funk", [genre("drum_and_bass")]),
+        ("Drum & Bass", [genre("drum_and_bass", "drum_n_bass")]),
+        ("Drum 'n' Bass", [genre("drum_and_bass", "drum_n_bass")]),
+        ("Liquid Funk", [genre("drum_and_bass", "drum_n_bass")]),
         ("Hip-Hop", [genre("hip_hop")]),
         ("Hip-Hop/Rap", [genre("hip_hop")]),
         ("Rap", [genre("hip_hop")]),
@@ -122,9 +124,9 @@ def test_discogs_genres_only_fence():
         ("Synthpop", [genre("synth", "synth_pop")]),
         ("Hardcore Punk", [genre("punk", "hardcore_punk")]),
         ("Garage Rock", [genre("rock", "garage_rock")]),
-        ("UK Garage", [genre("bass", "uk_garage")]),
-        ("Alternative Rock", [genre("indie", "alternative_rock")]),
-        ("K-Pop", [genre("pop", "k_pop")]),
+        ("UK Garage", [genre("drum_and_bass", "uk_garage")]),
+        ("Alternative Rock", [genre("rock", "alternative_rock")]),
+        ("K-Pop", [genre("asian_pop", "k_pop")]),
         ("Reggaeton", [genre("latin", "reggaeton")]),
         ("Dancehall", [genre("reggae", "dancehall")]),
         ("Soundtrack", [genre("soundtrack")]),
@@ -134,6 +136,21 @@ def test_discogs_genres_only_fence():
         ("Afro House", [genre("house")]),
         ("Rock & Roll", [genre("rock", "rock_and_roll")]),
         ("Musique concrète", [genre("experimental", "musique_concrete")]),
+        # #138 proposal: Indie & Alternative is part of Rock, Chillwave of Synth.
+        ("Indie Rock", [genre("rock", "indie_rock")]),
+        ("Shoegaze", [genre("rock", "shoegaze")]),
+        ("Chillwave", [genre("synth", "chillwave")]),
+        ("Stage & Screen", [genre("soundtrack")]),
+        ("Latijnse Muziek", [genre("latin")]),
+        ("Amapiano", [genre("house")]),
+        # Owner approved 2026-11-25: Bass & Breaks is part of D&B, Dance & Disco of
+        # House, and K-pop & J-pop is its own genre.
+        ("Dubstep", [genre("drum_and_bass", "dubstep")]),
+        ("Jungle", [genre("drum_and_bass", "jungle")]),
+        ("Disco", [genre("house", "disco")]),
+        ("Eurodance", [genre("house", "eurodance")]),
+        ("J-Pop", [genre("asian_pop", "j_pop")]),
+        ("City Pop", [genre("asian_pop", "city_pop")]),
     ],
 )
 def test_genre_tag(tag, expected):
@@ -156,28 +173,61 @@ def test_genre_tag_fixes_v1_rule_mistakes(tag, expected):
     assert CAT.genre_tag(tag) == [expected]
 
 
-ELECTRONIC = {"techno", "house", "trance", "drum_and_bass", "bass", "hard_dance", "dance", "synth", "ambient", "experimental"}
+ELECTRONIC = {"techno", "house", "trance", "drum_and_bass", "hard_dance", "synth", "ambient", "experimental"}
 
 
 @pytest.mark.parametrize(
     "tag, genres",
     [
-        ("Pop/Rock", {"pop", "rock", "indie", "metal", "punk"}),
-        ("Rock/Pop", {"pop", "rock", "indie", "metal", "punk"}),
+        ("Pop/Rock", {"pop", "asian_pop", "rock", "metal", "punk"}),
+        ("Rock/Pop", {"pop", "asian_pop", "rock", "metal", "punk"}),
         ("Electronic", ELECTRONIC),
         ("Electronica", ELECTRONIC),
         ("EDM", ELECTRONIC - {"ambient", "experimental"}),
-        ("Dance", {"techno", "house", "trance", "drum_and_bass", "bass", "hard_dance", "dance", "synth", "pop"}),
+        ("Dance", {"techno", "house", "trance", "drum_and_bass", "hard_dance", "synth", "pop", "asian_pop"}),
         ("Hardcore", {"hard_dance", "punk"}),
-        ("Alternative", {"indie", "rock", "punk", "metal"}),
-        ("Lo-Fi", {"ambient", "hip_hop", "indie"}),
-        ("Singer-Songwriter", {"folk", "pop", "indie", "rock"}),
+        ("Alternative", {"rock", "punk", "metal"}),
+        ("Lo-Fi", {"ambient", "hip_hop", "rock"}),
+        ("Singer-Songwriter", {"folk", "pop", "asian_pop", "rock"}),
+        # #138: "Electro" alone tags synthwave, techno and EDM alike in this library.
+        ("Electro", {"synth", "techno", "house", "trance", "drum_and_bass", "hard_dance"}),
+        ("Électronique", ELECTRONIC),
+        ("Dance & EDM", ELECTRONIC - {"ambient", "experimental"}),
+        ("Musiques du monde", {"world", "latin", "reggae", "folk"}),
     ],
 )
 def test_broad_tags_fence(tag, genres):
     [t] = CAT.genre_tag(tag)
     assert t.broad
     assert t.fence == genres
+
+
+def test_electro_fences_but_its_discogs_style_names_synth():
+    # A synthwave release tagged "Electro, Chillwave, Synthwave" is Synth.
+    parts = CAT.genre_tag("Electro, Chillsynth, Chillwave, Synthwave")
+    assert parts[0].broad
+    assert [(t.genre, t.style) for t in parts[1:]] == [("synth", "synthwave"), ("synth", "chillwave")]
+    assert CAT.discogs_style("Electro", ["Electronic"]) == genre("synth", "electro")
+    assert CAT.genre_tag("Electro House") == [genre("house", "electro_house")]
+
+
+def test_old_indie_moves_to_rock():
+    assert CAT.id_map()["indie"] == "rock"
+    assert "indie" not in CAT.genres
+
+
+def test_old_bass_and_dance_move_to_drum_and_bass_and_house():
+    assert CAT.id_map()["bass"] == "drum_and_bass"
+    assert CAT.id_map()["dance"] == "house"
+    assert "bass" not in CAT.genres and "dance" not in CAT.genres
+    assert not CAT.genres["asian_pop"].replaces
+
+
+def test_drum_n_bass_is_a_style_so_the_model_style_pick_can_choose_it():
+    # Without it, D&B songs got the strongest other style in the merged genre
+    # (Dubstep or Halftime) from the Discogs400 model (#138).
+    assert CAT.styles["drum_n_bass"].genre == "drum_and_bass"
+    assert CAT.genre_tag("DnB") == [genre("drum_and_bass", "drum_n_bass")]
 
 
 def test_broad_tag_fences_name_real_genres():
@@ -203,12 +253,12 @@ def test_genre_tag_splits_and_dedupes():
     "name, expected",
     [
         ("deep house", genre("house", "deep_house")),
-        ("drum and bass", genre("drum_and_bass")),
+        ("drum and bass", genre("drum_and_bass", "drum_n_bass")),
         ("psytrance", genre("trance", "psy_trance")),
         ("hip hop", genre("hip_hop")),
         ("synth-pop", genre("synth", "synth_pop")),
         ("black metal", genre("metal", "black_metal")),
-        ("alternative rock", genre("indie", "alternative_rock")),
+        ("alternative rock", genre("rock", "alternative_rock")),
         ("electronic", fence(*ELECTRONIC)),
         ("pop", genre("pop")),
         ("contemporary r&b", genre("soul", "contemporary_r_and_b")),
@@ -225,7 +275,7 @@ def test_musicbrainz_genre(name, expected):
     [
         ("Psytrance", genre("trance", "psy_trance")),
         ("chillout", genre("ambient")),
-        ("dnb", genre("drum_and_bass")),
+        ("dnb", genre("drum_and_bass", "drum_n_bass")),
         ("electronic", fence(*ELECTRONIC)),
         ("seen live", None),
         ("british", None),

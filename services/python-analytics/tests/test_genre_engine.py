@@ -136,7 +136,7 @@ def test_a_strong_source_outside_the_fence_makes_the_song_unsure(cat):
 
 def test_broad_tag_fences(cat):
     d = one(cat, SongInput("s", genre_tag="Pop/Rock"))
-    assert d.unsure and d.fence == ["indie", "metal", "pop", "punk", "rock"]
+    assert d.unsure and d.fence == ["asian_pop", "metal", "pop", "punk", "rock"]
 
 
 # --- release lean -----------------------------------------------------------------
