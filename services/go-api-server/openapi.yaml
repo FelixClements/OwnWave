@@ -810,39 +810,87 @@ paths:
         "200": { $ref: "#/components/responses/GenreStationSettings" }
         "400": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
+  /api/admin/genre-overview:
+    get:
+      operationId: getGenreOverview
+      tags: [admin]
+      summary: Songs per genre and style, unsure and flagged songs, and the classifier's test score
+      description: |
+        Counts best copies (one per song). Before the genre v2 switch
+        (`switched: false`) the counts come from the v1 blend, there are no
+        styles, and unsure, flagged and the test score are null.
+      responses:
+        "200":
+          description: Overview
+          content: { application/json: { schema: { $ref: "#/components/schemas/GenreOverview" } } }
   /api/admin/genre-review:
     get:
       operationId: getGenreReview
       tags: [admin]
-      summary: Songs whose main genre is most worth checking
-      description: Most often hidden on a genre station first, then songs whose copies disagree, then the lowest scores. Corrected songs are left out.
+      summary: The genre review queue, grouped by release and paged by groups
+      description: |
+        Ranked (ADR 0008): songs listeners hid on a genre station, then unsure
+        songs, then classifier-versus-tag disagreements, then the least sure
+        songs on stations. A release's songs stay together, placed by its
+        best-ranked song; a song without a release is a group of its own.
+        Songs decided by a correction are never on it. Before the genre v2
+        switch it lists the v1 blend's songs, hidden first, then lowest score.
       parameters:
-        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
+        - { name: offset, in: query, description: Groups to skip, schema: { type: integer, minimum: 0, default: 0 } }
+        - { name: limit, in: query, description: Groups per page, schema: { type: integer, minimum: 1, maximum: 100, default: 20 } }
       responses:
         "200":
-          description: Review list
-          content:
-            application/json:
-              schema:
-                type: object
-                required: [items]
-                properties: { items: { type: array, items: { $ref: "#/components/schemas/GenreReviewItem" } } }
+          description: One page of the queue
+          content: { application/json: { schema: { $ref: "#/components/schemas/GenreReviewPage" } } }
         "400": { $ref: "#/components/responses/Error" }
+  /api/admin/tracks/{id}/genre-decision:
+    get:
+      operationId: getGenreDecision
+      tags: [admin]
+      summary: How the genre engine decided one song, with its "why" breakdown
+      parameters: [{ $ref: "#/components/parameters/id" }]
+      responses:
+        "200":
+          description: The decision
+          content: { application/json: { schema: { $ref: "#/components/schemas/GenreDecision" } } }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /api/admin/releases/{id}/outside-genres/refetch:
+    post:
+      operationId: refetchReleaseOutsideGenres
+      tags: [admin]
+      summary: Fetch a release's MusicBrainz, Discogs and Last.fm genres again, in the background
+      description: |
+        Marks the release's cached lookups (release, release group, its songs'
+        recordings and Last.fm tracks, its Discogs release) due and queues a
+        fetch for each switched-on source; a rescore follows when they bring
+        new genres.
+      x-python-path: /releases/{id}/outside-genres/refetch
+      parameters: [{ $ref: "#/components/parameters/id" }]
+      responses:
+        "200":
+          description: Queued
+          content: { application/json: { schema: { type: object, required: [status], properties: { status: { type: string } } } } }
+        "404": { description: Unknown release }
   /api/admin/genre-corrections:
     get:
       operationId: listGenreCorrections
       tags: [admin]
       summary: Genre corrections, newest first
+      parameters:
+        - { name: q, in: query, description: "Keep corrections whose song, release, artist, genre or style contains this", schema: { type: string } }
       responses:
         "200": { $ref: "#/components/responses/GenreCorrections" }
     post:
       operationId: saveGenreCorrection
       tags: [admin]
-      summary: Correct the genre of a song or of an artist
+      summary: Correct the genre (and style) of a song, a release or an artist
       description: |
-        A song's correction wins over its artist's, which wins over the
-        blended score. Saving twice replaces it. Queues genre scoring; if
+        A correction beats every other source; the most specific one (song,
+        then release, then artist) wins, and it becomes a trusted label for
+        the classifier. Saving twice replaces it. Queues genre scoring; if
         queueing fails the correction is saved, and saving again retries.
+        Release corrections and styles need the genre v2 switch (400 before).
       requestBody:
         required: true
         content:
@@ -851,9 +899,11 @@ paths:
               type: object
               required: [genre]
               properties:
-                track_id: { type: string, description: "The song; give this or artist" }
-                artist: { type: string, description: "Every track of this artist; give this or track_id" }
-                genre: { type: string, description: A station genre }
+                track_id: { type: string, description: "The song; give exactly one of track_id, release_id and artist" }
+                release_id: { type: string, description: Every song of this release }
+                artist: { type: string, description: Every song of this artist }
+                genre: { type: string, description: A genre of the catalog }
+                style: { type: string, description: "Optional: a style of that genre" }
       responses:
         "200": { $ref: "#/components/responses/GenreCorrections" }
         "400": { $ref: "#/components/responses/Error" }
@@ -861,7 +911,7 @@ paths:
     delete:
       operationId: deleteGenreCorrection
       tags: [admin]
-      summary: Take a genre correction back
+      summary: Take a genre correction back (undo)
       description: Queues genre scoring; if queueing fails the correction is gone, and deleting again retries.
       parameters: [{ $ref: "#/components/parameters/id" }]
       responses:
@@ -1206,13 +1256,15 @@ components:
       description: Station
       content: { application/json: { schema: { $ref: "#/components/schemas/Station" } } }
     GenreCorrections:
-      description: Every genre correction
+      description: The genre corrections (matching the search, if any)
       content:
         application/json:
           schema:
             type: object
             required: [corrections]
-            properties: { corrections: { type: array, items: { $ref: "#/components/schemas/GenreCorrection" } } }
+            properties:
+              corrections: { type: array, items: { $ref: "#/components/schemas/GenreCorrection" } }
+              saved_id: { type: string, description: "After a save: the saved correction's id, to undo it" }
     GenreStationSettings:
       description: Genre stations
       content: { application/json: { schema: { $ref: "#/components/schemas/GenreStationSettings" } } }
@@ -1467,27 +1519,145 @@ components:
         track_id: { type: string }
         title: { type: string }
         artist: { type: string }
-    GenreReviewItem:
+    GenreReviewSong:
       type: object
-      required: [track_id, title, genre, score, hidden_by, copies_disagree]
+      required: [track_id, title, genre, source, hidden_by, priority]
       properties:
         track_id: { type: string }
         title: { type: string }
         artist: { type: string }
-        genre: { type: string }
-        score: { type: number }
-        hidden_by: { type: integer, description: How many users hid it on a genre station }
-        copies_disagree: { type: boolean, description: Another copy of the song has a different main genre }
-    GenreCorrection:
+        genre: { type: [string, "null"], description: The decided genre; null for an unsure song }
+        style: { type: string }
+        source: { type: string, description: "strong_sources, release, classifier or unsure; blend before the genre v2 switch" }
+        confidence: { type: number, description: Release share, classifier vote share or (before the switch) the blended score }
+        unsure_reason: { type: string }
+        review_reason: { type: string }
+        suggestion: { type: string, description: "A genre the engine leans to but did not pick: the classifier's, else the release lean's" }
+        hidden_by: { type: integer, description: How many listeners hid it on a genre station }
+        priority: { type: integer, description: "1 hidden by listeners, 2 unsure, 3 classifier versus tag, 4 least sure on a station" }
+    GenreReviewGroup:
       type: object
-      required: [id, genre, created_at]
+      required: [compilation, priority, songs]
+      properties:
+        release_id: { type: string }
+        release_title: { type: string }
+        release_artist: { type: string }
+        compilation: { type: boolean }
+        priority: { type: integer, description: The best rank of its songs }
+        songs: { type: array, items: { $ref: "#/components/schemas/GenreReviewSong" } }
+    GenreReviewPage:
+      type: object
+      required: [switched, groups, total, songs, offset, limit]
+      properties:
+        switched: { type: boolean, description: The genre v2 engine decides genres (release corrections and styles available) }
+        groups: { type: array, items: { $ref: "#/components/schemas/GenreReviewGroup" } }
+        total: { type: integer, description: Groups on the whole queue }
+        songs: { type: integer, description: Songs on the whole queue }
+        offset: { type: integer }
+        limit: { type: integer }
+    GenreDecision:
+      type: object
+      required: [track_id, title, genre, source, why, decided_at]
+      properties:
+        track_id: { type: string }
+        title: { type: string }
+        artist: { type: string }
+        genre_tag: { type: string }
+        release_id: { type: string }
+        release_title: { type: string }
+        genre: { type: [string, "null"] }
+        style: { type: string }
+        source: { type: string }
+        confidence: { type: number }
+        unsure_reason: { type: string }
+        review_reason: { type: string }
+        fence: { type: array, items: { type: string }, description: Genres the song may get; left out when nothing narrowed it }
+        why: { $ref: "#/components/schemas/GenreWhy" }
+        decided_at: { type: string, format: date-time }
+    GenreWhy:
+      type: object
+      description: The engine's "why" breakdown (genre_engine.py); every part is optional.
+      properties:
+        sources:
+          type: object
+          description: Each source's view, by name (genre_tag, discogs, mb_recording, mb_release, artist, lastfm)
+          additionalProperties:
+            type: object
+            properties:
+              genre: { type: string }
+              fence: { type: array, items: { type: string } }
+              styles: { type: array, items: { type: string } }
+        fence: { type: array, items: { type: string } }
+        correction: { type: object, properties: { scope: { type: string }, value: { type: string } } }
+        agreeing: { type: array, items: { type: string } }
+        release: { type: object, properties: { genre: { type: string }, share: { type: number }, decided: { type: integer } } }
+        classifier:
+          type: object
+          description: "Also runner_ups: [genre, share] pairs, left out here as mixed-type arrays"
+          properties:
+            genre: { type: [string, "null"] }
+            share: { type: number }
+        style: { type: object, properties: { style: { type: string }, from: { type: string }, activation: { type: number } } }
+    GenreCatalogEntry:
+      type: object
+      required: [id, name, station, songs]
       properties:
         id: { type: string }
+        name: { type: string }
+        station: { type: boolean }
+        songs: { type: integer }
+        styles: { type: array, items: { $ref: "#/components/schemas/GenreCatalogEntry" } }
+    GenreOverview:
+      type: object
+      required: [switched, songs, decided, genres]
+      description: unsure, flagged, with_style, to_review and by_source are left out before the genre v2 switch; test_score until the first rescore.
+      properties:
+        switched: { type: boolean }
+        songs: { type: integer, description: Songs (best copies) in the library }
+        decided: { type: integer, description: Songs with a genre }
+        unsure: { type: integer }
+        flagged: { type: integer, description: Kept their tag but the classifier disagrees }
+        with_style: { type: integer }
+        to_review: { type: integer, description: Songs on the review queue }
+        by_source: { type: object, additionalProperties: { type: integer }, description: Songs by what decided them }
+        genres: { type: array, items: { $ref: "#/components/schemas/GenreCatalogEntry" } }
+        test_score: { $ref: "#/components/schemas/GenreTestScore" }
+        test_score_at: { type: string, format: date-time }
+    GenreTestScore:
+      type: object
+      description: Leave-one-out accuracy of the classifier on the trusted labels
+      properties:
+        labels: { type: integer }
+        k: { type: integer }
+        decides_at: { type: number }
+        accuracy: { type: [number, "null"] }
+        decides: { type: [number, "null"], description: Share of labels it decides (vote at decides_at or more) }
+        accuracy_when_deciding: { type: [number, "null"] }
+        catalog_version: { type: string }
+        per_genre:
+          type: object
+          additionalProperties:
+            type: object
+            properties:
+              labels: { type: integer }
+              accuracy: { type: [number, "null"] }
+              decides: { type: [number, "null"] }
+              accuracy_when_deciding: { type: [number, "null"] }
+    GenreCorrection:
+      type: object
+      required: [id, scope, genre, created_at]
+      properties:
+        id: { type: string }
+        scope: { type: string, enum: [song, release, artist] }
         track_id: { type: string, description: Set when it corrects a song }
         track_title: { type: string }
         track_artist: { type: string }
+        release_id: { type: string, description: Set when it corrects a release }
+        release_title: { type: string }
+        release_artist: { type: string }
         artist: { type: string, description: Set when it corrects an artist }
         genre: { type: string }
+        style: { type: string, description: Set when it names a style of the genre }
         created_at: { type: string, format: date-time }
     PlaylistItem:
       type: object

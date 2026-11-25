@@ -175,6 +175,42 @@ def mark_all_due(conn, source: Optional[str] = None) -> int:
     return cur.rowcount
 
 
+def mark_release_due(conn, release_id) -> Optional[int]:
+    """Make a release's cached lookups due again: its MusicBrainz release and
+    release group, the Discogs release linked from it, and its songs'
+    recordings and Last.fm tracks. None when the release is unknown; the
+    caller commits and queues the fetch (admin review, #140)."""
+    if conn.execute("SELECT 1 FROM releases WHERE id = %s", (release_id,)).fetchone() is None:
+        return None
+    cur = conn.execute(
+        """
+        WITH r AS (SELECT * FROM releases WHERE id = %(r)s),
+        refs (source, ref) AS (
+            SELECT %(mb_release)s, mb_release_id FROM r WHERE mb_release_id IS NOT NULL
+            UNION SELECT %(mb_release_group)s, mb_release_group_id FROM r WHERE mb_release_group_id IS NOT NULL
+            UNION SELECT %(discogs)s, m.discogs_release_id FROM outside_genres m JOIN r ON m.ref = r.mb_release_id
+                  WHERE m.source = %(mb_release)s AND m.discogs_release_id IS NOT NULL
+            UNION SELECT %(mb_recording)s, t.mb_recording_id FROM tracks t
+                  WHERE t.release_id = %(r)s AND t.mb_recording_id IS NOT NULL
+            UNION SELECT %(lastfm)s, a.name || %(sep)s || t.title FROM tracks t JOIN artists a ON a.id = t.artist_id
+                  WHERE t.release_id = %(r)s
+        )
+        UPDATE outside_genres o SET fetched_at = 'epoch'
+        FROM refs WHERE o.source = refs.source AND o.ref = refs.ref
+        """,
+        {
+            "r": release_id,
+            "mb_release": MB_RELEASE,
+            "mb_release_group": MB_RELEASE_GROUP,
+            "discogs": DISCOGS_RELEASE,
+            "mb_recording": MB_RECORDING,
+            "lastfm": LASTFM_TRACK,
+            "sep": LASTFM_SEP,
+        },
+    )
+    return cur.rowcount
+
+
 # --- Raw genre lists, in each source's own words -------------------------
 
 

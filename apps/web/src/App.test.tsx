@@ -509,31 +509,78 @@ describe('App', () => {
   });
 
   it('reviews and corrects genres from admin', async () => {
-    let corrections: unknown[] = [];
+    let corrections: Record<string, unknown>[] = [];
+    const song = { track_id: 't1', title: 'Domino', artist: 'Oxia', genre: null, source: 'unsure', unsure_reason: 'classifier_unsure', suggestion: 'house', hidden_by: 2, priority: 1 };
     const calls = signedIn({
       'GET /api/admin/health': () => ({ database: 'ok' }),
       'GET /api/admin/scans': () => ({ jobs: [] }),
       'GET /api/admin/users': () => ({ users: [admin] }),
       'GET /api/admin/genre-stations': () => ({ enabled: true, show_at: 25, hide_below: 20, genres: [] }),
       'GET /api/admin/pipeline': () => ({ runs: [] }),
+      'GET /api/admin/genre-overview': () => ({
+        switched: true,
+        songs: 40,
+        decided: 39,
+        unsure: 1,
+        flagged: 0,
+        to_review: 1,
+        genres: [
+          { id: 'techno', name: 'Techno', station: true, songs: 30, styles: [{ id: 'acid', name: 'Acid', station: true, songs: 4 }] },
+          { id: 'house', name: 'House & Disco', station: true, songs: 9, styles: [] },
+        ],
+        test_score: { labels: 12, accuracy: 0.75, decides_at: 0.6, decides: 0.5, accuracy_when_deciding: 0.9 },
+      }),
       'GET /api/admin/genre-review': () => ({
-        items: [{ track_id: 't1', title: 'Domino', artist: 'Oxia', genre: 'techno', score: 0.3, hidden_by: 2, copies_disagree: true }],
+        switched: true,
+        total: 1,
+        songs: 1,
+        offset: 0,
+        limit: 20,
+        groups: [{ release_id: 'r1', release_title: 'Domino EP', release_artist: 'Oxia', compilation: false, priority: 1, songs: [song] }],
       }),
       'GET /api/admin/genre-corrections': () => ({ corrections }),
       'POST /api/admin/genre-corrections': (body) => {
-        corrections = [{ id: 'c1', artist: 'Oxia', genre: (body as { genre: string }).genre, created_at: '2026-11-05T00:00:00Z' }];
+        const b = body as { release_id?: string; genre: string; style?: string };
+        corrections = [{ id: 'c1', scope: 'release', release_id: b.release_id, release_title: 'Domino EP', release_artist: 'Oxia', genre: b.genre, style: b.style, created_at: '2026-11-05T00:00:00Z' }];
+        return { corrections, saved_id: 'c1' };
+      },
+      'DELETE /api/admin/genre-corrections/{id}': () => {
+        corrections = [];
         return { corrections };
       },
+      'POST /api/admin/releases/{id}/outside-genres/refetch': () => ({ status: 'queued' }),
     });
+    // The old review address opens the Review tab.
     renderAt('/settings/genre-review');
     const user = userEvent.setup();
     expect(await screen.findByText('Hidden by 2 listeners')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Looks right' })).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Set for this artist' })).not.toBeInTheDocument();
-    await user.selectOptions(await screen.findByRole('combobox', { name: 'Genre of Domino' }), 'house');
-    await user.click(screen.getByRole('button', { name: 'Set for this artist' }));
-    await waitFor(() => expect(calls.find((c) => c.method === 'POST' && c.path === '/api/admin/genre-corrections')?.body).toEqual({ artist: 'Oxia', genre: 'house' }));
+    expect(screen.getByText('Domino EP')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Accept House & Disco' })).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: /Refetch outside sources/ }));
+    await waitFor(() => expect(calls.some((c) => c.method === 'POST' && c.path === '/api/admin/releases/r1/outside-genres/refetch')).toBe(true));
+
+    // Correct the whole release to a style of techno.
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Genre of Domino' }), 'techno');
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Style of Domino' }), 'acid');
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Correct for' }), 'release');
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() =>
+      expect(calls.find((c) => c.method === 'POST' && c.path === '/api/admin/genre-corrections')?.body).toEqual({ release_id: 'r1', genre: 'techno', style: 'acid' }),
+    );
+    expect(await screen.findByText(/Saved Acid for its release/)).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Undo' }));
+    await waitFor(() => expect(calls.some((c) => c.method === 'DELETE' && c.path === '/api/admin/genre-corrections/c1')).toBe(true));
+
+    // The Overview shows the test score; Corrections lists and undoes them.
+    await user.click(screen.getByRole('tab', { name: /Overview/ }));
+    expect(await screen.findByText('Test score')).toBeInTheDocument();
+    expect(screen.getByText('90%')).toBeInTheDocument();
+    corrections = [{ id: 'c2', scope: 'artist', artist: 'Oxia', genre: 'techno', created_at: '2026-11-05T00:00:00Z' }];
+    await user.click(screen.getByRole('tab', { name: /Corrections/ }));
     expect(await screen.findByText('Everything by Oxia')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Undo the correction of Everything by Oxia' }));
+    await waitFor(() => expect(calls.some((c) => c.method === 'DELETE' && c.path === '/api/admin/genre-corrections/c2')).toBe(true));
   });
 
   it('lists the missing songs of a playlist', async () => {

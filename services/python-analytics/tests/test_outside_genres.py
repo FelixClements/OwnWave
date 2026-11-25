@@ -295,6 +295,32 @@ def test_marking_everything_due_refetches_all(conn):
     assert len(http.requests) == 4
 
 
+def test_marking_one_release_due_refetches_only_it(conn):
+    add_library(conn)
+    og.fetch_due(conn, og.MUSICBRAINZ, mb(FakeHttp(mb_routes())), max_age=180)
+    for ref in ("Amelie Lens\x1fOne", "Amelie Lens\x1fLoose"):
+        conn.execute("INSERT INTO outside_genres (source, ref, found) VALUES ('lastfm_track', %s, TRUE)", (ref,))
+    conn.execute("INSERT INTO outside_genres (source, ref, found) VALUES ('discogs_release', '555', TRUE)")
+    conn.commit()
+    rel, plain = (r[0] for r in conn.execute("SELECT id FROM releases ORDER BY folder DESC").fetchall())
+
+    assert og.mark_release_due(conn, "00000000-0000-0000-0000-000000000000") is None
+    marked = og.mark_release_due(conn, rel)
+    conn.commit()
+    due = {(s, r) for s, r in conn.execute("SELECT source, ref FROM outside_genres WHERE fetched_at = 'epoch'")}
+    assert ("mb_release", REL) in due and ("mb_recording", REC_A) in due
+    assert ("discogs_release", "555") in due and ("lastfm_track", "Amelie Lens\x1fOne") in due
+    assert ("mb_recording", REC_LOOSE) not in due and ("lastfm_track", "Amelie Lens\x1fLoose") not in due
+    assert marked == len(due)
+
+    http = FakeHttp(mb_routes())
+    og.fetch_due(conn, og.MUSICBRAINZ, mb(http), max_age=180)
+    assert f"/ws/2/release/{REL}" in http.paths()
+    assert f"/ws/2/recording/{REC_LOOSE}" not in http.paths()
+
+    assert og.mark_release_due(conn, plain) == 2  # its cached recording and Last.fm track
+
+
 def test_release_group_without_embedded_genres_is_looked_up(conn):
     add_library(conn)
     routes = mb_routes()

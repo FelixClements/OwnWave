@@ -1,22 +1,15 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import clsx from 'clsx';
-import { AlertTriangle, Copy, Pencil, RefreshCw, Trash2 } from 'lucide-react';
-import { useQueryClient } from '@tanstack/react-query';
-import { api, call, callAs } from '@/api/client';
-import type { GenreReviewItem, GenreStation, GenreStationSettings, PipelineRun, ScanSummary, StationChange } from '@/api/types';
+import { Copy, Pencil, RefreshCw } from 'lucide-react';
+import { api, callAs } from '@/api/client';
+import type { GenreStation, GenreStationSettings, PipelineRun, ScanSummary, StationChange } from '@/api/types';
 import { useAuth } from '@/lib/auth';
 import { plural, timeAgo } from '@/lib/format';
 import {
   isScanFinished,
-  keys,
   useDeleteUser,
-  useGenreCorrectionActions,
-  useGenreCorrections,
-  useGenreNames,
-  useGenreReport,
   useGenreReview,
-  useGenres,
   useGenreStations,
   useHealth,
   usePipeline,
@@ -29,7 +22,6 @@ import {
   useUsers,
 } from '@/lib/queries';
 import { scanPhase } from '@/lib/scan';
-import { GenreChart } from '@/components/GenreChart';
 import { Block, Row, Section, Switch, Tag, table } from '@/components/settings-ui';
 import { Button, ErrorText, IconButton, Spinner } from '@/components/ui';
 
@@ -286,102 +278,6 @@ export function PeoplePane() {
   );
 }
 
-// --- genres ---------------------------------------------------------------
-
-export function GenresPane() {
-  const genres = useGenres();
-  const [showReport, setShowReport] = useState(false);
-  const report = useGenreReport(showReport);
-  const qc = useQueryClient();
-  const [refreshing, setRefreshing] = useState(false);
-  return (
-    <>
-      <Section title="Genres in your library">
-        <Block>
-          {genres.isLoading ? (
-            <Spinner />
-          ) : genres.error ? (
-            <ErrorText error={genres.error} />
-          ) : (
-            genres.data && (
-              <>
-                {genres.data.warnings.map((w) => (
-                  <p key={w} role="alert" className="mb-4 flex items-start gap-2 rounded-md bg-danger/10 p-3 text-sm">
-                    <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-danger" aria-hidden />
-                    <span>
-                      <strong>Warning: </strong>
-                      {w}
-                    </span>
-                  </p>
-                ))}
-                <GenreChart data={genres.data} />
-              </>
-            )
-          )}
-        </Block>
-        <Row title="Refresh genres" description="Score every song's genre again from the audio model, tags and MusicBrainz.">
-          <Button
-            size="sm"
-            loading={refreshing}
-            onClick={async () => {
-              setRefreshing(true);
-              await call(api.POST('/api/admin/rebuild-genres')).catch(() => {});
-              setRefreshing(false);
-              setTimeout(() => void qc.invalidateQueries({ queryKey: keys.genres }), 5000);
-            }}
-          >
-            <RefreshCw className="h-4 w-4" /> Refresh genres
-          </Button>
-        </Row>
-        <Row
-          title="Outside sources"
-          description="MusicBrainz, Discogs and Last.fm: keys, how much of the library they match, and fetching their genres again."
-        >
-          <Link to="/settings/outside-sources" className="text-sm font-medium text-accent hover:underline">
-            Open
-          </Link>
-        </Row>
-        <Row title="Check the audio model against file tags" description="Shows how often the model agrees with your tags, and where it does not.">
-          {!showReport && (
-            <Button size="sm" onClick={() => setShowReport(true)}>
-              Open report
-            </Button>
-          )}
-        </Row>
-        {showReport && (
-          <Block className="text-sm">
-            {report.isLoading ? (
-              <Spinner />
-            ) : report.data ? (
-              <>
-                <p>
-                  The audio model alone agrees with the file tag on{' '}
-                  <strong>{report.data.audio_agreement != null ? `${Math.round(report.data.audio_agreement * 100)}%` : '–'}</strong> of{' '}
-                  {plural(report.data.tracks, 'track')} with a single-genre tag. The final genres also use tags and MusicBrainz.
-                </p>
-                {report.data.top_confusions.length > 0 && (
-                  <>
-                    <h3 className="mb-1 mt-4 font-medium">Most common disagreements</h3>
-                    <ul className="text-muted">
-                      {report.data.top_confusions.slice(0, 8).map((c) => (
-                        <li key={`${c.tag}-${c.audio}`}>
-                          tagged {c.tag}, audio says {c.audio ?? '–'}: {c.tracks}
-                        </li>
-                      ))}
-                    </ul>
-                  </>
-                )}
-              </>
-            ) : (
-              <ErrorText error={report.error} />
-            )}
-          </Block>
-        )}
-      </Section>
-    </>
-  );
-}
-
 // --- genre stations -------------------------------------------------------
 
 function genreState(g: GenreStation, settings: GenreStationSettings): string {
@@ -523,101 +419,6 @@ export function GenreStationsPane() {
   );
 }
 
-// --- genre review ---------------------------------------------------------
-
-/** One song to check: pick its genre, for the song or for its whole artist. */
-function GenreReviewRow({ item, genres }: { item: GenreReviewItem; genres: { genre: string; name: string }[] }) {
-  const { save } = useGenreCorrectionActions();
-  const [genre, setGenre] = useState(item.genre);
-  return (
-    <div className="px-4 py-3 text-sm">
-      <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-        <span className="min-w-0 truncate font-medium">{item.title}</span>
-        <span className="min-w-0 truncate text-muted">{item.artist ?? 'Unknown artist'}</span>
-        {item.hidden_by > 0 && <Tag tone="warn">Hidden by {plural(item.hidden_by, 'listener')}</Tag>}
-        {item.copies_disagree && <Tag>Copies disagree</Tag>}
-      </div>
-      <div className="mt-2 flex flex-wrap items-center gap-2">
-        <select
-          aria-label={`Genre of ${item.title}`}
-          value={genre}
-          onChange={(e) => setGenre(e.target.value)}
-          className="h-9 rounded-lg border border-line bg-raised px-2 text-sm text-ink outline-none focus:border-ink"
-        >
-          {genres.map((g) => (
-            <option key={g.genre} value={g.genre}>
-              {g.name}
-            </option>
-          ))}
-        </select>
-        <Button size="sm" loading={save.isPending} onClick={() => save.mutate({ track_id: item.track_id, genre })}>
-          {genre === item.genre ? 'Looks right' : 'Set for this song'}
-        </Button>
-        {item.artist && genre !== item.genre && (
-          <Button size="sm" variant="ghost" loading={save.isPending} onClick={() => save.mutate({ artist: item.artist, genre })}>
-            Set for this artist
-          </Button>
-        )}
-      </div>
-      <ErrorText error={save.error} />
-    </div>
-  );
-}
-
-export function GenreReviewPane() {
-  const review = useGenreReview();
-  const corrections = useGenreCorrections();
-  const genreData = useGenres();
-  const genreName = useGenreNames();
-  const { remove } = useGenreCorrectionActions();
-  const genres = (genreData.data?.genres ?? []).filter((g) => g.station).map((g) => ({ genre: g.genre, name: g.name }));
-  return (
-    <>
-      <p className="mb-6 text-[13px] text-muted">
-        Songs most worth checking: those people hid on a genre station, then those whose copies disagree, then the least certain. A correction
-        replaces the scored genre at the next scoring, which starts right away.
-      </p>
-      <Section title={<>Songs to check {review.data?.length ? <Tag>{review.data.length}</Tag> : null}</>}>
-        {review.isLoading ? (
-          <Block>
-            <Spinner />
-          </Block>
-        ) : (
-          <>
-            {review.error != null && (
-              <Block>
-                <ErrorText error={review.error} />
-              </Block>
-            )}
-            {review.data?.map((item) => <GenreReviewRow key={`${item.track_id}-${item.genre}`} item={item} genres={genres} />)}
-            {review.data?.length === 0 && <Block className="text-sm text-muted">Nothing to check.</Block>}
-          </>
-        )}
-      </Section>
-      <Section title={`Your corrections${corrections.data?.length ? ` (${corrections.data.length})` : ''}`}>
-        {(corrections.error ?? remove.error) != null && (
-          <Block>
-            <ErrorText error={corrections.error ?? remove.error} />
-          </Block>
-        )}
-        {corrections.data?.length === 0 && <Block className="text-sm text-muted">None yet.</Block>}
-        {corrections.data?.map((c) => {
-          const what = c.artist ? `Everything by ${c.artist}` : `${c.track_title} · ${c.track_artist ?? 'Unknown artist'}`;
-          return (
-            <div key={c.id} className="flex items-center gap-3 px-4 py-2.5 text-sm">
-              <span className="min-w-0 flex-1 truncate">{what}</span>
-              <span className="shrink-0 font-medium">{genreName(c.genre)}</span>
-              <IconButton label={`Remove the correction of ${what}`} size="sm" disabled={remove.isPending} onClick={() => remove.mutate(c.id)}>
-                <Trash2 className="h-4 w-4" />
-              </IconButton>
-            </div>
-          );
-        })}
-      </Section>
-    </>
-  );
-}
-
 // --- station refresh (pipeline) -------------------------------------------
 
 const triggers: Record<string, string> = {
@@ -716,9 +517,9 @@ export function StationRefreshPane() {
 /** Sidebar dots: a scan running, songs waiting for review. Only queried for admins. */
 export function useAdminBadges(enabled: boolean) {
   const scans = useScans(enabled);
-  const review = useGenreReview(enabled);
+  const review = useGenreReview(0, enabled, 1);
   return {
     library: !!scans.data?.[0] && !isScanFinished(scans.data[0].status),
-    review: (review.data?.length ?? 0) > 0,
+    review: (review.data?.total ?? 0) > 0,
   };
 }

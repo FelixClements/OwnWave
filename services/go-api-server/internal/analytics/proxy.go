@@ -41,6 +41,7 @@ var Routes = []Route{
 	{http.MethodPost, "/admin/rebuild-analysis", "/rebuild-analysis", AdminOnly},
 	{http.MethodPost, "/admin/rebuild-genres", "/rebuild-genres", AdminOnly},
 	{http.MethodPost, "/admin/outside-genres/refetch", "/outside-genres/refetch", AdminOnly},
+	{http.MethodPost, "/admin/releases/{id}/outside-genres/refetch", "/releases/{id}/outside-genres/refetch", AdminOnly},
 	{http.MethodGet, "/admin/outside-sources", "/outside-sources", AdminOnly},
 	{http.MethodPost, "/admin/outside-sources/settings", "/outside-sources/settings", AdminOnly},
 	{http.MethodPost, "/admin/outside-sources/test", "/outside-sources/test", AdminOnly},
