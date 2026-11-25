@@ -123,7 +123,7 @@ def test_discogs_genres_only_fence():
         ("Hardcore Punk", [genre("punk", "hardcore_punk")]),
         ("Garage Rock", [genre("rock", "garage_rock")]),
         ("UK Garage", [genre("bass", "uk_garage")]),
-        ("Alternative Rock", [genre("indie", "alternative_rock")]),
+        ("Alternative Rock", [genre("rock", "alternative_rock")]),
         ("K-Pop", [genre("pop", "k_pop")]),
         ("Reggaeton", [genre("latin", "reggaeton")]),
         ("Dancehall", [genre("reggae", "dancehall")]),
@@ -134,6 +134,13 @@ def test_discogs_genres_only_fence():
         ("Afro House", [genre("house")]),
         ("Rock & Roll", [genre("rock", "rock_and_roll")]),
         ("Musique concrète", [genre("experimental", "musique_concrete")]),
+        # #138 proposal: Indie & Alternative is part of Rock, Chillwave of Synth.
+        ("Indie Rock", [genre("rock", "indie_rock")]),
+        ("Shoegaze", [genre("rock", "shoegaze")]),
+        ("Chillwave", [genre("synth", "chillwave")]),
+        ("Stage & Screen", [genre("soundtrack")]),
+        ("Latijnse Muziek", [genre("latin")]),
+        ("Amapiano", [genre("house")]),
     ],
 )
 def test_genre_tag(tag, expected):
@@ -162,22 +169,41 @@ ELECTRONIC = {"techno", "house", "trance", "drum_and_bass", "bass", "hard_dance"
 @pytest.mark.parametrize(
     "tag, genres",
     [
-        ("Pop/Rock", {"pop", "rock", "indie", "metal", "punk"}),
-        ("Rock/Pop", {"pop", "rock", "indie", "metal", "punk"}),
+        ("Pop/Rock", {"pop", "rock", "metal", "punk"}),
+        ("Rock/Pop", {"pop", "rock", "metal", "punk"}),
         ("Electronic", ELECTRONIC),
         ("Electronica", ELECTRONIC),
         ("EDM", ELECTRONIC - {"ambient", "experimental"}),
         ("Dance", {"techno", "house", "trance", "drum_and_bass", "bass", "hard_dance", "dance", "synth", "pop"}),
         ("Hardcore", {"hard_dance", "punk"}),
-        ("Alternative", {"indie", "rock", "punk", "metal"}),
-        ("Lo-Fi", {"ambient", "hip_hop", "indie"}),
-        ("Singer-Songwriter", {"folk", "pop", "indie", "rock"}),
+        ("Alternative", {"rock", "punk", "metal"}),
+        ("Lo-Fi", {"ambient", "hip_hop", "rock"}),
+        ("Singer-Songwriter", {"folk", "pop", "rock"}),
+        # #138: "Electro" alone tags synthwave, techno and EDM alike in this library.
+        ("Electro", {"synth", "techno", "house", "trance", "drum_and_bass", "bass", "hard_dance", "dance"}),
+        ("Électronique", ELECTRONIC),
+        ("Dance & EDM", ELECTRONIC - {"ambient", "experimental"}),
+        ("Musiques du monde", {"world", "latin", "reggae", "folk"}),
     ],
 )
 def test_broad_tags_fence(tag, genres):
     [t] = CAT.genre_tag(tag)
     assert t.broad
     assert t.fence == genres
+
+
+def test_electro_fences_but_its_discogs_style_names_synth():
+    # A synthwave release tagged "Electro, Chillwave, Synthwave" is Synth.
+    parts = CAT.genre_tag("Electro, Chillsynth, Chillwave, Synthwave")
+    assert parts[0].broad
+    assert [(t.genre, t.style) for t in parts[1:]] == [("synth", "synthwave"), ("synth", "chillwave")]
+    assert CAT.discogs_style("Electro", ["Electronic"]) == genre("synth", "electro")
+    assert CAT.genre_tag("Electro House") == [genre("house", "electro_house")]
+
+
+def test_old_indie_moves_to_rock():
+    assert CAT.id_map()["indie"] == "rock"
+    assert "indie" not in CAT.genres
 
 
 def test_broad_tag_fences_name_real_genres():
@@ -208,7 +234,7 @@ def test_genre_tag_splits_and_dedupes():
         ("hip hop", genre("hip_hop")),
         ("synth-pop", genre("synth", "synth_pop")),
         ("black metal", genre("metal", "black_metal")),
-        ("alternative rock", genre("indie", "alternative_rock")),
+        ("alternative rock", genre("rock", "alternative_rock")),
         ("electronic", fence(*ELECTRONIC)),
         ("pop", genre("pop")),
         ("contemporary r&b", genre("soul", "contemporary_r_and_b")),

@@ -1,6 +1,7 @@
 # Genre catalog for the genre engine v2 (ADR 0008, glossary in CONTEXT.md).
 #
 # DRAFT. The owner approves the final list after the offline run (issue #138).
+# This version is the #138 proposal from the run on a copy of the live library.
 # Edit this file, not the code: genre_catalog.py reads it, and
 #   python services/python-analytics/src/genre_catalog.py
 # regenerates the switch migration in database/genre-v2/ from it.
@@ -32,7 +33,7 @@
 # Style ids are made from the style name (Deep House -> deep_house) and may
 # not equal a genre id.
 
-version = "draft-2026-11-24"
+version = "draft-2026-11-25"
 
 [[genre]]
 id = "techno"
@@ -97,7 +98,12 @@ styles = [
 id = "synth"
 name = "Synth & Electro"
 replaces = ["synth"]
-styles = ["Chiptune", "Darkwave", "EBM", "Electro", "Electroclash", "New Wave", "Synth-pop", "Synthwave", "Vaporwave"]
+# Chillwave moved here from Ambient & Chill (#138): it is how the audio model
+# hears this library's synthwave, and file tags list it with Synthwave.
+styles = [
+    "Chillwave", "Chiptune", "Darkwave", "EBM", "Electro", "Electroclash", "New Wave", "Synth-pop", "Synthwave",
+    "Vaporwave",
+]
 
 [[genre]]
 id = "ambient"
@@ -105,7 +111,7 @@ name = "Ambient & Chill"
 replaces = ["ambient"]
 discogs = ["Ambient"]
 styles = [
-    "Berlin-School", "Chillwave", "Dark Ambient", "Downtempo", "Drone", "Dungeon Synth", "Illbient",
+    "Berlin-School", "Dark Ambient", "Downtempo", "Drone", "Dungeon Synth", "Illbient",
     "Modern Classical", "New Age", "Trip Hop",
 ]
 
@@ -151,22 +157,17 @@ styles = [
 
 [[genre]]
 id = "rock"
-name = "Rock"
-replaces = ["rock"]
+name = "Rock & Alternative"
+# #138 proposal: Indie & Alternative merged in. The classifier could not tell
+# indie from rock or pop (10% held-out accuracy, 0% when it decided).
+replaces = ["rock", "indie"]
 styles = [
-    "AOR", "Acid Rock", "Acoustic", "Arena Rock", "Art Rock", "Beat", "Blues Rock", "Classic Rock",
-    "Doo Wop", "Garage Rock", "Glam", "Hard Rock", "Krautrock", "Mod", "Pop Rock", "Prog Rock",
-    "Psychedelic Rock", "Pub Rock", "Rock & Roll", "Rockabilly", "Soft Rock", "Southern Rock",
+    "AOR", "Acid Rock", "Acoustic", "Alternative Rock", "Arena Rock", "Art Rock", "Beat", "Blues Rock",
+    "Brit Pop", "Classic Rock", "Coldwave", "Deathrock", "Doo Wop", "Dream Pop", "Emo", "Ethereal",
+    "Garage Rock", "Glam", "Goth Rock", "Grunge", "Hard Rock", "Indie Pop", "Indie Rock", "Krautrock",
+    "Lo-Fi", "Math Rock", "Mod", "No Wave", "Pop Rock", "Post Rock", "Post-Punk", "Prog Rock",
+    "Psychedelic Rock", "Pub Rock", "Rock & Roll", "Rockabilly", "Shoegaze", "Soft Rock", "Southern Rock",
     "Space Rock", "Stoner Rock", "Surf", "Symphonic Rock", "Twist",
-]
-
-[[genre]]
-id = "indie"
-name = "Indie & Alternative"
-replaces = ["indie"]
-styles = [
-    "Alternative Rock", "Brit Pop", "Coldwave", "Deathrock", "Dream Pop", "Emo", "Ethereal", "Goth Rock",
-    "Grunge", "Indie Pop", "Indie Rock", "Lo-Fi", "Math Rock", "No Wave", "Post Rock", "Post-Punk", "Shoegaze",
 ]
 
 [[genre]]
@@ -223,7 +224,7 @@ styles = [
 
 [[genre]]
 id = "folk"
-name = "Folk & Country"
+name = "Country & Folk"
 replaces = ["folk"]
 discogs = ["Folk"]
 styles = [
@@ -298,9 +299,9 @@ styles = [
 "Jazz" = ["jazz", "world", "latin"]
 "Latin" = ["latin"]
 "Non-Music" = ["other"]
-"Pop" = ["pop", "indie"]
+"Pop" = ["pop", "rock"]
 "Reggae" = ["reggae", "world"]
-"Rock" = ["rock", "indie", "metal", "punk", "synth", "experimental", "folk", "reggae", "pop", "jazz"]
+"Rock" = ["rock", "metal", "punk", "synth", "experimental", "folk", "reggae", "pop", "jazz"]
 "Stage & Screen" = ["soundtrack"]
 
 # --- Free text: file genre tags, MusicBrainz genres, Last.fm tags ------------------
@@ -324,29 +325,35 @@ ignore = [
 
 [text.broad]
 "electronic" = ["techno", "house", "trance", "drum_and_bass", "bass", "hard_dance", "dance", "synth", "ambient", "experimental"]
+"electronique" = ["techno", "house", "trance", "drum_and_bass", "bass", "hard_dance", "dance", "synth", "ambient", "experimental"]
 "electronica" = ["techno", "house", "trance", "drum_and_bass", "bass", "hard_dance", "dance", "synth", "ambient", "experimental"]
 "electronic dance music" = ["techno", "house", "trance", "drum_and_bass", "bass", "hard_dance", "dance", "synth"]
+"dance and edm" = ["techno", "house", "trance", "drum_and_bass", "bass", "hard_dance", "dance", "synth"]
 "edm" = ["techno", "house", "trance", "drum_and_bass", "bass", "hard_dance", "dance", "synth"]
+# "Electro" alone in file tags is used for synthwave, techno, EDM and electro
+# alike (#138), so it only fences. Discogs' Electro style still names Synth.
+"electro" = ["synth", "techno", "house", "trance", "drum_and_bass", "bass", "hard_dance", "dance"]
 "electro dance" = ["techno", "house", "trance", "drum_and_bass", "bass", "hard_dance", "dance", "synth"]
 "dance electronic" = ["techno", "house", "trance", "drum_and_bass", "bass", "hard_dance", "dance", "synth", "ambient", "experimental", "pop"]
 "electronic dance" = ["techno", "house", "trance", "drum_and_bass", "bass", "hard_dance", "dance", "synth", "ambient", "experimental", "pop"]
 "dance" = ["techno", "house", "trance", "drum_and_bass", "bass", "hard_dance", "dance", "synth", "pop"]
 "club" = ["techno", "house", "trance", "drum_and_bass", "bass", "hard_dance", "dance"]
-"pop rock" = ["pop", "rock", "indie", "metal", "punk"]
-"rock pop" = ["pop", "rock", "indie", "metal", "punk"]
-"alternative" = ["indie", "rock", "punk", "metal"]
-"alt" = ["indie", "rock", "punk", "metal"]
-"alternative and punk" = ["indie", "rock", "punk", "metal"]
+"pop rock" = ["pop", "rock", "metal", "punk"]
+"rock pop" = ["pop", "rock", "metal", "punk"]
+"alternative" = ["rock", "punk", "metal"]
+"alt" = ["rock", "punk", "metal"]
+"alternative and punk" = ["rock", "punk", "metal"]
 "hardcore" = ["hard_dance", "punk"]
 "progressive" = ["house", "trance", "rock", "metal"]
 "urban" = ["hip_hop", "soul"]
-"lo fi" = ["ambient", "hip_hop", "indie"]
-"lofi" = ["ambient", "hip_hop", "indie"]
-"singer songwriter" = ["folk", "pop", "indie", "rock"]
+"lo fi" = ["ambient", "hip_hop", "rock"]
+"lofi" = ["ambient", "hip_hop", "rock"]
+"singer songwriter" = ["folk", "pop", "rock"]
 "easy listening" = ["pop", "jazz", "soundtrack", "ambient"]
 "jazz blues" = ["jazz", "blues"]
 "blues jazz" = ["jazz", "blues"]
 "world music" = ["world", "latin", "reggae", "folk"]
+"musiques du monde" = ["world", "latin", "reggae", "folk"]
 
 [text.aliases]
 "drum and bass" = "drum_and_bass"
@@ -361,6 +368,8 @@ ignore = [
 "psychedelic trance" = "Psy-Trance"
 "goa" = "Goa Trance"
 "synthpop" = "Synth-pop"
+# Chill synthwave, not ambient (the "chill" rule would say ambient).
+"chillsynth" = "Synthwave"
 "hiphop" = "hip_hop"
 "rap" = "hip_hop"
 "hip hop rap" = "hip_hop"
@@ -390,6 +399,9 @@ ignore = [
 "video game" = "soundtrack"
 "ost" = "soundtrack"
 "film score" = "Score"
+"stage and screen" = "soundtrack"
+"latijnse muziek" = "latin"
+"amapiano" = "house"
 "hardcore punk" = "Hardcore Punk"
 
 # Patterns are Python regular expressions over the folded text.
@@ -453,8 +465,9 @@ pattern = 'punk|hardcore|\boi\b|\bemo\b|screamo'
 genre = "punk"
 
 [[text.rule]]
+# Indie & Alternative is part of Rock & Alternative (#138).
 pattern = 'indie|alternative|\balt\b|grunge|shoegaze|post ?rock|brit ?pop|dream pop|math rock'
-genre = "indie"
+genre = "rock"
 
 [[text.rule]]
 pattern = 'rock|rockabilly|surf'
