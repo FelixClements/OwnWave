@@ -40,7 +40,8 @@ LASTFM_SEP = "\x1f"
 MB_REQUESTS_PER_RUN = 140
 DISCOGS_REQUESTS_PER_RUN = 55
 LASTFM_REQUESTS_PER_RUN = 240
-# A source stops for the run after this many failed lookups.
+# A source stops for the run after this many failed lookups. A lookup that
+# succeeded after a busy answer and a retry (see http_json) is not one.
 MAX_FAILURES = 5
 
 
@@ -116,6 +117,8 @@ class RunSummary:
     refused: bool = False
     # Requests sent, retries included.
     requests: int = 0
+    # Requests sent again after a busy answer (HTTP 429 or 503, Last.fm error 29).
+    retries: int = 0
 
     @property
     def status(self) -> str:
@@ -128,6 +131,7 @@ class RunSummary:
         return {
             "status": self.status,
             "requests": self.requests,
+            "retries": self.retries,
             "stored": self.stored,
             "new_data": self.new_data,
             "by_source": self.by_source,
@@ -292,6 +296,7 @@ def fetch_due(conn, source: str, client, max_age: int) -> RunSummary:
     summary.failures = budget.failures
     summary.refused = budget.refused
     summary.requests = client.requests
+    summary.retries = client.retries
     summary.more = budget.exhausted and not budget.stopped
     return summary
 

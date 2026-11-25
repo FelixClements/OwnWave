@@ -14,7 +14,7 @@ from http_json import JsonClient
 
 API_URL = "https://api.discogs.com"
 MIN_INTERVAL = 1.1  # seconds between requests (60 a minute, with a margin)
-BUSY_WAIT = 10.0  # Discogs counts requests over a moving minute
+BUSY_WAIT = 10.0  # first back-off on 429 without Retry-After; Discogs counts over a moving minute
 
 # https://www.discogs.com/release/249504-Rick-Astley-Never-Gonna-Give-You-Up
 _RELEASE_URL = re.compile(r"^https?://(?:www\.)?discogs\.com/(?:[a-z]{2}/)?release/(\d+)", re.IGNORECASE)
@@ -50,6 +50,10 @@ class DiscogsClient:
     @property
     def requests(self) -> int:
         return self.http.requests
+
+    @property
+    def retries(self) -> int:
+        return self.http.retries
 
     def identity(self) -> Optional[dict]:
         """Who the token belongs to: one cheap request that fails with 401 for a bad token."""

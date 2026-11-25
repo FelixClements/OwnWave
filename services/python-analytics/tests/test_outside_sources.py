@@ -206,7 +206,7 @@ def test_refused_token_is_recorded_and_cleared_by_a_new_key(db_url, env, monkeyp
     assert http.requests[0].get_header("Authorization") == f"Discogs token={PAGE_KEY}"
     with psycopg.connect(db_url) as c:
         s = osrc.settings(c, "discogs")
-        assert s.last_run["status"] == "refused_key" and s.last_run["requests"] == 1
+        assert s.last_run["status"] == "refused_key" and s.last_run["requests"] == 1 and s.last_run["retries"] == 0
         assert osrc.state(s) == "refused_key"
         osrc.save_key(c, "discogs", OTHER_KEY)
         c.commit()

@@ -361,7 +361,7 @@ describe('App', () => {
         source('lastfm', 'Last.fm', {
           state: 'refused_key',
           key: { set: true, source: 'env', last4: 'abcd', unreadable: false, env_var: 'LASTFM_API_KEY' },
-          last_run: { status: 'refused_key', requests: 1, stored: 0, failures: 0, more: false, at: '2026-11-03T10:00:00Z' },
+          last_run: { status: 'refused_key', requests: 3, retries: 2, stored: 0, failures: 0, more: false, at: '2026-11-03T10:00:00Z' },
         }),
       ],
     });
@@ -380,6 +380,7 @@ describe('App', () => {
     expect(screen.getByText('Key refused')).toBeInTheDocument();
     expect(screen.getByText('From the environment (LASTFM_API_KEY), ends in abcd.')).toBeInTheDocument();
     expect(screen.getByText(/→ Techno/)).toBeInTheDocument();
+    expect(screen.getByText(/2 requests retried because the service was busy/)).toBeInTheDocument();
 
     const input = screen.getByLabelText('New Discogs personal access token');
     expect(input).toHaveAttribute('type', 'password');
