@@ -1,7 +1,7 @@
 # Genre catalog for the genre engine v2 (ADR 0008, glossary in CONTEXT.md).
 #
-# DRAFT. The owner approves the final list after the offline run (issue #138).
-# This version is the #138 proposal from the run on a copy of the live library.
+# The genre list the owner approved on 2026-11-25 (issue #138), from the
+# offline run on a copy of the live library.
 # Edit this file, not the code: genre_catalog.py reads it, and
 #   python services/python-analytics/src/genre_catalog.py
 # regenerates the switch migration in database/genre-v2/ from it.
@@ -33,7 +33,7 @@
 # Style ids are made from the style name (Deep House -> deep_house) and may
 # not equal a genre id.
 
-version = "draft-2026-11-25"
+version = "2026-11-25"
 
 [[genre]]
 id = "techno"
@@ -44,13 +44,16 @@ styles = ["Acid", "Bleep", "Deep Techno", "Dub Techno", "Hard Techno", "Minimal"
 
 [[genre]]
 id = "house"
-name = "House"
-replaces = ["house"]
+name = "House & Disco"
+# Dance & Disco merged in (#138, owner approved 2026-11-25): on its own it had
+# 37 songs and the classifier never got its labels right.
+replaces = ["house", "dance"]
 discogs = ["House"]
 styles = [
-    "Acid House", "Beatdown", "Deep House", "Electro House", "Euro House", "Garage House",
-    "Ghetto House", "Hard House", "Hip-House", "Italo House", "Progressive House", "Tech House",
-    "Tribal House", "Tropical House",
+    "Acid House", "Beatdown", "Deep House", "Disco", "Disco Polo", "Electro House", "Euro House",
+    "Euro-Disco", "Eurobeat", "Eurodance", "Freestyle", "Garage House", "Ghetto House", "Hands Up",
+    "Hard House", "Hi NRG", "Hip-House", "Italo House", "Italo-Disco", "Italodance", "New Beat",
+    "Nu-Disco", "Progressive House", "Tech House", "Tribal House", "Tropical House",
 ]
 
 [[genre]]
@@ -62,18 +65,15 @@ styles = ["Goa Trance", "Hard Trance", "Progressive Trance", "Psy-Trance", "Tech
 
 [[genre]]
 id = "drum_and_bass"
-name = "Drum & Bass"
-replaces = ["drum_and_bass"]
-discogs = ["Drum n Bass"]
-styles = ["Jungle"]
-
-[[genre]]
-id = "bass"
-name = "Bass & Breaks"
-replaces = ["bass"]
+name = "Drum & Bass and Bass Music"
+# Bass & Breaks merged in (#138, owner approved 2026-11-25). Drum n Bass is a
+# style here, not the genre as a whole: the style pick takes the strongest
+# Discogs400 style inside the genre, and without it most D&B songs got
+# Dubstep or Halftime.
+replaces = ["drum_and_bass", "bass"]
 styles = [
-    "Bass Music", "Bassline", "Big Beat", "Breakbeat", "Breaks", "Broken Beat", "Dubstep", "Ghetto",
-    "Grime", "Halftime", "Juke", "Progressive Breaks", "Speed Garage", "UK Garage",
+    "Bass Music", "Bassline", "Big Beat", "Breakbeat", "Breaks", "Broken Beat", "Drum n Bass", "Dubstep",
+    "Ghetto", "Grime", "Halftime", "Juke", "Jungle", "Progressive Breaks", "Speed Garage", "UK Garage",
 ]
 
 [[genre]]
@@ -83,15 +83,6 @@ replaces = ["hard_dance"]
 styles = [
     { name = "Hardcore", discogs = ["Electronic---Hardcore"] },
     "Donk", "Gabber", "Happy Hardcore", "Hardstyle", "Jumpstyle", "Makina", "Speedcore",
-]
-
-[[genre]]
-id = "dance"
-name = "Dance & Disco"
-replaces = ["dance"]
-styles = [
-    "Disco", "Disco Polo", "Euro-Disco", "Eurobeat", "Eurodance", "Freestyle", "Hands Up", "Hi NRG",
-    "Italo-Disco", "Italodance", "New Beat", "Nu-Disco",
 ]
 
 [[genre]]
@@ -151,9 +142,16 @@ id = "pop"
 name = "Pop"
 replaces = ["pop"]
 styles = [
-    "Ballad", "Bollywood", "Bubblegum", "Chanson", "City Pop", "Dance-pop", "Europop", "J-pop", "K-pop",
-    "Kayōkyoku", "Light Music", "Music Hall", "Novelty", "Parody", "Power Pop", "Schlager", "Vocal", "Yé-Yé",
+    "Ballad", "Bollywood", "Bubblegum", "Chanson", "Dance-pop", "Europop", "Light Music", "Music Hall",
+    "Novelty", "Parody", "Power Pop", "Schlager", "Vocal", "Yé-Yé",
 ]
+
+[[genre]]
+id = "asian_pop"
+name = "K-pop & J-pop"
+# Split from Pop (#138, owner approved 2026-11-25). No v1 genre maps here.
+replaces = []
+styles = ["City Pop", "J-pop", "K-pop", "Kayōkyoku"]
 
 [[genre]]
 id = "rock"
@@ -290,16 +288,16 @@ styles = [
 "Children's" = ["other"]
 "Classical" = ["classical"]
 "Electronic" = [
-    "techno", "house", "trance", "drum_and_bass", "bass", "hard_dance", "dance", "synth", "ambient",
-    "experimental", "pop", "hip_hop", "jazz", "latin", "folk", "reggae",
+    "techno", "house", "trance", "drum_and_bass", "hard_dance", "synth", "ambient", "experimental",
+    "pop", "hip_hop", "jazz", "latin", "folk", "reggae",
 ]
 "Folk, World, & Country" = ["folk", "world", "soul"]
-"Funk / Soul" = ["soul", "dance", "world"]
-"Hip Hop" = ["hip_hop", "bass", "ambient", "soul", "synth"]
+"Funk / Soul" = ["soul", "house", "world"]
+"Hip Hop" = ["hip_hop", "drum_and_bass", "ambient", "soul", "synth"]
 "Jazz" = ["jazz", "world", "latin"]
 "Latin" = ["latin"]
 "Non-Music" = ["other"]
-"Pop" = ["pop", "rock"]
+"Pop" = ["pop", "asian_pop", "rock"]
 "Reggae" = ["reggae", "world"]
 "Rock" = ["rock", "metal", "punk", "synth", "experimental", "folk", "reggae", "pop", "jazz"]
 "Stage & Screen" = ["soundtrack"]
@@ -324,22 +322,22 @@ ignore = [
 ]
 
 [text.broad]
-"electronic" = ["techno", "house", "trance", "drum_and_bass", "bass", "hard_dance", "dance", "synth", "ambient", "experimental"]
-"electronique" = ["techno", "house", "trance", "drum_and_bass", "bass", "hard_dance", "dance", "synth", "ambient", "experimental"]
-"electronica" = ["techno", "house", "trance", "drum_and_bass", "bass", "hard_dance", "dance", "synth", "ambient", "experimental"]
-"electronic dance music" = ["techno", "house", "trance", "drum_and_bass", "bass", "hard_dance", "dance", "synth"]
-"dance and edm" = ["techno", "house", "trance", "drum_and_bass", "bass", "hard_dance", "dance", "synth"]
-"edm" = ["techno", "house", "trance", "drum_and_bass", "bass", "hard_dance", "dance", "synth"]
+"electronic" = ["techno", "house", "trance", "drum_and_bass", "hard_dance", "synth", "ambient", "experimental"]
+"electronique" = ["techno", "house", "trance", "drum_and_bass", "hard_dance", "synth", "ambient", "experimental"]
+"electronica" = ["techno", "house", "trance", "drum_and_bass", "hard_dance", "synth", "ambient", "experimental"]
+"electronic dance music" = ["techno", "house", "trance", "drum_and_bass", "hard_dance", "synth"]
+"dance and edm" = ["techno", "house", "trance", "drum_and_bass", "hard_dance", "synth"]
+"edm" = ["techno", "house", "trance", "drum_and_bass", "hard_dance", "synth"]
 # "Electro" alone in file tags is used for synthwave, techno, EDM and electro
 # alike (#138), so it only fences. Discogs' Electro style still names Synth.
-"electro" = ["synth", "techno", "house", "trance", "drum_and_bass", "bass", "hard_dance", "dance"]
-"electro dance" = ["techno", "house", "trance", "drum_and_bass", "bass", "hard_dance", "dance", "synth"]
-"dance electronic" = ["techno", "house", "trance", "drum_and_bass", "bass", "hard_dance", "dance", "synth", "ambient", "experimental", "pop"]
-"electronic dance" = ["techno", "house", "trance", "drum_and_bass", "bass", "hard_dance", "dance", "synth", "ambient", "experimental", "pop"]
-"dance" = ["techno", "house", "trance", "drum_and_bass", "bass", "hard_dance", "dance", "synth", "pop"]
-"club" = ["techno", "house", "trance", "drum_and_bass", "bass", "hard_dance", "dance"]
-"pop rock" = ["pop", "rock", "metal", "punk"]
-"rock pop" = ["pop", "rock", "metal", "punk"]
+"electro" = ["synth", "techno", "house", "trance", "drum_and_bass", "hard_dance"]
+"electro dance" = ["techno", "house", "trance", "drum_and_bass", "hard_dance", "synth"]
+"dance electronic" = ["techno", "house", "trance", "drum_and_bass", "hard_dance", "synth", "ambient", "experimental", "pop", "asian_pop"]
+"electronic dance" = ["techno", "house", "trance", "drum_and_bass", "hard_dance", "synth", "ambient", "experimental", "pop", "asian_pop"]
+"dance" = ["techno", "house", "trance", "drum_and_bass", "hard_dance", "synth", "pop", "asian_pop"]
+"club" = ["techno", "house", "trance", "drum_and_bass", "hard_dance"]
+"pop rock" = ["pop", "asian_pop", "rock", "metal", "punk"]
+"rock pop" = ["pop", "asian_pop", "rock", "metal", "punk"]
 "alternative" = ["rock", "punk", "metal"]
 "alt" = ["rock", "punk", "metal"]
 "alternative and punk" = ["rock", "punk", "metal"]
@@ -348,22 +346,22 @@ ignore = [
 "urban" = ["hip_hop", "soul"]
 "lo fi" = ["ambient", "hip_hop", "rock"]
 "lofi" = ["ambient", "hip_hop", "rock"]
-"singer songwriter" = ["folk", "pop", "rock"]
-"easy listening" = ["pop", "jazz", "soundtrack", "ambient"]
+"singer songwriter" = ["folk", "pop", "asian_pop", "rock"]
+"easy listening" = ["pop", "asian_pop", "jazz", "soundtrack", "ambient"]
 "jazz blues" = ["jazz", "blues"]
 "blues jazz" = ["jazz", "blues"]
 "world music" = ["world", "latin", "reggae", "folk"]
 "musiques du monde" = ["world", "latin", "reggae", "folk"]
 
 [text.aliases]
-"drum and bass" = "drum_and_bass"
-"drum bass" = "drum_and_bass"
-"drum n bass" = "drum_and_bass"
-"drumnbass" = "drum_and_bass"
-"dnb" = "drum_and_bass"
-"d and b" = "drum_and_bass"
-"liquid funk" = "drum_and_bass"
-"neurofunk" = "drum_and_bass"
+"drum and bass" = "Drum n Bass"
+"drum bass" = "Drum n Bass"
+"drum n bass" = "Drum n Bass"
+"drumnbass" = "Drum n Bass"
+"dnb" = "Drum n Bass"
+"d and b" = "Drum n Bass"
+"liquid funk" = "Drum n Bass"
+"neurofunk" = "Drum n Bass"
 "psytrance" = "Psy-Trance"
 "psychedelic trance" = "Psy-Trance"
 "goa" = "Goa Trance"
@@ -386,7 +384,7 @@ ignore = [
 "2 step" = "UK Garage"
 "2step" = "UK Garage"
 "big room" = "house"
-"future bass" = "bass"
+"future bass" = "drum_and_bass"
 "riddim" = "Dubstep"
 "hard dance" = "hard_dance"
 "frenchcore" = "hard_dance"
@@ -434,11 +432,11 @@ genre = "trance"
 [[text.rule]]
 # "Garage Rock" and "Garage Punk" are not UK garage.
 pattern = 'dubstep|breakbeat|\bbreaks\b|uk garage|\bgarage\b(?! rock| punk)|grime|bass music|riddim|future bass|bassline'
-genre = "bass"
+genre = "drum_and_bass"
 
 [[text.rule]]
 pattern = 'disco|eurodance|eurobeat|hi ?nrg|italo'
-genre = "dance"
+genre = "house"
 
 [[text.rule]]
 pattern = 'synth ?pop|synthwave|darkwave|\belectro\b|electroclash|new wave|\bebm\b|vaporwave|retrowave|chiptune'

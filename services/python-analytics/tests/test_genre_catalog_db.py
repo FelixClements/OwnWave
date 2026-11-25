@@ -51,11 +51,11 @@ def test_switch_migration_builds_the_catalog_and_keeps_user_data(db_url):
         def genres_of(sid):
             return conn.execute("SELECT genres, auto_genre FROM stations WHERE id = %s", (sid,)).fetchone()
 
-        # The draft keeps the v1 ids, so user data is unchanged.
+        # Kept v1 ids stay; merged ones move to their new genre (dance -> house).
         assert genres_of(mixed) == (["gone", "house", "techno"], None)
         assert genres_of(everything) == ([], None)
         assert genres_of(techno) == ([], "techno")
-        assert conn.execute("SELECT genre FROM genre_corrections").fetchall() == [("dance",)]
+        assert conn.execute("SELECT genre FROM genre_corrections").fetchall() == [("house",)]
         assert conn.execute("SELECT COUNT(*) FROM station_suggestion_dismissals").fetchone()[0] == 0
 
         # The analytics service keeps the new catalog in sync.
