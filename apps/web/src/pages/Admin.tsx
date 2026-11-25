@@ -294,6 +294,7 @@ export function GenresPane() {
   const report = useGenreReport(showReport);
   const qc = useQueryClient();
   const [refreshing, setRefreshing] = useState(false);
+  const [refetching, setRefetching] = useState(false);
   return (
     <>
       <Section title="Genres in your library">
@@ -331,6 +332,22 @@ export function GenresPane() {
             }}
           >
             <RefreshCw className="h-4 w-4" /> Refresh genres
+          </Button>
+        </Row>
+        <Row
+          title="Fetch outside genres again"
+          description="Look up every song's MusicBrainz, Discogs and Last.fm genres again in the background. Otherwise they are refreshed after about 6 months."
+        >
+          <Button
+            size="sm"
+            loading={refetching}
+            onClick={async () => {
+              setRefetching(true);
+              await call(api.POST('/api/admin/outside-genres/refetch')).catch(() => {});
+              setRefetching(false);
+            }}
+          >
+            <RefreshCw className="h-4 w-4" /> Fetch again
           </Button>
         </Row>
         <Row title="Check the audio model against file tags" description="Shows how often the model agrees with your tags, and where it does not.">

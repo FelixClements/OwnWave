@@ -1,26 +1,27 @@
-"""Artist genre tags from the MusicBrainz web service.
+"""Genres and tags from the MusicBrainz web service.
 
-One search request per artist name returns the best-matching artist and its
-community tags (genres and other tags with vote counts). MusicBrainz allows
+Artist tags: one search request per artist name returns the best-matching
+artist and its community tags (genres and other tags with vote counts).
+Recording, release and release group genres are looked up by MusicBrainz id
+only (see outside_genres). MusicBrainz allows
 about one request per second per client and requires a descriptive
 User-Agent; the client keeps to that.
 """
 
-import json
 import logging
 import re
 import time
 import unicodedata
-import urllib.error
-import urllib.parse
-import urllib.request
 from dataclasses import dataclass, field
 from typing import Callable, List, Optional
+
+from http_json import JsonClient
 
 log = logging.getLogger(__name__)
 
 MIN_SCORE = 90  # MusicBrainz search score (0-100) required to accept a match
 MIN_INTERVAL = 1.1  # seconds between requests
+BROWSE_LIMIT = 100  # MusicBrainz's largest page
 
 _CREDIT_SPLIT = re.compile(
     r"\s*(?:,|&|;|/|\sx\s|\sfeat\.?\s|\sft\.?\s|\sfeaturing\s|\svs\.?\s|\swith\s)\s*", re.IGNORECASE
@@ -57,29 +58,41 @@ class MusicBrainzClient:
     ):
         self.base_url = base_url.rstrip("/")
         self.user_agent = user_agent
-        self._open = opener or urllib.request.urlopen
-        self._sleep = sleep
-        self._clock = clock
-        self._last = 0.0
+        # 503 is MusicBrainz's rate-limit answer: the client backs off and retries.
+        self.http = JsonClient(user_agent, MIN_INTERVAL, opener=opener, sleep=sleep, clock=clock)
 
-    def _get(self, path: str, params: dict) -> dict:
-        url = f"{self.base_url}{path}?{urllib.parse.urlencode(params)}"
-        req = urllib.request.Request(url, headers={"User-Agent": self.user_agent, "Accept": "application/json"})
-        for attempt in range(4):
-            wait = self._last + MIN_INTERVAL - self._clock()
-            if wait > 0:
-                self._sleep(wait)
-            self._last = self._clock()
-            try:
-                with self._open(req, timeout=20) as resp:
-                    return json.loads(resp.read().decode("utf-8"))
-            except urllib.error.HTTPError as exc:
-                # 503 is MusicBrainz's rate-limit answer: back off and retry.
-                if exc.code in (429, 503) and attempt < 3:
-                    self._sleep(2.0 * (attempt + 1))
-                    continue
-                raise
-        raise RuntimeError("unreachable")
+    @property
+    def requests(self) -> int:
+        return self.http.requests
+
+    def _get(self, path: str, params: dict) -> Optional[dict]:
+        return self.http.get(f"{self.base_url}{path}", {**params, "fmt": "json"})
+
+    # Lookups by MusicBrainz id (genre engine v2, ADR 0008: no name search).
+    # Each returns None when MusicBrainz does not know the id.
+
+    def release(self, mbid: str) -> Optional[dict]:
+        """A release with its genres, release group and URL relations."""
+        return self._get(f"/ws/2/release/{mbid}", {"inc": "genres release-groups url-rels"})
+
+    def release_group(self, mbid: str) -> Optional[dict]:
+        return self._get(f"/ws/2/release-group/{mbid}", {"inc": "genres"})
+
+    def recording(self, mbid: str) -> Optional[dict]:
+        return self._get(f"/ws/2/recording/{mbid}", {"inc": "genres"})
+
+    def release_recordings(self, mbid: str) -> List[dict]:
+        """Every recording on a release, with genres, in pages of BROWSE_LIMIT."""
+        recordings: List[dict] = []
+        while True:
+            page = self._get(
+                "/ws/2/recording",
+                {"release": mbid, "inc": "genres", "limit": str(BROWSE_LIMIT), "offset": str(len(recordings))},
+            )
+            got = (page or {}).get("recordings") or []
+            recordings.extend(got)
+            if not got or len(recordings) >= int((page or {}).get("recording-count", 0)):
+                return recordings
 
     def lookup_artist(self, name: str) -> ArtistTags:
         """Best confident match for an artist name, or ArtistTags(None) if none."""
@@ -87,7 +100,7 @@ class MusicBrainzClient:
         if not key:
             return ArtistTags(None)
         query = 'artist:"{}"'.format(name.replace('"', ""))
-        data = self._get("/ws/2/artist/", {"query": query, "fmt": "json", "limit": "5"})
+        data = self._get("/ws/2/artist/", {"query": query, "limit": "5"}) or {}
         for artist in data.get("artists", []):
             if int(artist.get("score", 0)) < MIN_SCORE:
                 continue
