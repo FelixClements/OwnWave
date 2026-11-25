@@ -24,6 +24,17 @@ def main():
     subparsers.add_parser("score-genres", help="Re-blend every track's station genres")
     subparsers.add_parser("genre-report", help="Print the genre distribution and audio/tag agreement")
 
+    engine_parser = subparsers.add_parser(
+        "genre-engine",
+        help="Run the genre engine v2 over the whole library and print counts and agreement (JSON). "
+        "Heavy: run it on a copy of the database, not live. Read only unless --write.",
+    )
+    engine_parser.add_argument(
+        "--write", action="store_true",
+        help="store the decisions (track_genre_decisions) and the test score; never touches the stations",
+    )
+    engine_parser.add_argument("--examples", type=int, default=3, help="unsure/flagged songs shown per reason")
+
     args = parser.parse_args()
 
     if args.command == "scan":
@@ -60,6 +71,21 @@ def main():
         with db.get_conn() as conn:
             report = {"distribution": distribution(conn), "agreement": agreement_report(conn, load_labels(GENRE_MODEL_DIR))}
         print(json.dumps(report, indent=2))
+
+    elif args.command == "genre-engine":
+        import json
+
+        import db
+        from config import GENRE_MODEL_DIR
+        from genre_audio import load_labels
+        from genre_engine import run_report
+
+        wait_for_db()
+        with db.get_conn() as conn:
+            conn.read_only = not args.write
+            report = run_report(conn, load_labels(GENRE_MODEL_DIR), write=args.write, per_reason=args.examples)
+            conn.commit()
+        print(json.dumps(report, indent=2, default=str))
 
 
 if __name__ == "__main__":
