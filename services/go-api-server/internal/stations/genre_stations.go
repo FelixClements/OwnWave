@@ -11,9 +11,11 @@ import (
 )
 
 // Genre stations: one shared station per station genre, playing every song
-// of the library with that main genre. Refresh creates, shows and hides them; it
-// never deletes one, so a station keeps its id, name and history while
-// its genre is below the threshold.
+// of the library with that main genre, and one per style, playing every song
+// with that style (ADR 0008: genres and styles with enough songs get
+// stations). Refresh creates, shows and hides them; it never deletes one, so
+// a station keeps its id, name and history while its genre or style is below
+// the threshold.
 const (
 	// GenreStationShowAt is how many songs a genre needs before its
 	// station is shown.
@@ -21,6 +23,10 @@ const (
 	// GenreStationHideBelow: a shown station is hidden only below this, so
 	// a genre near the threshold does not flicker in and out.
 	GenreStationHideBelow = 20
+	// StyleStationShowAt and StyleStationHideBelow are the same rule for
+	// styles, counting songs whose style the genre engine is sure of.
+	StyleStationShowAt    = GenreStationShowAt
+	StyleStationHideBelow = GenreStationHideBelow
 )
 
 // refreshLock is the advisory lock that serialises refreshes across
@@ -53,10 +59,15 @@ const (
 	StateOff            = "off" // genre stations are switched off
 )
 
-// GenreStation is a station genre and its genre station, if it has one.
+// GenreStation is a station genre (a genre or a style) and its genre
+// station, if it has one.
 type GenreStation struct {
 	Genre     string `json:"genre"`
 	GenreName string `json:"genre_name"`
+	// Kind is CatalogGenre or CatalogStyle.
+	Kind string `json:"kind"`
+	// Parent is a style's genre; empty for a genre.
+	Parent string `json:"parent,omitempty"`
 	// StationID and Name are empty until the genre first reaches the threshold.
 	StationID    string `json:"station_id,omitempty"`
 	Name         string `json:"name"`
@@ -67,14 +78,19 @@ type GenreStation struct {
 
 // GenreStationSettings is the admin view of genre stations.
 type GenreStationSettings struct {
-	Enabled   bool           `json:"enabled"`
-	ShowAt    int            `json:"show_at"`
-	HideBelow int            `json:"hide_below"`
-	Genres    []GenreStation `json:"genres"`
+	Enabled        bool `json:"enabled"`
+	ShowAt         int  `json:"show_at"`
+	HideBelow      int  `json:"hide_below"`
+	StyleShowAt    int  `json:"style_show_at"`
+	StyleHideBelow int  `json:"style_hide_below"`
+	// Genres lists every genre and, after each, its styles that have songs
+	// or a station.
+	Genres []GenreStation `json:"genres"`
 }
 
 type autoStation struct {
 	id, genre, name     string
+	kind, parent        string
 	nameIsCustom        bool
 	active, excluded    bool
 	stillAStationGenre  bool
@@ -98,13 +114,19 @@ func autoEnabled(ctx context.Context, q queryer) (bool, error) {
 }
 
 // genreTrackCounts counts, per station genre, the songs of the library with
-// that main genre, as genre stations play them.
+// that main genre, and per style the songs with that style, as genre and
+// style stations play them.
 func genreTrackCounts(ctx context.Context, q queryer) (map[string]int, error) {
 	rows, err := q.Query(ctx, `
 		SELECT g.genre, COUNT(*) FROM track_station_genres g
 		JOIN songs s ON s.track_id = g.track_id
 		WHERE g.is_primary AND s.best_copy
-		GROUP BY g.genre`)
+		GROUP BY g.genre
+		UNION ALL
+		SELECT d.style, COUNT(*) FROM track_genre_decisions d
+		JOIN songs s ON s.track_id = d.track_id
+		WHERE s.best_copy AND d.genre IS NOT NULL AND d.style IN (`+styleIDsSQL+`)
+		GROUP BY d.style`)
 	if err != nil {
 		return nil, err
 	}
@@ -115,8 +137,9 @@ func genreTrackCounts(ctx context.Context, q queryer) (map[string]int, error) {
 	return out, err
 }
 
-// loadGenreStations returns every station genre with its station (if any)
-// in display order, plus stations whose genre is no longer a station genre.
+// loadGenreStations returns every station genre (genres and styles) with its
+// station (if any) in display order, plus stations whose genre is no longer
+// a station genre.
 func loadGenreStations(ctx context.Context, q queryer) ([]autoStation, error) {
 	counts, err := genreTrackCounts(ctx, q)
 	if err != nil {
@@ -125,8 +148,11 @@ func loadGenreStations(ctx context.Context, q queryer) ([]autoStation, error) {
 	rows, err := q.Query(ctx, `
 		SELECT COALESCE(g.id, s.auto_genre), COALESCE(s.id::text, ''), COALESCE(s.name, ''),
 		       COALESCE(s.name_is_custom, FALSE), COALESCE(s.auto_active, FALSE), COALESCE(s.auto_excluded, FALSE),
-		       g.id IS NOT NULL, COALESCE(g.name, ''), COALESCE(g.position, 2147483647)
-		FROM (SELECT id, name, position FROM station_genres WHERE is_station) g
+		       g.id IS NOT NULL, COALESCE(g.name, ''), COALESCE(g.ordinal, 2147483647),
+		       COALESCE(g.kind, 'genre'), COALESCE(g.parent_id, '')
+		FROM (SELECT c.id, c.name, c.kind, c.parent_id, ROW_NUMBER() OVER (ORDER BY `+catalogOrder+`)::int AS ordinal
+		      FROM `+catalogSQL+` c LEFT JOIN `+catalogSQL+` p ON p.id = c.parent_id
+		      WHERE c.is_station) g
 		FULL JOIN (SELECT * FROM stations WHERE auto_genre IS NOT NULL) s ON s.auto_genre = g.id
 		ORDER BY 9, 1`)
 	if err != nil {
@@ -135,26 +161,36 @@ func loadGenreStations(ctx context.Context, q queryer) ([]autoStation, error) {
 	list, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (autoStation, error) {
 		var a autoStation
 		err := row.Scan(&a.genre, &a.id, &a.name, &a.nameIsCustom, &a.active, &a.excluded,
-			&a.stillAStationGenre, &a.stationGenreName, &a.stationGenreOrdinal)
+			&a.stillAStationGenre, &a.stationGenreName, &a.stationGenreOrdinal, &a.kind, &a.parent)
 		a.tracks = counts[a.genre]
 		return a, err
 	})
 	return list, err
 }
 
-// shouldShow decides whether a genre station is shown.
+// thresholds are the show and hide thresholds of the station's genre or style.
+func (a autoStation) thresholds() (showAt, hideBelow int) {
+	if a.kind == CatalogStyle {
+		return StyleStationShowAt, StyleStationHideBelow
+	}
+	return GenreStationShowAt, GenreStationHideBelow
+}
+
+// shouldShow decides whether a genre or style station is shown.
 func (a autoStation) shouldShow(enabled bool) bool {
 	if !enabled || a.excluded || !a.stillAStationGenre {
 		return false
 	}
+	showAt, hideBelow := a.thresholds()
 	if a.active {
-		return a.tracks >= GenreStationHideBelow
+		return a.tracks >= hideBelow
 	}
-	return a.tracks >= GenreStationShowAt
+	return a.tracks >= showAt
 }
 
-// Refresh brings the genre stations in line with the library: it creates
-// the station of every genre that reached GenreStationShowAt, shows and
+// Refresh brings the genre and style stations in line with the library: it
+// creates the station of every genre that reached GenreStationShowAt and of
+// every style that reached StyleStationShowAt, shows and
 // hides stations, and gives stations without a custom name their genre's
 // display name. Their track pools need no refresh (they are evaluated
 // live). Running it again changes nothing.
@@ -231,13 +267,18 @@ func (s *Service) GenreStations(ctx context.Context) (GenreStationSettings, erro
 	if err != nil {
 		return GenreStationSettings{}, err
 	}
-	out := GenreStationSettings{Enabled: enabled, ShowAt: GenreStationShowAt, HideBelow: GenreStationHideBelow, Genres: []GenreStation{}}
+	out := GenreStationSettings{
+		Enabled: enabled, ShowAt: GenreStationShowAt, HideBelow: GenreStationHideBelow,
+		StyleShowAt: StyleStationShowAt, StyleHideBelow: StyleStationHideBelow, Genres: []GenreStation{},
+	}
 	for _, a := range list {
-		if !a.stillAStationGenre {
+		// Hundreds of styles have no songs in a library; list only the ones
+		// that matter.
+		if !a.stillAStationGenre || (a.kind == CatalogStyle && a.tracks == 0 && a.id == "") {
 			continue
 		}
 		g := GenreStation{
-			Genre: a.genre, GenreName: a.stationGenreName, StationID: a.id, Name: a.name,
+			Genre: a.genre, GenreName: a.stationGenreName, Kind: a.kind, Parent: a.parent, StationID: a.id, Name: a.name,
 			NameIsCustom: a.nameIsCustom, Tracks: a.tracks,
 		}
 		if g.Name == "" {

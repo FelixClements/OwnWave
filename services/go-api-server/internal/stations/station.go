@@ -6,8 +6,9 @@
 // station genres (primary or secondary).
 //
 // Genre stations are made by Refresh: one shared station per station genre
-// with enough songs in the library. A genre station plays every song whose
-// main genre is that genre, evaluated live.
+// (a genre or a style) with enough songs in the library. A genre station
+// plays every song whose main genre is that genre, a style station every
+// song with that style, evaluated live.
 //
 // Every station plays songs: of several copies of a song, its best copy
 // (the songs view). Bans, likes, history and hides count for the whole song.
@@ -51,7 +52,7 @@ var genreIDPattern = regexp.MustCompile(`^[a-z][a-z0-9_]{0,39}$`)
 // Definition is what a station plays.
 type Definition struct {
 	// Library: a genre station's pool, every song of the library whose main
-	// genre is in Genres. Playlists play no part.
+	// genre (or, for a style, whose style) is in Genres. Playlists play no part.
 	Library bool `json:"-"`
 	// AllPlaylists: the pool is every playlist, including ones added
 	// later; PlaylistIDs is then ignored.
@@ -69,8 +70,10 @@ type Station struct {
 	ID     string `json:"id"`
 	Name   string `json:"name"`
 	Shared bool   `json:"shared"`
-	// Kind is KindCustom or KindGenre.
-	Kind         string `json:"kind"`
+	// Kind is KindCustom or KindGenre (style stations included).
+	Kind string `json:"kind"`
+	// ParentGenre is set on a style station: the genre its style belongs to.
+	ParentGenre  string `json:"parent_genre,omitempty"`
 	AllPlaylists bool   `json:"all_playlists"`
 	// PlaylistIDs are the playlists the station plays; for AllPlaylists
 	// stations, every playlist right now.

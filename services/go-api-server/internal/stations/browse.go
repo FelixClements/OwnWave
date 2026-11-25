@@ -44,9 +44,9 @@ const recentLimit = 20
 //	root                  Stations, Recently played, Genres, Playlists
 //	stations              every station the user can play
 //	recent                stations by last play
-//	genres                genres used by stations  -> genre:<id>
+//	genres                genres used by stations (or their styles) -> genre:<id>
 //	playlists             playlists used by stations -> playlist:<id>
-//	genre:<id>            stations with that genre
+//	genre:<id>            stations with that genre, then those with one of its styles
 //	playlist:<id>         stations playing that playlist
 func (s *Service) Browse(ctx context.Context, userID, node string) (BrowseNode, error) {
 	switch {
@@ -70,17 +70,7 @@ func (s *Service) Browse(ctx context.Context, userID, node string) (BrowseNode, 
 		items, err := s.playlistFolders(ctx, userID)
 		return BrowseNode{ID: node, Title: "Playlists", Items: items}, err
 	case strings.HasPrefix(node, "genre:"):
-		g := strings.TrimPrefix(node, "genre:")
-		names, err := s.genreNames(ctx)
-		if err != nil {
-			return BrowseNode{}, err
-		}
-		name, ok := names[g]
-		if !ok {
-			return BrowseNode{}, ErrUnknownNode
-		}
-		items, err := s.stationItems(ctx, userID, func(st Station) bool { return contains(st.Genres, g) })
-		return BrowseNode{ID: node, Title: name, Items: items}, err
+		return s.genreNode(ctx, userID, strings.TrimPrefix(node, "genre:"))
 	case strings.HasPrefix(node, "playlist:"):
 		id := strings.TrimPrefix(node, "playlist:")
 		if _, err := uuid.Parse(id); err != nil {
@@ -98,6 +88,59 @@ func (s *Service) Browse(ctx context.Context, userID, node string) (BrowseNode, 
 		return BrowseNode{ID: node, Title: name, Items: items}, err
 	}
 	return BrowseNode{}, ErrUnknownNode
+}
+
+// genreNode lists a genre's stations: those with the genre first, then those
+// with one of its styles in the styles' order (the genre page). A style's
+// node lists the stations with that style.
+func (s *Service) genreNode(ctx context.Context, userID, g string) (BrowseNode, error) {
+	catalog, err := loadCatalog(ctx, s.pool)
+	if err != nil {
+		return BrowseNode{}, err
+	}
+	rank := map[string]int{} // g first, then its styles
+	title := ""
+	for _, e := range catalog {
+		switch {
+		case e.id == g:
+			title, rank[g] = e.name, 0
+		case e.parent == g:
+			rank[e.id] = len(rank) + 1
+		}
+	}
+	if title == "" {
+		return BrowseNode{}, ErrUnknownNode
+	}
+	list, err := s.List(ctx, userID)
+	if err != nil {
+		return BrowseNode{}, err
+	}
+	names, err := s.genreNames(ctx)
+	if err != nil {
+		return BrowseNode{}, err
+	}
+	type ranked struct {
+		item BrowseItem
+		rank int
+	}
+	var found []ranked
+	for _, st := range list {
+		best := -1
+		for _, sg := range st.Genres {
+			if r, ok := rank[sg]; ok && (best < 0 || r < best) {
+				best = r
+			}
+		}
+		if best >= 0 {
+			found = append(found, ranked{StationItem(st, names), best})
+		}
+	}
+	sort.SliceStable(found, func(i, j int) bool { return found[i].rank < found[j].rank })
+	items := make([]BrowseItem, 0, len(found))
+	for _, f := range found {
+		items = append(items, f.item)
+	}
+	return BrowseNode{ID: "genre:" + g, Title: title, Items: items}, nil
 }
 
 func contains(list []string, v string) bool {
@@ -185,25 +228,35 @@ func (s *Service) genreFolders(ctx context.Context, userID string) ([]BrowseItem
 	if err != nil {
 		return nil, err
 	}
-	stationsPer := map[string]int{}
-	for _, st := range list {
-		for _, g := range st.Genres {
-			stationsPer[g]++
-		}
-	}
-	rows, err := s.pool.Query(ctx, `SELECT id, name FROM station_genres WHERE is_station ORDER BY position`)
+	catalog, err := loadCatalog(ctx, s.pool)
 	if err != nil {
 		return nil, err
 	}
-	items := []BrowseItem{}
-	var id, name string
-	_, err = pgx.ForEachRow(rows, []any{&id, &name}, func() error {
-		if n := stationsPer[id]; n > 0 {
-			items = append(items, BrowseItem{ID: "genre:" + id, Title: name, Subtitle: plural(n, "station"), Browsable: true})
+	genreOf := map[string]string{} // genre or style -> its genre
+	for _, e := range catalog {
+		genreOf[e.id] = e.id
+		if e.parent != "" {
+			genreOf[e.id] = e.parent
 		}
-		return nil
-	})
-	return items, err
+	}
+	// A station counts once per genre, however many of its styles it has.
+	stationsPer := map[string]int{}
+	for _, st := range list {
+		seen := map[string]bool{}
+		for _, g := range st.Genres {
+			if top, ok := genreOf[g]; ok && !seen[top] {
+				seen[top] = true
+				stationsPer[top]++
+			}
+		}
+	}
+	items := []BrowseItem{}
+	for _, e := range catalog {
+		if n := stationsPer[e.id]; n > 0 && e.isStation && e.kind == CatalogGenre {
+			items = append(items, BrowseItem{ID: "genre:" + e.id, Title: e.name, Subtitle: plural(n, "station"), Browsable: true})
+		}
+	}
+	return items, nil
 }
 
 func (s *Service) playlistFolders(ctx context.Context, userID string) ([]BrowseItem, error) {

@@ -69,11 +69,18 @@ export function StationPage() {
       <HeroHeader
         color={color}
         art={<Art src={stationCover(s.id)} name={s.name} className="aspect-square w-full" />}
-        kind={genreStation ? 'Genre station' : s.shared ? 'Station' : 'Your station'}
+        kind={s.parent_genre ? 'Style station' : genreStation ? 'Genre station' : s.shared ? 'Station' : 'Your station'}
         title={s.name}
         meta={
           <>
-            <span className="font-semibold">{genreLabel(s)}</span>
+            {genreStation ? (
+              // The genre's page lists its style stations; a style links to its genre's.
+              <Link to={`/genre/${s.parent_genre ?? s.genres[0]}`} className="font-semibold hover:underline">
+                {genreLabel(s)}
+              </Link>
+            ) : (
+              <span className="font-semibold">{genreLabel(s)}</span>
+            )}
             <span className="mx-1.5">•</span>
             {plural(s.track_count, 'track')}
             {(s.all_playlists || genreStation) && (

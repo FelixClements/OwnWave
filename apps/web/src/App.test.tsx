@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter } from 'react-router-dom';
@@ -272,6 +272,41 @@ describe('App', () => {
     const main = screen.getByRole('main');
     expect(within(main).getByText('Techno')).toBeInTheDocument();
     expect(within(main).queryByText('Bunker Techno')).not.toBeInTheDocument();
+  });
+
+  it('shows style stations under their genre', async () => {
+    const house: Station = { ...genreStation, id: 'g2', name: 'House', genres: ['house'] };
+    const deep: Station = { ...genreStation, id: 'g3', name: 'Deep House', genres: ['deep_house'], parent_genre: 'house' };
+    signedIn({
+      'GET /api/stations': () => ({ stations: [station, genreStation, house, deep] }),
+      'GET /api/browse': (_body, url) =>
+        url.searchParams.get('node') === 'genre:house'
+          ? {
+              id: 'genre:house',
+              title: 'House',
+              items: [house, deep].map((s) => ({ id: `station:${s.id}`, title: s.name, browsable: false, playable: true, station_id: s.id })),
+            }
+          : { id: 'recent', title: 'Recently played', items: [] },
+    });
+    renderAt('/genre/house');
+    const styles = await screen.findByRole('heading', { name: 'Styles' });
+    const section = styles.closest('section')!;
+    expect(within(section).getByText('Deep House')).toBeInTheDocument();
+    expect(within(section).queryByText('House')).not.toBeInTheDocument();
+    const page = screen.getByRole('main');
+    expect(within(page).getAllByText('House').length).toBeGreaterThan(0);
+    expect(within(page).queryByText('Techno')).not.toBeInTheDocument();
+
+    // The Stations page keeps genres and styles apart.
+    cleanup();
+    renderAt('/stations');
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('tab', { name: /Styles/ }));
+    const main = screen.getByRole('main');
+    expect(within(main).getByText('Deep House')).toBeInTheDocument();
+    expect(within(main).queryByText('Techno')).not.toBeInTheDocument();
+    await user.click(screen.getByRole('tab', { name: /Genres/ }));
+    expect(within(main).queryByText('Deep House')).not.toBeInTheDocument();
   });
 
   it('runs the genre stations and the pipeline from admin', async () => {
