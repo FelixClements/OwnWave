@@ -14,15 +14,15 @@ func (a *sqlArgs) add(v any) string {
 // where returns an SQL predicate on `tracks t` that holds for the songs the
 // definition plays, each by its best copy, so t.id is the song id. A genre
 // station plays every song of the library whose best copy's main genre is
-// its genre. Any other station plays the songs of the local matches of its
+// its genre; a style station every song whose best copy's style is its
+// style. Any other station plays the songs of the local matches of its
 // playlists (of every playlist for AllPlaylists), with Enhance also of their
 // library picks, and when it has genres, songs with one of them among their
-// station genres.
+// station genres or as their style.
 func (d Definition) where(args *sqlArgs) string {
 	if d.Library {
 		return `t.id IN (
-		SELECT g.track_id FROM track_station_genres g JOIN songs s ON s.track_id = g.track_id
-		WHERE s.best_copy AND g.is_primary AND g.genre = ANY(` + args.add(d.Genres) + `::text[]))`
+		SELECT s.track_id FROM songs s WHERE s.best_copy AND s.track_id IN (` + songsWithGenres(args.add(d.Genres), true) + `))`
 	}
 	matches, picks := "", ""
 	if !d.AllPlaylists {
@@ -42,9 +42,7 @@ func (d Definition) where(args *sqlArgs) string {
 	}
 	cond += `)`
 	if len(d.Genres) > 0 {
-		cond += ` AND EXISTS (
-		SELECT 1 FROM track_station_genres g
-		WHERE g.track_id = t.id AND g.genre = ANY(` + args.add(d.Genres) + `::text[]))`
+		cond += ` AND t.id IN (` + songsWithGenres(args.add(d.Genres), false) + `)`
 	}
 	return cond
 }

@@ -24,6 +24,14 @@ _Avoid_: station genre, family, category
 A narrower kind of music within one genre, such as Deep House under House or Black Metal under Metal.
 _Avoid_: subgenre, substyle
 
+**Genre station**:
+A shared station OwnWave makes for a genre once enough songs have it as their genre (shown from 25 songs, hidden below 20). It plays every such song of the library; unsure songs are on none.
+_Avoid_: auto station, library station
+
+**Style station**:
+A genre station for a style: it plays every song whose style is that style, under the same threshold. It is listed on its genre's page, after the genre's own station. Songs with a genre but no style are only on the genre station.
+_Avoid_: substation, sub-genre station
+
 **Fence**:
 The set of genres a song may still end up in, narrowed by weak hints such as a broad tag. Nothing outside a song's fence can become its genre.
 _Avoid_: constraint, filter, allowed genres

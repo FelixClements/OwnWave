@@ -38,6 +38,12 @@ and the API's startup catalog sync check `station_genres.kind`
 moving this file into `database/migrations/` at the release is the switch;
 nothing else needs flipping.
 
+The API follows it too (issue #139): Go reads `station_genres.kind` and
+`parent_id` through `to_jsonb` (`internal/stations/catalog.go`), so the same
+queries run before the switch (every entry is a genre, no style stations) and
+after it (styles get style stations from `track_genre_decisions.style`, under
+`StyleStationShowAt` / `StyleStationHideBelow`). Apps need no switch either.
+
 Migration `036_genre_decisions` (already in `database/migrations/`, harmless
 before the switch) adds where the engine stores its results:
 `track_genre_decisions`, release-scope `genre_corrections.release_id`, and the
