@@ -326,6 +326,82 @@ describe('App', () => {
     await waitFor(() => expect(calls.some((c) => c.method === 'POST' && c.path === '/api/admin/pipeline/refresh')).toBe(true));
   });
 
+  it('saves and tests outside source keys without ever showing them', async () => {
+    const match = (covered: number, found: number) => ({ covered, looked_up: found + 1, found, not_found: 1, due: covered - found - 1 });
+    const noYield = { found_rows: 0, with_genres: 0, values: 0, translated_values: 0, untranslated_values: 0, top: [], untranslated: [] };
+    const source = (id: string, name: string, extra: object) => ({
+      source: id,
+      name,
+      state: 'on',
+      enabled: true,
+      enabled_from: 'env',
+      env_switch: `${id.toUpperCase()}_ENABLED`,
+      key: null,
+      running: false,
+      queued: false,
+      requests_per_run: 100,
+      last_run: null,
+      last_refresh: null,
+      songs: match(10, 5),
+      releases: match(4, 2),
+      genre_yield: noYield,
+      ...extra,
+    });
+    let discogsKey: object = { set: false, source: null, last4: null, unreadable: false, env_var: 'DISCOGS_TOKEN' };
+    const status = () => ({
+      library: { songs: 20, releases: 5 },
+      max_age_days: 180,
+      sources: [
+        source('musicbrainz', 'MusicBrainz', {
+          genre_yield: { ...noYield, found_rows: 4, with_genres: 3, values: 2, translated_values: 1, untranslated_values: 1,
+            top: [{ name: 'techno', kind: 'genre', rows: 3, translated_to: 'Techno' }],
+            untranslated: [{ name: 'zzz', kind: 'genre', rows: 1, translated_to: null }] },
+        }),
+        source('discogs', 'Discogs', { state: (discogsKey as { set: boolean }).set ? 'on' : 'missing_key', key: discogsKey }),
+        source('lastfm', 'Last.fm', {
+          state: 'refused_key',
+          key: { set: true, source: 'env', last4: 'abcd', unreadable: false, env_var: 'LASTFM_API_KEY' },
+          last_run: { status: 'refused_key', requests: 1, stored: 0, failures: 0, more: false, at: '2026-11-03T10:00:00Z' },
+        }),
+      ],
+    });
+    const calls = signedIn({
+      'GET /api/admin/outside-sources': status,
+      'POST /api/admin/outside-sources/settings': (body) => {
+        if ((body as { key?: string }).key) discogsKey = { set: true, source: 'page', last4: 'wxyz', unreadable: false, env_var: 'DISCOGS_TOKEN' };
+        return { status: 'saved' };
+      },
+      'POST /api/admin/outside-sources/test': () => ({ ok: true, message: 'Discogs accepted the token.' }),
+      'POST /api/admin/outside-genres/refetch': () => ({ status: 'queued' }),
+    });
+    renderAt('/settings/outside-sources');
+    const user = userEvent.setup();
+    expect(await screen.findByText('Missing key')).toBeInTheDocument();
+    expect(screen.getByText('Key refused')).toBeInTheDocument();
+    expect(screen.getByText('From the environment (LASTFM_API_KEY), ends in abcd.')).toBeInTheDocument();
+    expect(screen.getByText(/→ Techno/)).toBeInTheDocument();
+
+    const input = screen.getByLabelText('New Discogs personal access token');
+    expect(input).toHaveAttribute('type', 'password');
+    await user.type(input, 'fake-token-0000wxyz');
+    await user.click(screen.getByRole('button', { name: 'Test this Discogs key' }));
+    expect(await screen.findByText(/Discogs accepted the token/)).toBeInTheDocument();
+    expect(calls.find((c) => c.path === '/api/admin/outside-sources/test')?.body).toEqual({ source: 'discogs', key: 'fake-token-0000wxyz' });
+
+    await user.click(screen.getByRole('button', { name: 'Save the Discogs key' }));
+    expect(await screen.findByText('Saved on this page, ends in wxyz.')).toBeInTheDocument();
+    expect(calls.find((c) => c.path === '/api/admin/outside-sources/settings')?.body).toEqual({ source: 'discogs', key: 'fake-token-0000wxyz' });
+    expect(input).toHaveValue('');
+    expect(document.body.textContent).not.toContain('fake-token-0000wxyz');
+
+    await user.click(screen.getByRole('switch', { name: 'MusicBrainz on' }));
+    await waitFor(() =>
+      expect(calls.filter((c) => c.path === '/api/admin/outside-sources/settings').at(-1)?.body).toEqual({ source: 'musicbrainz', enabled: false }),
+    );
+    await user.click(screen.getByRole('button', { name: /Fetch again/ }));
+    await waitFor(() => expect(calls.some((c) => c.path === '/api/admin/outside-genres/refetch')).toBe(true));
+  });
+
   it('hides a song on a station and brings it back', async () => {
     let hidden: { track_id: string; title: string; artist?: string }[] = [];
     const song = { id: 't1', title: 'Domino', artist: 'Oxia', liked: false };

@@ -81,6 +81,10 @@ class MusicBrainzClient:
     def recording(self, mbid: str) -> Optional[dict]:
         return self._get(f"/ws/2/recording/{mbid}", {"inc": "genres"})
 
+    def ping(self) -> Optional[dict]:
+        """One cheap request (the first genre of the genre list), for the admin Test button."""
+        return self._get("/ws/2/genre/all", {"limit": "1"})
+
     def release_recordings(self, mbid: str) -> List[dict]:
         """Every recording on a release, with genres, in pages of BROWSE_LIMIT."""
         recordings: List[dict] = []

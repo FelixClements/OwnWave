@@ -50,15 +50,23 @@ OUTSIDE_USER_AGENT = MUSICBRAINZ_USER_AGENT
 
 # Release genres and styles from Discogs, found through the MusicBrainz
 # release's Discogs link. Needs a Discogs personal access token
-# (discogs.com > Settings > Developers); off while it is unset.
+# (discogs.com > Settings > Developers); off while it is unset. The admin
+# "Outside sources" page can set both; its values override these.
 DISCOGS_TOKEN = os.environ.get("DISCOGS_TOKEN", "").strip()
-DISCOGS_ENABLED = os.environ.get("DISCOGS_ENABLED", "true").lower() == "true" and bool(DISCOGS_TOKEN)
+DISCOGS_ENABLED = os.environ.get("DISCOGS_ENABLED", "true").lower() == "true"
 
 # Track tags from Last.fm, matched by exact artist and title (sends them to
 # Last.fm). Needs a Last.fm API key (last.fm/api/account/create); off while
-# it is unset.
+# it is unset. The admin "Outside sources" page can set both; its values
+# override these.
 LASTFM_API_KEY = os.environ.get("LASTFM_API_KEY", "").strip()
-LASTFM_ENABLED = os.environ.get("LASTFM_ENABLED", "true").lower() == "true" and bool(LASTFM_API_KEY)
+LASTFM_ENABLED = os.environ.get("LASTFM_ENABLED", "true").lower() == "true"
+
+# Key material for the secrets saved on the admin "Outside sources" page
+# (encrypted at rest, see secret_box). Optional: without it the key is
+# derived from ANALYTICS_API_SECRET. Changing either makes saved secrets
+# unreadable until they are saved again.
+SECRETS_KEY = os.environ.get("SECRETS_KEY", "").strip()
 
 # Outside genres are fetched again once they are this many days old.
 OUTSIDE_GENRES_MAX_AGE_DAYS = int(os.environ.get("OUTSIDE_GENRES_MAX_AGE_DAYS", "180"))
