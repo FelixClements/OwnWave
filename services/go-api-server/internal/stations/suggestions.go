@@ -30,7 +30,7 @@ type poolData struct {
 	playlists   []playlistRef
 	matched     map[string]map[string]bool // playlist id -> its matched songs, by best copy (no library picks)
 	trackGenres map[string]map[string]bool // track id -> station genres
-	genres      []Genre                    // station genres, display order
+	genres      []Genre                    // station genres (no styles), display order
 	stations    map[string]bool            // pool key + "|" + genres key of existing custom stations
 	dismissed   map[string]bool            // pool key + "|" + genre
 }
@@ -81,7 +81,9 @@ func (s *Service) loadPools(ctx context.Context) (*poolData, error) {
 			}
 			d.trackGenres[t][g] = true
 		}},
-		{`SELECT id, name FROM station_genres WHERE is_station ORDER BY position`, func(id, name string) {
+		// Genres only: a style's songs are its genre's songs, so a playlist
+		// pool is broken down by genre.
+		{`SELECT id, name FROM ` + catalogSQL + ` c WHERE is_station AND kind = 'genre' ORDER BY position`, func(id, name string) {
 			d.genres = append(d.genres, Genre{ID: id, Name: name})
 		}},
 		{`SELECT COALESCE((SELECT string_agg(sp.playlist_id::text, ',' ORDER BY sp.playlist_id::text)

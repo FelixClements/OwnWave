@@ -45,14 +45,15 @@ func NewService(pool *pgxpool.Pool, opts ...Option) *Service {
 }
 
 // stationColumns reads a station; an all-playlists station lists every
-// playlist there is now.
+// playlist there is now, and a style station names its style's genre.
 const stationColumns = `
 	s.id::text, s.name, s.user_id IS NULL, s.auto_genre IS NOT NULL, s.all_playlists, s.genres, s.enhance, s.updated_at,
 	CASE WHEN s.all_playlists
 	     THEN COALESCE((SELECT array_agg(p.id::text ORDER BY p.id) FROM playlists p), '{}')
 	     ELSE COALESCE((SELECT array_agg(sp.playlist_id::text ORDER BY sp.playlist_id)
 	                    FROM station_playlists sp WHERE sp.station_id = s.id), '{}')
-	END`
+	END,
+	COALESCE((SELECT sc.parent_id FROM ` + catalogSQL + ` sc WHERE sc.id = s.auto_genre), '')`
 
 // visibleTo is an SQL predicate on `stations s`: the station is the
 // user's (at placeholder userArg) or shared, and not a hidden genre station.
@@ -63,7 +64,7 @@ func visibleTo(userArg string) string {
 func scanStation(row pgx.Row) (Station, error) {
 	var st Station
 	var genre bool
-	err := row.Scan(&st.ID, &st.Name, &st.Shared, &genre, &st.AllPlaylists, &st.Genres, &st.Enhance, &st.UpdatedAt, &st.PlaylistIDs)
+	err := row.Scan(&st.ID, &st.Name, &st.Shared, &genre, &st.AllPlaylists, &st.Genres, &st.Enhance, &st.UpdatedAt, &st.PlaylistIDs, &st.ParentGenre)
 	st.Kind = KindCustom
 	if genre {
 		st.Kind = KindGenre

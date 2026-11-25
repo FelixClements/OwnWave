@@ -89,11 +89,12 @@ import java.util.UUID
 /** The station page lists this many of the queue, not the whole pool. */
 private const val PREVIEW_TRACKS = 100
 
-private enum class Filter { All, Genre, Shared, Mine }
+private enum class Filter { All, Genre, Style, Shared, Mine }
 
 private fun Filter.matches(s: Station) = when (this) {
     Filter.All -> true
-    Filter.Genre -> s.kind == Station.Kind.GENRE
+    Filter.Genre -> s.kind == Station.Kind.GENRE && s.parentGenre.isNullOrEmpty()
+    Filter.Style -> !s.parentGenre.isNullOrEmpty()
     Filter.Shared -> s.shared && s.kind != Station.Kind.GENRE
     Filter.Mine -> !s.shared
 }
@@ -117,6 +118,7 @@ fun StationsScreen() {
                     listOf(
                         TabItem(Filter.All, "All", all.size),
                         TabItem(Filter.Genre, "Genres", all.count(Filter.Genre::matches)),
+                        TabItem(Filter.Style, "Styles", all.count(Filter.Style::matches)),
                         TabItem(Filter.Shared, "Shared", all.count(Filter.Shared::matches)),
                         TabItem(Filter.Mine, "Yours", all.count(Filter.Mine::matches)),
                     ),
@@ -133,7 +135,7 @@ fun StationsScreen() {
                 Empty(
                     "Nothing here yet",
                     icon = Icons.Default.Radio,
-                    body = "A station plays the songs of one or more playlists that are in your library, optionally only some genres. Each main genre gets its own station once enough of your playlist songs are in it.",
+                    body = "A station plays the songs of one or more playlists that are in your library, optionally only some genres. Each genre and style gets its own station once enough of your library's songs are in it.",
                 )
             }
             else -> cardGrid(list, key = { it.id }) { StationCard(it) }
@@ -143,7 +145,10 @@ fun StationsScreen() {
     if (creating) StationEditor(onDismiss = { creating = false })
 }
 
-/** apps/web/src/pages/Genre.tsx: the stations of one genre, from the browse tree. */
+/**
+ * apps/web/src/pages/Genre.tsx: a genre's page, from the browse tree: its
+ * stations, then the stations of its styles (House, then Deep House, Tech House).
+ */
 @Composable
 fun GenreScreen(id: String) {
     val node = rememberQuery("browse:genre:$id") { apiBody { apis.stations.browse("genre:$id") } }
@@ -160,8 +165,10 @@ fun GenreScreen(id: String) {
                 Empty("Genre not found", body = node.error)
             }
             else -> {
-                val ids = n.items.mapNotNull { it.stationId }.toSet()
-                val list = stations.filter { it.id in ids }
+                // The browse node keeps the order: the genre's stations first, then its styles'.
+                val byId = stations.associateBy { it.id }
+                val list = n.items.mapNotNull { item -> item.stationId?.let { byId[it] } }
+                val (own, styles) = list.partition { id in it.genres }
                 item(key = "head") {
                     val c = Colors.nameColor(n.title).toColor()
                     Column(
@@ -177,7 +184,18 @@ fun GenreScreen(id: String) {
                 if (list.isEmpty()) {
                     item(key = "empty") { Empty("No ${n.title} stations") }
                 } else {
-                    cardGrid(list, key = { it.id }) { StationCard(it) }
+                    if (own.isNotEmpty()) cardGrid(own, key = { it.id }) { StationCard(it) }
+                    if (styles.isNotEmpty()) {
+                        item(key = "styles") {
+                            Text(
+                                "Styles",
+                                fontSize = 24.sp,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.padding(start = PagePad, end = PagePad, top = if (own.isEmpty()) 0.dp else 24.dp, bottom = 8.dp),
+                            )
+                        }
+                        cardGrid(styles, key = { it.id }) { StationCard(it) }
+                    }
                 }
             }
         }
@@ -231,7 +249,12 @@ fun StationScreen(id: String, session: Session) {
             HeroHeader(
                 color = color,
                 art = { Art(app.stationCover(s.id), s.name, Modifier.fillMaxWidth().aspectSquare()) },
-                kind = if (genreStation) "Genre station" else if (s.shared) "Station" else "Your station",
+                kind = when {
+                    !s.parentGenre.isNullOrEmpty() -> "Style station"
+                    genreStation -> "Genre station"
+                    s.shared -> "Station"
+                    else -> "Your station"
+                },
                 title = s.name,
                 meta = {
                     val text = buildAnnotatedString {
@@ -243,8 +266,15 @@ fun StationScreen(id: String, session: Session) {
                             append(if (genreStation) "from your whole library" else "from every playlist")
                         }
                     }
+                    // The genre's page lists its style stations; a style opens its genre's.
+                    val genrePage = if (genreStation) s.parentGenre?.takeIf { it.isNotEmpty() } ?: s.genres.firstOrNull() else null
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text(text, fontSize = 14.sp, textAlign = TextAlign.Center)
+                        Text(
+                            text,
+                            fontSize = 14.sp,
+                            textAlign = TextAlign.Center,
+                            modifier = if (genrePage != null) Modifier.clickable { nav.push(Route.Genre(genrePage)) } else Modifier,
+                        )
                         if (names.isNotEmpty()) {
                             Row(Modifier.padding(top = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                                 Text("from ", fontSize = 14.sp)

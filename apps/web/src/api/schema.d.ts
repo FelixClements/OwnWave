@@ -1417,15 +1417,17 @@ export interface components {
             /** @description Played by everyone, changed by admins only */
             shared: boolean;
             /**
-             * @description genre = made and kept up to date by OwnWave, one per station genre; custom = made by hand
+             * @description genre = made and kept up to date by OwnWave, one per station genre or style; custom = made by hand
              * @enum {string}
              */
             kind: "custom" | "genre";
+            /** @description Set on a style station: the genre its style belongs to */
+            parent_genre?: string;
             /** @description Plays every playlist, including ones added later */
             all_playlists: boolean;
             /** @description For all_playlists stations, every playlist now */
             playlist_ids: string[];
-            /** @description Station genre ids; empty = every genre */
+            /** @description Station genre or style ids; empty = every genre */
             genres: string[];
             /** @description Also plays library songs that sound like its playlists; off = only the playlists' tracks */
             enhance: boolean;
@@ -1463,23 +1465,33 @@ export interface components {
             name: string;
         };
         GenreStation: {
+            /** @description A genre or a style id */
             genre: string;
             genre_name: string;
-            /** @description Empty until the genre first reaches the threshold */
+            /** @enum {string} */
+            kind: "genre" | "style";
+            /** @description A style's genre */
+            parent?: string;
+            /** @description Empty until the genre or style first reaches the threshold */
             station_id?: string;
             name: string;
             name_is_custom: boolean;
-            /** @description Songs of the library with this main genre */
+            /** @description Songs of the library with this main genre, or with this style */
             tracks: number;
             /** @enum {string} */
             state: "active" | "below_threshold" | "excluded" | "off";
         };
         GenreStationSettings: {
             enabled: boolean;
-            /** @description A hidden station is shown from this many tracks */
+            /** @description A hidden genre station is shown from this many tracks */
             show_at: number;
-            /** @description A shown station is hidden below this many tracks */
+            /** @description A shown genre station is hidden below this many tracks */
             hide_below: number;
+            /** @description A hidden style station is shown from this many tracks */
+            style_show_at: number;
+            /** @description A shown style station is hidden below this many tracks */
+            style_hide_below: number;
+            /** @description Every genre, each followed by its styles that have songs or a station */
             genres: components["schemas"]["GenreStation"][];
         };
         StationChange: {
@@ -2662,7 +2674,7 @@ export interface operations {
     browse: {
         parameters: {
             query?: {
-                /** @description root (default), stations, recent, genres, playlists, genre:<id>, playlist:<id> */
+                /** @description root (default), stations, recent, genres, playlists, genre:<id> (the genre's stations, then its style stations), playlist:<id> */
                 node?: string;
             };
             header?: never;
