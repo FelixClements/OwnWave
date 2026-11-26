@@ -1,11 +1,16 @@
-"""The genre v2 switch migration on a database in its v1 state."""
+"""The genre v2 switch, migration 038, on a database in its v1 state."""
 
 import tomllib
+from pathlib import Path
 
 import psycopg
 
 import genre_catalog as gc
 import genre_scoring
+
+MIGRATIONS = Path(__file__).resolve().parents[3] / "database" / "migrations"
+SWITCH_UP = (MIGRATIONS / "038_genre_v2_switch.up.sql").read_text()
+SWITCH_DOWN = (MIGRATIONS / "038_genre_v2_switch.down.sql").read_text()
 
 
 def _apply(conn, sql):
@@ -13,7 +18,9 @@ def _apply(conn, sql):
 
 
 def _v1_state(conn):
-    """A v1 database: the v1 catalog and user data that stores v1 genre ids."""
+    """A v1 database: the test database (every migration) rolled back past
+    038, the v1 catalog, and user data that stores v1 genre ids."""
+    _apply(conn, SWITCH_DOWN)
     genre_scoring.sync_catalog(conn)
 
     def station(name, genres=(), auto=None, active=False, created="2026-01-01"):
@@ -31,7 +38,7 @@ def _v1_state(conn):
 
 
 def test_switch_migration_builds_the_catalog_and_keeps_user_data(db_url):
-    up, down = gc.switch_migration(gc.catalog())
+    up, down = SWITCH_UP, SWITCH_DOWN
     with psycopg.connect(db_url, autocommit=True) as conn:
         station = _v1_state(conn)
         mixed = station("Mixed", ["techno", "house", "gone"])

@@ -5,22 +5,12 @@ package main
 import (
 	"fmt"
 	"net/http"
-	"os"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 
 	"ownwave/api/internal/stations"
 )
-
-// applyGenreSwitch applies the pending genre v2 switch migration
-// (database/genre-v2), as the release will.
-func (f *stationsFixture) applyGenreSwitch() {
-	f.t.Helper()
-	sql, err := os.ReadFile("../../database/genre-v2/genre_v2_switch.up.sql")
-	require.NoError(f.t, err)
-	f.exec(string(sql))
-}
 
 // decidedSong adds a song the genre engine decided: genre "" is an unsure
 // song (no station genre row), style "" none.
@@ -61,26 +51,9 @@ func titles(items []stations.BrowseItem) []string {
 	return out
 }
 
-func TestStyleStationsNeedTheGenreSwitch(t *testing.T) {
-	f := newStationsFixture(t)
-	alice := f.user("alice", false)
-	// Before the switch the catalog has no styles: a decided style (from a
-	// bulk run with --write) makes no station and changes no pool.
-	f.decidedSongs("house", 30, "house", "deep_house")
-	require.Equal(t, []stations.Change{{Genre: "house", Name: "House", Change: stations.ChangeCreated}}, f.refresh())
-	require.Equal(t, []string{"House/genre/30"}, f.visible(alice))
-	settings := decode[stations.GenreStationSettings](t, f.call(f.h.AdminGenreStations, f.user("admin", true), http.MethodGet, "/", "", ""))
-	for _, g := range settings.Genres {
-		require.Equal(t, stations.CatalogGenre, g.Kind, g.Genre)
-		require.Empty(t, g.Parent)
-	}
-	require.Equal(t, []string{"House"}, titles(f.browse("genre:house").Items))
-}
-
-func TestStyleStationsAfterTheGenreSwitch(t *testing.T) {
+func TestStyleStations(t *testing.T) {
 	f := newStationsFixture(t)
 	admin, alice := f.user("admin", true), f.user("alice", false)
-	f.applyGenreSwitch()
 	other := f.one(`SELECT id FROM station_genres WHERE parent_id = 'house' AND id <> 'deep_house' ORDER BY position LIMIT 1`)
 	otherName := f.one(`SELECT name FROM station_genres WHERE id = $1`, other)
 

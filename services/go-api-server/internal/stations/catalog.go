@@ -14,16 +14,11 @@ const (
 	CatalogStyle = "style"
 )
 
-// catalogSQL reads station_genres with each entry's kind and parent genre.
-// kind and parent_id arrive with the genre v2 switch migration
-// (database/genre-v2); until it is in, every entry is a genre. Reading them
-// through to_jsonb lets the same SQL run before and after the switch, so the
-// release only has to apply the migration.
-const catalogSQL = `(SELECT c.id, c.name, c.position, c.is_station,
-	COALESCE(to_jsonb(c)->>'kind', 'genre') AS kind, to_jsonb(c)->>'parent_id' AS parent_id
-	FROM station_genres c)`
+// catalogSQL is the catalog table: station_genres, with each entry's kind
+// and parent genre (migration 038_genre_v2_switch).
+const catalogSQL = `station_genres`
 
-// styleIDsSQL is the ids of the catalog's styles (none before the switch).
+// styleIDsSQL is the ids of the catalog's styles.
 const styleIDsSQL = `SELECT id FROM ` + catalogSQL + ` sc WHERE sc.kind = 'style'`
 
 // catalogEntry is one genre or style of the catalog.

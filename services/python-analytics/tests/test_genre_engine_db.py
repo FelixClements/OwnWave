@@ -1,5 +1,5 @@
 """The genre engine v2 against a database: loading sources, storing
-decisions, the review queue, and the one switch (ADR 0008)."""
+decisions, the review queue and the rescore task (ADR 0008)."""
 
 import numpy as np
 import psycopg
@@ -8,7 +8,6 @@ from psycopg.types.json import Jsonb
 
 import genre_catalog as gc
 import genre_engine as ge
-import genre_scoring
 
 DIMS = 1280
 
@@ -160,7 +159,7 @@ def test_run_report_reads_every_source_and_stores_decisions(db_url):
 def test_review_queue_is_grouped_by_release_and_ranked(db_url):
     with psycopg.connect(db_url) as conn:
         lib = Library(conn)
-        genre_scoring.sync_catalog(conn)  # station genres (v1 ids include house)
+        gc.sync_catalog(conn)
         user = conn.execute("INSERT INTO users (username, password_hash) VALUES ('u', 'x') RETURNING id").fetchone()[0]
         station = conn.execute(
             "INSERT INTO stations (name, auto_genre) VALUES ('House', 'house') RETURNING id"
@@ -214,26 +213,16 @@ def test_release_corrections_need_exactly_one_target(db_url):
                          (track, release))
 
 
-def test_score_genres_keeps_the_v1_engine_until_the_switch(db_url):
+def test_score_genres_runs_the_genre_engine(db_url):
     import tasks
 
     with psycopg.connect(db_url, autocommit=True) as conn:
         lib = Library(conn)
-        genre_scoring.sync_catalog(conn)
         tagged = lib.track("tagged", tag="Techno; Hard Techno")
         unsure = lib.track("unsure", tag="Techno", artist="Metal Band")
         conn.execute("INSERT INTO musicbrainz_artists (name_key, mbid, tags) VALUES ('metal band', 'x', %s)",
                      (Jsonb([{"name": "heavy metal", "count": 5}]),))
 
-        assert not ge.switched(conn)
-        tasks.score_genres()
-        # v1: the blend, which gives every tagged song a genre.
-        assert conn.execute("SELECT COUNT(*) FROM track_station_genres WHERE is_primary").fetchone()[0] == 2
-        assert conn.execute("SELECT COUNT(*) FROM track_genre_decisions").fetchone()[0] == 0
-
-        up, _ = gc.switch_migration(gc.catalog())
-        conn.execute(up)
-        assert ge.switched(conn)
         summary = tasks.score_genres()
         assert summary == {"tracks": 2, "scored": 1, "unsure": 1}
         stations = conn.execute(
@@ -241,6 +230,9 @@ def test_score_genres_keeps_the_v1_engine_until_the_switch(db_url):
         ).fetchall()
         # The unsure song joins no genre station.
         assert stations == [(tagged, "techno", 1.0, True, False)]
+        assert conn.execute(
+            "SELECT genre FROM track_genre_decisions WHERE track_id = %s", (unsure,)
+        ).fetchone()[0] is None
         style = conn.execute("SELECT style FROM track_genre_decisions WHERE track_id = %s", (tagged,)).fetchone()[0]
         assert style == "hard_techno"
         assert conn.execute(
@@ -249,9 +241,6 @@ def test_score_genres_keeps_the_v1_engine_until_the_switch(db_url):
         assert conn.execute("SELECT value FROM app_state WHERE key = %s", (ge.TEST_SCORE_KEY,)).fetchone()
         scored = conn.execute("SELECT value FROM app_state WHERE key = %s", (tasks.GENRES_SCORED_KEY,)).fetchone()[0]
         assert scored == {"tracks": 2, "scored": 1}
-        # The API's startup catalog sync follows the switch too.
-        ge.sync_catalog(conn)
-        assert conn.execute("SELECT COUNT(*) FROM station_genres WHERE kind = 'style'").fetchone()[0] > 0
 
 
 def test_migration_036_down_restores_the_corrections_table(db_url):

@@ -553,7 +553,6 @@ describe('App', () => {
       'GET /api/admin/genre-stations': () => ({ enabled: true, show_at: 25, hide_below: 20, genres: [] }),
       'GET /api/admin/pipeline': () => ({ runs: [] }),
       'GET /api/admin/genre-overview': () => ({
-        switched: true,
         songs: 40,
         decided: 39,
         unsure: 1,
@@ -566,7 +565,6 @@ describe('App', () => {
         test_score: { labels: 12, accuracy: 0.75, decides_at: 0.6, decides: 0.5, accuracy_when_deciding: 0.9 },
       }),
       'GET /api/admin/genre-review': () => ({
-        switched: true,
         total: 1,
         songs: 1,
         offset: 0,

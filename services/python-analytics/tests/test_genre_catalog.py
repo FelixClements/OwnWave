@@ -344,11 +344,6 @@ def test_catalog_errors(extra, v1, message):
 # --- the switch migration -------------------------------------------------------------
 
 
-def test_pending_switch_migration_is_current():
-    # Regenerate with: python services/python-analytics/src/genre_catalog.py
-    assert gc.main(["--check"]) == 0
-
-
 def test_switch_migration_maps_old_ids_and_lists_styles_under_their_genre():
     cat = make(
         '[[genre]]\nid = "club"\nname = "Club"\nreplaces = ["dance", "synth"]\nstyles = ["Nu-Disco"]\n',

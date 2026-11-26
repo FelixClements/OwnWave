@@ -1,6 +1,7 @@
 -- GENERATED from services/python-analytics/src/genre_catalog.toml
--- (catalog version 2026-11-25) by genre_catalog.py. Do not edit by hand:
--- edit the TOML file and run `python services/python-analytics/src/genre_catalog.py`.
+-- (catalog version 2026-11-25) by genre_catalog.py at the genre v2 release.
+-- Frozen: do not edit or regenerate it. Later catalog edits reach
+-- station_genres through genre_catalog.sync_catalog at startup.
 --
 -- Genre engine v2 switch (docs/adr/0008-genre-engine-v2.md): the catalog
 -- holds genres and styles, and stored v1 genre ids move to the new genres.

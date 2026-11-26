@@ -12,7 +12,6 @@ import {
   useGenreCorrections,
   useGenreDecision,
   useGenreOverview,
-  useGenreReport,
   useGenreReview,
   useRefetchReleaseGenres,
   type GenreCorrectionBody,
@@ -45,7 +44,7 @@ function useCatalog(overview: GenreOverview | undefined): Catalog {
       for (const s of g.styles ?? []) names.set(s.id, s.name);
     }
     return {
-      genres: (overview?.genres ?? []).filter((g) => overview?.switched || g.station),
+      genres: overview?.genres ?? [],
       name: (id) => (id ? (names.get(id) ?? id.replace(/_/g, ' ')) : '–'),
       stylesOf: (genre) => styles.get(genre) ?? [],
     };
@@ -121,14 +120,8 @@ function OverviewTab({ overview, loading, catalog }: { overview?: GenreOverview;
         <Stat label="Unsure" value={overview.unsure != null ? overview.unsure.toLocaleString() : '–'} />
         <Stat label="Classifier disagrees with tag" value={overview.flagged != null ? overview.flagged.toLocaleString() : '–'} />
       </div>
-      {!overview.switched && (
-        <p className="mb-6 rounded-md bg-raised p-3 text-[13px] text-muted">
-          Genre engine v2 is not switched on yet, so these counts come from the current genre blend. Styles, unsure songs, the test score and release
-          corrections arrive with the switch.
-        </p>
-      )}
       <Section title="Test score">
-        {score ? <TestScore score={score} at={overview.test_score_at} catalog={catalog} /> : <Block className="text-sm text-muted">No test score yet: it is measured at every genre rescore once genre engine v2 runs.</Block>}
+        {score ? <TestScore score={score} at={overview.test_score_at} catalog={catalog} /> : <Block className="text-sm text-muted">No test score yet: it is measured at every genre rescore.</Block>}
       </Section>
       {overview.by_source && (
         <Section title="Decided by">
@@ -206,7 +199,6 @@ function OverviewTab({ overview, loading, catalog }: { overview?: GenreOverview;
           </Link>
         </Row>
       </Section>
-      {!overview.switched && <AgreementReport />}
     </>
   );
 }
@@ -248,37 +240,6 @@ function TestScore({ score, at, catalog }: { score: GenreTestScore; at?: string;
         </table>
       )}
     </>
-  );
-}
-
-/** Before the genre v2 switch: the v1 report of the audio model against file tags. */
-function AgreementReport() {
-  const [open, setOpen] = useState(false);
-  const report = useGenreReport(open);
-  return (
-    <Section>
-      <Row title="Check the audio model against file tags" description="Shows how often the current audio model agrees with your tags.">
-        {!open && (
-          <Button size="sm" onClick={() => setOpen(true)}>
-            Open report
-          </Button>
-        )}
-      </Row>
-      {open && (
-        <Block className="text-sm">
-          {report.isLoading ? (
-            <Spinner />
-          ) : report.data ? (
-            <p>
-              The audio model alone agrees with the file tag on <strong>{pct(report.data.audio_agreement)}</strong> of {plural(report.data.tracks, 'track')}{' '}
-              with a single-genre tag.
-            </p>
-          ) : (
-            <ErrorText error={report.error} />
-          )}
-        </Block>
-      )}
-    </Section>
   );
 }
 
@@ -362,11 +323,8 @@ function ReviewTab({ catalog }: { catalog: Catalog }) {
   return (
     <>
       <p className="mb-6 text-[13px] text-muted">
-        {page.switched
-          ? 'Grouped by release: songs listeners hid on a genre station first, then unsure songs, then songs whose tag the classifier disagrees with, then the least sure songs on stations.'
-          : 'Songs listeners hid on a genre station first, then the least certain.'}{' '}
-        Every correction teaches the classifier, and the rescore that follows right away moves similar songs too.
-        {!page.switched && ' Release corrections and styles arrive with genre engine v2.'}
+        Grouped by release: songs listeners hid on a genre station first, then unsure songs, then songs whose tag the classifier disagrees with, then the
+        least sure songs on stations. Every correction teaches the classifier, and the rescore that follows right away moves similar songs too.
       </p>
       <ErrorText error={q.error} />
       {page.groups.length === 0 && (
@@ -375,7 +333,7 @@ function ReviewTab({ catalog }: { catalog: Catalog }) {
         </Section>
       )}
       {page.groups.map((g) => (
-        <ReviewGroup key={g.release_id ?? g.songs[0]?.track_id} group={g} switched={page.switched} catalog={catalog} />
+        <ReviewGroup key={g.release_id ?? g.songs[0]?.track_id} group={g} catalog={catalog} />
       ))}
       {page.total > 0 && (
         <div className="flex items-center justify-between gap-3 text-sm text-muted">
@@ -396,7 +354,7 @@ function ReviewTab({ catalog }: { catalog: Catalog }) {
   );
 }
 
-function ReviewGroup({ group, switched, catalog }: { group: GenreReviewGroup; switched: boolean; catalog: Catalog }) {
+function ReviewGroup({ group, catalog }: { group: GenreReviewGroup; catalog: Catalog }) {
   const refetch = useRefetchReleaseGenres();
   const title = group.release_id ? (
     <>
@@ -426,7 +384,7 @@ function ReviewGroup({ group, switched, catalog }: { group: GenreReviewGroup; sw
         </Block>
       )}
       {group.songs.map((s) => (
-        <ReviewSong key={s.track_id} song={s} releaseId={group.release_id} switched={switched} catalog={catalog} />
+        <ReviewSong key={s.track_id} song={s} releaseId={group.release_id} catalog={catalog} />
       ))}
     </Section>
   );
@@ -438,11 +396,11 @@ function songReason(song: GenreReviewSong): { text: string; tone: 'warn' | 'neut
   if (song.hidden_by > 0) return { text: `Hidden by ${plural(song.hidden_by, 'listener')}`, tone: 'warn' };
   if (song.unsure_reason) return { text: UNSURE_REASONS[song.unsure_reason] ?? song.unsure_reason.replace(/_/g, ' '), tone: 'warn' };
   if (song.review_reason === 'classifier_disagrees') return { text: 'Classifier disagrees with the tag', tone: 'warn' };
-  if (song.confidence != null && song.source !== 'blend') return { text: `${song.source === 'release' ? 'Release lean' : 'Classifier'} ${pct(song.confidence)}`, tone: 'neutral' };
+  if (song.confidence != null) return { text: `${song.source === 'release' ? 'Release lean' : 'Classifier'} ${pct(song.confidence)}`, tone: 'neutral' };
   return null;
 }
 
-function ReviewSong({ song, releaseId, switched, catalog }: { song: GenreReviewSong; releaseId?: string; switched: boolean; catalog: Catalog }) {
+function ReviewSong({ song, releaseId, catalog }: { song: GenreReviewSong; releaseId?: string; catalog: Catalog }) {
   const { save, remove } = useGenreCorrectionActions();
   const [genre, setGenre] = useState(song.genre ?? '');
   const [style, setStyle] = useState(song.style ?? '');
@@ -453,7 +411,7 @@ function ReviewSong({ song, releaseId, switched, catalog }: { song: GenreReviewS
   const reason = songReason(song);
   const scopes: { value: Scope; label: string }[] = [
     { value: 'song', label: 'This song' },
-    ...(releaseId && switched ? [{ value: 'release' as const, label: 'Its release' }] : []),
+    ...(releaseId ? [{ value: 'release' as const, label: 'Its release' }] : []),
     ...(song.artist ? [{ value: 'artist' as const, label: `Everything by ${song.artist}` }] : []),
   ];
   const submit = (g: string, s: string) => {
@@ -473,11 +431,9 @@ function ReviewSong({ song, releaseId, switched, catalog }: { song: GenreReviewS
         <span className="min-w-0 truncate text-muted">{song.artist ?? 'Unknown artist'}</span>
         <Tag tone={song.genre ? 'ok' : 'neutral'}>{song.genre ? catalog.name(song.genre) + (song.style ? ` · ${catalog.name(song.style)}` : '') : 'Unsure'}</Tag>
         {reason && <Tag tone={reason.tone}>{reason.text}</Tag>}
-        {switched && (
-          <button type="button" className="text-[12px] text-muted hover:text-ink hover:underline" aria-expanded={why} onClick={() => setWhy(!why)}>
-            {why ? 'Hide why' : 'Why?'}
-          </button>
-        )}
+        <button type="button" className="text-[12px] text-muted hover:text-ink hover:underline" aria-expanded={why} onClick={() => setWhy(!why)}>
+          {why ? 'Hide why' : 'Why?'}
+        </button>
       </div>
       {why && <WhyBreakdown trackId={song.track_id} catalog={catalog} />}
       <div className="mt-2 flex flex-wrap items-center gap-2">
@@ -489,7 +445,7 @@ function ReviewSong({ song, releaseId, switched, catalog }: { song: GenreReviewS
             </option>
           ))}
         </select>
-        {switched && styles.length > 0 && (
+        {styles.length > 0 && (
           <select aria-label={`Style of ${song.title}`} value={style} onChange={(e) => setStyle(e.target.value)} className={selectClass}>
             <option value="">No style</option>
             {styles.map((s) => (

@@ -5,7 +5,6 @@ package main
 import (
 	"encoding/json"
 	"net/http"
-	"os"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -14,19 +13,9 @@ import (
 	"ownwave/api/internal/stations"
 )
 
-// applyGenreV2Switch runs the pending genre v2 switch migration, as the
-// release will (database/genre-v2/README.md).
-func applyGenreV2Switch(f *stationsFixture) {
-	f.t.Helper()
-	sql, err := os.ReadFile("../../database/genre-v2/genre_v2_switch.up.sql")
-	require.NoError(f.t, err)
-	f.exec(string(sql))
-}
-
-func TestGenreReviewAfterTheSwitch(t *testing.T) {
+func TestGenreReview(t *testing.T) {
 	f := newStationsFixture(t)
 	admin := f.user("admin", true)
-	applyGenreV2Switch(f)
 	stub := analytics.NewStub()
 	f.h.analytics = stub
 
@@ -65,7 +54,6 @@ func TestGenreReviewAfterTheSwitch(t *testing.T) {
 		return decode[stations.GenreReviewPage](t, rec)
 	}
 	page := review("/r")
-	require.True(t, page.Switched)
 	require.Equal(t, 3, page.Total)
 	require.Equal(t, 4, page.Songs)
 	require.Len(t, page.Groups, 3)
@@ -111,7 +99,6 @@ func TestGenreReviewAfterTheSwitch(t *testing.T) {
 	rec = f.call(f.h.AdminGenreOverview, admin, http.MethodGet, "/o", "", "")
 	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
 	o := decode[stations.GenreOverview](t, rec)
-	require.True(t, o.Switched)
 	require.Equal(t, 5, o.Songs)
 	require.Equal(t, 4, o.Decided)
 	require.Equal(t, 1, *o.Unsure)
@@ -158,7 +145,7 @@ func TestGenreReviewAfterTheSwitch(t *testing.T) {
 	code, _ = save(`{"release_id":"` + albumA + `","artist":"Oxia","genre":"techno"}`)
 	require.Equal(t, http.StatusBadRequest, code, "one scope only")
 	code, _ = save(`{"track_id":"` + a1 + `","genre":"dance"}`)
-	require.Equal(t, http.StatusBadRequest, code, "v1 ids are gone after the switch")
+	require.Equal(t, http.StatusBadRequest, code, "v1 ids are gone")
 	require.Empty(t, stub.Calls)
 
 	code, got := save(`{"release_id":"` + albumA + `","genre":"house"}`)

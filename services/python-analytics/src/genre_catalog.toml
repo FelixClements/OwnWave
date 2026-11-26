@@ -2,9 +2,10 @@
 #
 # The genre list the owner approved on 2026-11-25 (issue #138), from the
 # offline run on a copy of the live library.
-# Edit this file, not the code: genre_catalog.py reads it, and
-#   python services/python-analytics/src/genre_catalog.py
-# regenerates the switch migration in database/genre-v2/ from it.
+# Edit this file, not the code: genre_catalog.py reads it, and the analytics
+# service writes it to station_genres at startup. The genre v2 switch
+# (migration 038_genre_v2_switch) was generated from it at the release and is
+# frozen; renaming or removing an id that stored data uses needs a migration.
 #
 # Two levels:
 #   genre  A station-sized kind of music (House). Listed in display order.

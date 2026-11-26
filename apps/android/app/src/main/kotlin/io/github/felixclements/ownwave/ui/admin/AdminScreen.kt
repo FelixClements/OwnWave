@@ -524,7 +524,7 @@ private fun GenreReview() {
                                 )
                             }
                         }
-                        group.songs.forEach { song -> GenreReviewRow(song, releaseId.takeIf { page?.switched == true }, genres, genreName) }
+                        group.songs.forEach { song -> GenreReviewRow(song, releaseId, genres, genreName) }
                     }
                     if (page != null && page.total > page.groups.size) {
                         Text(
