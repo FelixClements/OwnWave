@@ -5,7 +5,7 @@ import { CardGrid, StationCard } from '@/components/media';
 import { StationEditor } from '@/components/StationEditor';
 import { Button, Empty, Spinner, Tabs } from '@/components/ui';
 
-type Filter = 'all' | 'genre' | 'shared' | 'mine';
+type Filter = 'all' | 'genre' | 'style' | 'shared' | 'mine';
 
 export function StationsPage() {
   const { data, isLoading } = useStations();
@@ -15,7 +15,8 @@ export function StationsPage() {
   const all = data ?? [];
   const matches: Record<Filter, (s: (typeof all)[number]) => boolean> = {
     all: () => true,
-    genre: (s) => s.kind === 'genre',
+    genre: (s) => s.kind === 'genre' && !s.parent_genre,
+    style: (s) => !!s.parent_genre,
     shared: (s) => s.shared && s.kind !== 'genre',
     mine: (s) => !s.shared,
   };
@@ -36,6 +37,7 @@ export function StationsPage() {
           tabs={[
             { id: 'all', label: 'All', count: all.length },
             { id: 'genre', label: 'Genres', count: all.filter(matches.genre).length },
+            { id: 'style', label: 'Styles', count: all.filter(matches.style).length },
             { id: 'shared', label: 'Shared', count: all.filter(matches.shared).length },
             { id: 'mine', label: 'Yours', count: all.filter(matches.mine).length },
           ]}
@@ -49,8 +51,8 @@ export function StationsPage() {
         </CardGrid>
       ) : (
         <Empty icon={<Radio className="h-12 w-12" />} title="Nothing here yet">
-          A station plays the songs of one or more playlists that are in your library, optionally only some genres. Each main genre
-          gets its own station once enough of your playlist songs are in it.
+          A station plays the songs of one or more playlists that are in your library, optionally only some genres. Each genre and
+          style gets its own station once enough of your library's songs are in it.
         </Empty>
       )}
       <StationEditor open={creating} onClose={() => setCreating(false)} />

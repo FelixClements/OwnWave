@@ -24,6 +24,14 @@ _Avoid_: station genre, family, category
 A narrower kind of music within one genre, such as Deep House under House or Black Metal under Metal.
 _Avoid_: subgenre, substyle
 
+**Genre station**:
+A shared station OwnWave makes for a genre once enough songs have it as their genre (shown from 25 songs, hidden below 20). It plays every such song of the library; unsure songs are on none.
+_Avoid_: auto station, library station
+
+**Style station**:
+A genre station for a style: it plays every song whose style is that style, under the same threshold. It is listed on its genre's page, after the genre's own station. Songs with a genre but no style are only on the genre station.
+_Avoid_: substation, sub-genre station
+
 **Fence**:
 The set of genres a song may still end up in, narrowed by weak hints such as a broad tag. Nothing outside a song's fence can become its genre.
 _Avoid_: constraint, filter, allowed genres
@@ -37,7 +45,7 @@ A genre tag that names only a wide area (such as "Electronic", "Pop/Rock" or "Da
 _Avoid_: generic tag
 
 **Correction**:
-An admin's choice of genre for one song or for all of an artist's songs. It beats every other source.
+An admin's choice of genre for one song, for all songs of a release, or for all of an artist's songs. It beats every other source; the most specific one wins.
 _Avoid_: override, manual genre
 
 **Trusted label**:
@@ -52,9 +60,17 @@ _Avoid_: primary source, authoritative source
 A source that only narrows a song's fence and never picks its genre: a broad tag, the artist's genres, or Last.fm tags.
 _Avoid_: hint, secondary source
 
+**Outside source**:
+A web service whose genres are looked up by ID only and cached: MusicBrainz, Discogs and Last.fm. Each can be switched off, and Discogs and Last.fm need a key; the admin "Outside sources" page overrides the server's environment for both.
+_Avoid_: external API, provider, online source
+
 **Classifier**:
 The part that guesses a song's genre from how it sounds, by comparing it with similar-sounding songs that have trusted labels. It only decides when no strong source does.
 _Avoid_: audio model, AI, genre model
+
+**Release lean**:
+A song with no strong source takes the genre that at least 70% of its release's decided songs share, if that genre is inside its fence. Compilations never lean.
+_Avoid_: album vote, album genre
 
 **Unsure song**:
 A song whose sources do not agree well enough to pick a genre. It joins no genre station until an admin reviews it.

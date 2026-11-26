@@ -37,9 +37,36 @@ GENRE_MODEL_DIR = os.environ.get("GENRE_MODEL_DIR", "/app/models")
 # Length of each of the three analysis windows (at 20%, 50% and 75% of a track).
 GENRE_WINDOW_SECONDS = float(os.environ.get("GENRE_WINDOW_SECONDS", "20"))
 
-# Artist genre tags from musicbrainz.org (sends artist names to MusicBrainz).
+# Genres from musicbrainz.org: artist tags (sends artist names) and recording,
+# release and release group genres (sends the files' MusicBrainz ids).
 MUSICBRAINZ_ENABLED = os.environ.get("MUSICBRAINZ_ENABLED", "true").lower() == "true"
 MUSICBRAINZ_URL = os.environ.get("MUSICBRAINZ_URL", "https://musicbrainz.org")
 MUSICBRAINZ_USER_AGENT = os.environ.get(
     "MUSICBRAINZ_USER_AGENT", "OwnWave/1.0 ( https://github.com/FelixClements/OwnWave )"
 )
+
+# User-Agent for the outside genre sources (MusicBrainz, Discogs, Last.fm).
+OUTSIDE_USER_AGENT = MUSICBRAINZ_USER_AGENT
+
+# Release genres and styles from Discogs, found through the MusicBrainz
+# release's Discogs link. Needs a Discogs personal access token
+# (discogs.com > Settings > Developers); off while it is unset. The admin
+# "Outside sources" page can set both; its values override these.
+DISCOGS_TOKEN = os.environ.get("DISCOGS_TOKEN", "").strip()
+DISCOGS_ENABLED = os.environ.get("DISCOGS_ENABLED", "true").lower() == "true"
+
+# Track tags from Last.fm, matched by exact artist and title (sends them to
+# Last.fm). Needs a Last.fm API key (last.fm/api/account/create); off while
+# it is unset. The admin "Outside sources" page can set both; its values
+# override these.
+LASTFM_API_KEY = os.environ.get("LASTFM_API_KEY", "").strip()
+LASTFM_ENABLED = os.environ.get("LASTFM_ENABLED", "true").lower() == "true"
+
+# Key material for the secrets saved on the admin "Outside sources" page
+# (encrypted at rest, see secret_box). Optional: without it the key is
+# derived from ANALYTICS_API_SECRET. Changing either makes saved secrets
+# unreadable until they are saved again.
+SECRETS_KEY = os.environ.get("SECRETS_KEY", "").strip()
+
+# Outside genres are fetched again once they are this many days old.
+OUTSIDE_GENRES_MAX_AGE_DAYS = int(os.environ.get("OUTSIDE_GENRES_MAX_AGE_DAYS", "180"))

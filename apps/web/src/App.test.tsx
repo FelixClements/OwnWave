@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter } from 'react-router-dom';
@@ -274,6 +274,41 @@ describe('App', () => {
     expect(within(main).queryByText('Bunker Techno')).not.toBeInTheDocument();
   });
 
+  it('shows style stations under their genre', async () => {
+    const house: Station = { ...genreStation, id: 'g2', name: 'House', genres: ['house'] };
+    const deep: Station = { ...genreStation, id: 'g3', name: 'Deep House', genres: ['deep_house'], parent_genre: 'house' };
+    signedIn({
+      'GET /api/stations': () => ({ stations: [station, genreStation, house, deep] }),
+      'GET /api/browse': (_body, url) =>
+        url.searchParams.get('node') === 'genre:house'
+          ? {
+              id: 'genre:house',
+              title: 'House',
+              items: [house, deep].map((s) => ({ id: `station:${s.id}`, title: s.name, browsable: false, playable: true, station_id: s.id })),
+            }
+          : { id: 'recent', title: 'Recently played', items: [] },
+    });
+    renderAt('/genre/house');
+    const styles = await screen.findByRole('heading', { name: 'Styles' });
+    const section = styles.closest('section')!;
+    expect(within(section).getByText('Deep House')).toBeInTheDocument();
+    expect(within(section).queryByText('House')).not.toBeInTheDocument();
+    const page = screen.getByRole('main');
+    expect(within(page).getAllByText('House').length).toBeGreaterThan(0);
+    expect(within(page).queryByText('Techno')).not.toBeInTheDocument();
+
+    // The Stations page keeps genres and styles apart.
+    cleanup();
+    renderAt('/stations');
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('tab', { name: /Styles/ }));
+    const main = screen.getByRole('main');
+    expect(within(main).getByText('Deep House')).toBeInTheDocument();
+    expect(within(main).queryByText('Techno')).not.toBeInTheDocument();
+    await user.click(screen.getByRole('tab', { name: /Genres/ }));
+    expect(within(main).queryByText('Deep House')).not.toBeInTheDocument();
+  });
+
   it('runs the genre stations and the pipeline from admin', async () => {
     let settings = {
       enabled: true,
@@ -324,6 +359,83 @@ describe('App', () => {
     expect(screen.getByText('Genres scored', { selector: 'span' })).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: /Refresh now/ }));
     await waitFor(() => expect(calls.some((c) => c.method === 'POST' && c.path === '/api/admin/pipeline/refresh')).toBe(true));
+  });
+
+  it('saves and tests outside source keys without ever showing them', async () => {
+    const match = (covered: number, found: number) => ({ covered, looked_up: found + 1, found, not_found: 1, due: covered - found - 1 });
+    const noYield = { found_rows: 0, with_genres: 0, values: 0, translated_values: 0, untranslated_values: 0, top: [], untranslated: [] };
+    const source = (id: string, name: string, extra: object) => ({
+      source: id,
+      name,
+      state: 'on',
+      enabled: true,
+      enabled_from: 'env',
+      env_switch: `${id.toUpperCase()}_ENABLED`,
+      key: null,
+      running: false,
+      queued: false,
+      requests_per_run: 100,
+      last_run: null,
+      last_refresh: null,
+      songs: match(10, 5),
+      releases: match(4, 2),
+      genre_yield: noYield,
+      ...extra,
+    });
+    let discogsKey: object = { set: false, source: null, last4: null, unreadable: false, env_var: 'DISCOGS_TOKEN' };
+    const status = () => ({
+      library: { songs: 20, releases: 5 },
+      max_age_days: 180,
+      sources: [
+        source('musicbrainz', 'MusicBrainz', {
+          genre_yield: { ...noYield, found_rows: 4, with_genres: 3, values: 2, translated_values: 1, untranslated_values: 1,
+            top: [{ name: 'techno', kind: 'genre', rows: 3, translated_to: 'Techno' }],
+            untranslated: [{ name: 'zzz', kind: 'genre', rows: 1, translated_to: null }] },
+        }),
+        source('discogs', 'Discogs', { state: (discogsKey as { set: boolean }).set ? 'on' : 'missing_key', key: discogsKey }),
+        source('lastfm', 'Last.fm', {
+          state: 'refused_key',
+          key: { set: true, source: 'env', last4: 'abcd', unreadable: false, env_var: 'LASTFM_API_KEY' },
+          last_run: { status: 'refused_key', requests: 3, retries: 2, stored: 0, failures: 0, more: false, at: '2026-11-03T10:00:00Z' },
+        }),
+      ],
+    });
+    const calls = signedIn({
+      'GET /api/admin/outside-sources': status,
+      'POST /api/admin/outside-sources/settings': (body) => {
+        if ((body as { key?: string }).key) discogsKey = { set: true, source: 'page', last4: 'wxyz', unreadable: false, env_var: 'DISCOGS_TOKEN' };
+        return { status: 'saved' };
+      },
+      'POST /api/admin/outside-sources/test': () => ({ ok: true, message: 'Discogs accepted the token.' }),
+      'POST /api/admin/outside-genres/refetch': () => ({ status: 'queued' }),
+    });
+    renderAt('/settings/outside-sources');
+    const user = userEvent.setup();
+    expect(await screen.findByText('Missing key')).toBeInTheDocument();
+    expect(screen.getByText('Key refused')).toBeInTheDocument();
+    expect(screen.getByText('From the environment (LASTFM_API_KEY), ends in abcd.')).toBeInTheDocument();
+    expect(screen.getByText(/→ Techno/)).toBeInTheDocument();
+    expect(screen.getByText(/2 requests retried because the service was busy/)).toBeInTheDocument();
+
+    const input = screen.getByLabelText('New Discogs personal access token');
+    expect(input).toHaveAttribute('type', 'password');
+    await user.type(input, 'fake-token-0000wxyz');
+    await user.click(screen.getByRole('button', { name: 'Test this Discogs key' }));
+    expect(await screen.findByText(/Discogs accepted the token/)).toBeInTheDocument();
+    expect(calls.find((c) => c.path === '/api/admin/outside-sources/test')?.body).toEqual({ source: 'discogs', key: 'fake-token-0000wxyz' });
+
+    await user.click(screen.getByRole('button', { name: 'Save the Discogs key' }));
+    expect(await screen.findByText('Saved on this page, ends in wxyz.')).toBeInTheDocument();
+    expect(calls.find((c) => c.path === '/api/admin/outside-sources/settings')?.body).toEqual({ source: 'discogs', key: 'fake-token-0000wxyz' });
+    expect(input).toHaveValue('');
+    expect(document.body.textContent).not.toContain('fake-token-0000wxyz');
+
+    await user.click(screen.getByRole('switch', { name: 'MusicBrainz on' }));
+    await waitFor(() =>
+      expect(calls.filter((c) => c.path === '/api/admin/outside-sources/settings').at(-1)?.body).toEqual({ source: 'musicbrainz', enabled: false }),
+    );
+    await user.click(screen.getByRole('button', { name: /Fetch again/ }));
+    await waitFor(() => expect(calls.some((c) => c.path === '/api/admin/outside-genres/refetch')).toBe(true));
   });
 
   it('hides a song on a station and brings it back', async () => {
@@ -432,31 +544,76 @@ describe('App', () => {
   });
 
   it('reviews and corrects genres from admin', async () => {
-    let corrections: unknown[] = [];
+    let corrections: Record<string, unknown>[] = [];
+    const song = { track_id: 't1', title: 'Domino', artist: 'Oxia', genre: null, source: 'unsure', unsure_reason: 'classifier_unsure', suggestion: 'house', hidden_by: 2, priority: 1 };
     const calls = signedIn({
       'GET /api/admin/health': () => ({ database: 'ok' }),
       'GET /api/admin/scans': () => ({ jobs: [] }),
       'GET /api/admin/users': () => ({ users: [admin] }),
       'GET /api/admin/genre-stations': () => ({ enabled: true, show_at: 25, hide_below: 20, genres: [] }),
       'GET /api/admin/pipeline': () => ({ runs: [] }),
+      'GET /api/admin/genre-overview': () => ({
+        songs: 40,
+        decided: 39,
+        unsure: 1,
+        flagged: 0,
+        to_review: 1,
+        genres: [
+          { id: 'techno', name: 'Techno', station: true, songs: 30, styles: [{ id: 'acid', name: 'Acid', station: true, songs: 4 }] },
+          { id: 'house', name: 'House & Disco', station: true, songs: 9, styles: [] },
+        ],
+        test_score: { labels: 12, accuracy: 0.75, decides_at: 0.6, decides: 0.5, accuracy_when_deciding: 0.9 },
+      }),
       'GET /api/admin/genre-review': () => ({
-        items: [{ track_id: 't1', title: 'Domino', artist: 'Oxia', genre: 'techno', score: 0.3, hidden_by: 2, copies_disagree: true }],
+        total: 1,
+        songs: 1,
+        offset: 0,
+        limit: 20,
+        groups: [{ release_id: 'r1', release_title: 'Domino EP', release_artist: 'Oxia', compilation: false, priority: 1, songs: [song] }],
       }),
       'GET /api/admin/genre-corrections': () => ({ corrections }),
       'POST /api/admin/genre-corrections': (body) => {
-        corrections = [{ id: 'c1', artist: 'Oxia', genre: (body as { genre: string }).genre, created_at: '2026-11-05T00:00:00Z' }];
+        const b = body as { release_id?: string; genre: string; style?: string };
+        corrections = [{ id: 'c1', scope: 'release', release_id: b.release_id, release_title: 'Domino EP', release_artist: 'Oxia', genre: b.genre, style: b.style, created_at: '2026-11-05T00:00:00Z' }];
+        return { corrections, saved_id: 'c1' };
+      },
+      'DELETE /api/admin/genre-corrections/{id}': () => {
+        corrections = [];
         return { corrections };
       },
+      'POST /api/admin/releases/{id}/outside-genres/refetch': () => ({ status: 'queued' }),
     });
+    // The old review address opens the Review tab.
     renderAt('/settings/genre-review');
     const user = userEvent.setup();
     expect(await screen.findByText('Hidden by 2 listeners')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Looks right' })).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Set for this artist' })).not.toBeInTheDocument();
-    await user.selectOptions(await screen.findByRole('combobox', { name: 'Genre of Domino' }), 'house');
-    await user.click(screen.getByRole('button', { name: 'Set for this artist' }));
-    await waitFor(() => expect(calls.find((c) => c.method === 'POST' && c.path === '/api/admin/genre-corrections')?.body).toEqual({ artist: 'Oxia', genre: 'house' }));
+    expect(screen.getByText('Domino EP')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Accept House & Disco' })).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: /Refetch outside sources/ }));
+    await waitFor(() => expect(calls.some((c) => c.method === 'POST' && c.path === '/api/admin/releases/r1/outside-genres/refetch')).toBe(true));
+
+    // Correct the whole release to a style of techno.
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Genre of Domino' }), 'techno');
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Style of Domino' }), 'acid');
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Correct for' }), 'release');
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() =>
+      expect(calls.find((c) => c.method === 'POST' && c.path === '/api/admin/genre-corrections')?.body).toEqual({ release_id: 'r1', genre: 'techno', style: 'acid' }),
+    );
+    expect(await screen.findByText(/Saved Acid for its release/)).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Undo' }));
+    await waitFor(() => expect(calls.some((c) => c.method === 'DELETE' && c.path === '/api/admin/genre-corrections/c1')).toBe(true));
+
+    // The Overview shows the test score; Corrections lists and undoes them.
+    await user.click(screen.getByRole('tab', { name: /Overview/ }));
+    expect(await screen.findByText('Test score')).toBeInTheDocument();
+    expect(screen.getByText('90%')).toBeInTheDocument();
+    corrections = [{ id: 'c2', scope: 'artist', artist: 'Oxia', genre: 'techno', created_at: '2026-11-05T00:00:00Z' }];
+    await user.click(screen.getByRole('tab', { name: /Corrections/ }));
     expect(await screen.findByText('Everything by Oxia')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Undo the correction of Everything by Oxia' }));
+    await waitFor(() => expect(calls.some((c) => c.method === 'DELETE' && c.path === '/api/admin/genre-corrections/c2')).toBe(true));
   });
 
   it('lists the missing songs of a playlist', async () => {

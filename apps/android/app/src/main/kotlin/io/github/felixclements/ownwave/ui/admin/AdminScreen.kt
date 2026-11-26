@@ -59,7 +59,7 @@ import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import io.github.felixclements.ownwave.api.models.CreateInviteRequest
-import io.github.felixclements.ownwave.api.models.GenreReviewItem
+import io.github.felixclements.ownwave.api.models.GenreReviewSong
 import io.github.felixclements.ownwave.api.models.GenreStation
 import io.github.felixclements.ownwave.api.models.GenreStationSettings
 import io.github.felixclements.ownwave.api.models.PipelineRun
@@ -469,31 +469,70 @@ private fun GenreStationRow(g: GenreStation, settings: GenreStationSettings) {
 
 // --- Genre review -------------------------------------------------------------------------------
 
+/** Why a song is on the review queue, as on the web's admin Genres page. */
+private fun reviewReason(song: GenreReviewSong): String? = when {
+    song.hiddenBy > 0 -> "Hidden by ${Format.plural(song.hiddenBy, "listener")}"
+    song.unsureReason != null -> "Unsure: " + song.unsureReason!!.replace('_', ' ')
+    song.reviewReason == "classifier_disagrees" -> "Classifier disagrees with the tag"
+    else -> null
+}
+
 @Composable
 private fun GenreReview() {
-    val review = rememberQuery("genre-review") { apiBody { apis.admin.getGenreReview() }.map { it.items } }
+    // The first page of release groups; the full queue, styles and the "why" live on the web's admin Genres page.
+    val review = rememberQuery("genre-review") { apiBody { apis.admin.getGenreReview(offset = 0, limit = 10) } }
     val corrections = rememberQuery("genre-corrections") { apiBody { apis.admin.listGenreCorrections() }.map { it.corrections } }
     val genreData = rememberGenres()
     val genreName = rememberGenreNames()
     val remove = rememberMutation()
+    val refetch = rememberMutation()
     val genres = genreData.data?.genres.orEmpty().filter { it.station }.map { it.genre to it.name }
     CardBox("Genre review") {
         Column {
             Text(
-                "Songs most worth checking: those people hid on a genre station, then those whose copies disagree, then the least certain. A correction replaces the scored genre at the next scoring, which starts right away.",
+                "Songs most worth checking, grouped by release: those listeners hid on a genre station, then unsure songs, then songs whose tag the classifier disagrees with, then the least sure. Every correction teaches the classifier and rescores right away.",
                 fontSize = 14.sp,
                 color = Ow.Muted,
             )
             when {
                 review.loading -> Spinner()
                 else -> {
-                    ErrorText(review.error)
-                    val items = review.data.orEmpty()
-                    if (review.data != null && items.isEmpty()) Text("Nothing to check.", fontSize = 14.sp, color = Ow.Muted, modifier = Modifier.padding(vertical = 16.dp))
-                    // The web caps this list's height; on a phone the page scrolls, so show the first 20.
-                    items.take(20).forEachIndexed { i, item ->
+                    ErrorText(review.error ?: refetch.error)
+                    val page = review.data
+                    if (page != null && page.groups.isEmpty()) Text("Nothing to check.", fontSize = 14.sp, color = Ow.Muted, modifier = Modifier.padding(vertical = 16.dp))
+                    page?.groups.orEmpty().forEachIndexed { i, group ->
                         if (i > 0) HorizontalDivider(color = Ow.Line)
-                        GenreReviewRow(item, genres, genreName)
+                        val releaseId = group.releaseId
+                        Row(Modifier.padding(top = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                if (releaseId == null) "Song without a release" else "${group.releaseTitle} · ${if (group.compilation) "Compilation" else group.releaseArtist ?: "Unknown artist"}",
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = Ow.Muted,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.weight(1f),
+                            )
+                            if (releaseId != null) {
+                                OwIconButton(
+                                    Icons.Default.Refresh,
+                                    "Refetch outside sources for ${group.releaseTitle}",
+                                    { refetch.run<Any?>(tag = releaseId) { apiCall { apis.admin.refetchReleaseOutsideGenres(UUID.fromString(releaseId)) } } },
+                                    enabled = !refetch.pending,
+                                    size = 32.dp,
+                                    iconSize = 16.dp,
+                                )
+                            }
+                        }
+                        group.songs.forEach { song -> GenreReviewRow(song, releaseId, genres, genreName) }
+                    }
+                    if (page != null && page.total > page.groups.size) {
+                        Text(
+                            "${Format.plural(page.total - page.groups.size, "more release")} on the web's admin Genres page.",
+                            fontSize = 13.sp,
+                            color = Ow.Muted,
+                            modifier = Modifier.padding(top = 8.dp),
+                        )
                     }
                 }
             }
@@ -504,10 +543,19 @@ private fun GenreReview() {
             if (corrections.data != null && list.isEmpty()) Text("None yet.", fontSize = 14.sp, color = Ow.Muted)
             list.forEachIndexed { i, c ->
                 if (i > 0) HorizontalDivider(color = Ow.Line)
-                val what = c.artist?.let { "Everything by $it" } ?: "${c.trackTitle} · ${c.trackArtist ?: "Unknown artist"}"
+                val what = when {
+                    c.artist != null -> "Everything by ${c.artist}"
+                    c.releaseId != null -> "${c.releaseTitle ?: "Release"} · ${c.releaseArtist ?: "Unknown artist"}"
+                    else -> "${c.trackTitle} · ${c.trackArtist ?: "Unknown artist"}"
+                }
                 Row(Modifier.padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
                     Text(what, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
-                    Text(genreName(c.genre), fontSize = 14.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(horizontal = 8.dp))
+                    Text(
+                        genreName(c.genre) + (c.style?.let { " · ${genreName(it)}" } ?: ""),
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        modifier = Modifier.padding(horizontal = 8.dp),
+                    )
                     OwIconButton(
                         Icons.Default.Delete,
                         "Remove the correction of $what",
@@ -522,19 +570,23 @@ private fun GenreReview() {
     }
 }
 
+/** One song of the queue; [releaseId] is set when its release can be corrected (after the genre v2 switch). */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun GenreReviewRow(item: GenreReviewItem, genres: List<Pair<String, String>>, genreName: (String) -> String) {
+private fun GenreReviewRow(song: GenreReviewSong, releaseId: String?, genres: List<Pair<String, String>>, genreName: (String) -> String) {
     val save = rememberMutation()
-    var genre by remember(item.trackId, item.genre) { mutableStateOf(item.genre) }
+    var genre by remember(song.trackId, song.genre) { mutableStateOf(song.genre ?: song.suggestion) }
     var open by remember { mutableStateOf(false) }
+    val pick = genre
     Column(Modifier.padding(vertical = 12.dp)) {
-        Text(item.title, fontSize = 14.sp, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
-        Text(item.artist ?: "Unknown artist", fontSize = 14.sp, color = Ow.Muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
-        if (item.hiddenBy > 0 || item.copiesDisagree) {
+        Text(song.title, fontSize = 14.sp, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Text(song.artist ?: "Unknown artist", fontSize = 14.sp, color = Ow.Muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        val reason = reviewReason(song)
+        val suggestion = song.suggestion
+        if (reason != null || suggestion != null) {
             Row(Modifier.padding(top = 4.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                if (item.hiddenBy > 0) Badge("Hidden by ${Format.plural(item.hiddenBy, "listener")}")
-                if (item.copiesDisagree) Badge("Copies disagree")
+                reason?.let { Badge(it) }
+                suggestion?.let { Badge("Leans ${genreName(it)}") }
             }
         }
         FlowRow(
@@ -554,32 +606,42 @@ private fun GenreReviewRow(item: GenreReviewItem, genres: List<Pair<String, Stri
                         .padding(start = 10.dp, end = 4.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Text(genreName(genre), fontSize = 14.sp)
+                    Text(pick?.let(genreName) ?: "Pick a genre", fontSize = 14.sp)
                     Icon(Icons.Default.ExpandMore, null, tint = Ow.Muted, modifier = Modifier.size(18.dp))
                 }
                 DropdownMenu(expanded = open, onDismissRequest = { open = false }, containerColor = Ow.Raised) {
                     genres.forEach { (id, name) ->
-                        DropdownMenuItem(text = { Text(name, color = if (id == genre) Ow.Accent else Ow.Ink) }, onClick = {
+                        DropdownMenuItem(text = { Text(name, color = if (id == pick) Ow.Accent else Ow.Ink) }, onClick = {
                             genre = id
                             open = false
                         })
                     }
                 }
             }
-            OwButton(
-                if (genre == item.genre) "Looks right" else "Set for this song",
-                { save.run<Any?>(tag = "song") { apiCall { apis.admin.saveGenreCorrection(SaveGenreCorrectionRequest(genre = genre, trackId = item.trackId)) } } },
-                small = true,
-                loading = save.pending && save.tag == "song",
-            )
-            val artist = item.artist
-            if (artist != null && genre != item.genre) {
+            if (pick != null) {
                 OwButton(
-                    "Set for this artist",
-                    { save.run<Any?>(tag = "artist") { apiCall { apis.admin.saveGenreCorrection(SaveGenreCorrectionRequest(genre = genre, artist = artist)) } } },
+                    if (pick == song.genre) "Looks right" else "Set for this song",
+                    { save.run<Any?>(tag = "song") { apiCall { apis.admin.saveGenreCorrection(SaveGenreCorrectionRequest(genre = pick, trackId = song.trackId)) } } },
                     small = true,
-                    loading = save.pending && save.tag == "artist",
+                    loading = save.pending && save.tag == "song",
                 )
+                if (releaseId != null) {
+                    OwButton(
+                        "Set for this release",
+                        { save.run<Any?>(tag = "release") { apiCall { apis.admin.saveGenreCorrection(SaveGenreCorrectionRequest(genre = pick, releaseId = releaseId)) } } },
+                        small = true,
+                        loading = save.pending && save.tag == "release",
+                    )
+                }
+                val artist = song.artist
+                if (artist != null && pick != song.genre) {
+                    OwButton(
+                        "Set for this artist",
+                        { save.run<Any?>(tag = "artist") { apiCall { apis.admin.saveGenreCorrection(SaveGenreCorrectionRequest(genre = pick, artist = artist)) } } },
+                        small = true,
+                        loading = save.pending && save.tag == "artist",
+                    )
+                }
             }
         }
         ErrorText(save.error)

@@ -14,7 +14,7 @@ from typing import Dict, List, Optional, Set, Tuple
 import psycopg
 
 from audio_metadata import is_supported_audio_file
-from db import delete_tracks
+from db import delete_tracks, refresh_releases
 
 log = logging.getLogger(__name__)
 
@@ -100,20 +100,35 @@ def prune_library(
     with conn.cursor() as cur:
         for old, moved in pairs:
             # Drop the freshly imported duplicate, then point the old row
-            # (which owns history and feedback) at the new location.
-            cur.execute(
-                "DELETE FROM tracks WHERE id = %s RETURNING path, file_size, file_mtime",
-                (moved["id"],),
-            )
-            path, file_size, file_mtime = cur.fetchone()
+            # (which owns history and feedback) at the new location. The
+            # release and ids come from the new file: a release without a
+            # MusicBrainz id belongs to the file's folder.
             cur.execute(
                 """
-                UPDATE tracks
-                SET path = %s, file_size = %s, file_mtime = %s, updated_at = NOW()
-                WHERE id = %s
+                DELETE FROM tracks WHERE id = %s
+                RETURNING path, file_size, file_mtime, release_id, isrc,
+                          mb_recording_id, mb_artist_ids, tags_version
                 """,
-                (path, file_size, file_mtime, old["id"]),
+                (moved["id"],),
             )
+            path, file_size, file_mtime, release_id, isrc, mb_recording_id, mb_artist_ids, tags_version = (
+                cur.fetchone()
+            )
+            cur.execute(
+                """
+                UPDATE tracks t
+                SET path = %s, file_size = %s, file_mtime = %s, release_id = %s, isrc = %s,
+                    mb_recording_id = %s, mb_artist_ids = %s, tags_version = %s, updated_at = NOW()
+                FROM (SELECT release_id FROM tracks WHERE id = %s) old
+                WHERE t.id = %s
+                RETURNING old.release_id
+                """,
+                (
+                    path, file_size, file_mtime, release_id, isrc, mb_recording_id, mb_artist_ids,
+                    tags_version, old["id"], old["id"],
+                ),
+            )
+            refresh_releases(conn, {release_id, cur.fetchone()[0]})
 
     moved_ids = {old["id"] for old, _ in pairs}
     to_delete = [r["id"] for r in missing if r["id"] not in moved_ids]

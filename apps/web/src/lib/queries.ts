@@ -3,9 +3,9 @@ import { api, call, callAs } from '@/api/client';
 import type {
   AdminHealth,
   Feedback,
-  GenreCorrection,
   GenreReport,
   GenreStationSettings,
+  OutsideSource,
   QueueTrack,
   ScanStatus,
   ScanSummary,
@@ -42,9 +42,14 @@ export const keys = {
   genreReport: ['genreReport'] as const,
   users: ['users'] as const,
   genreStations: ['genreStations'] as const,
+  genreOverview: ['genreOverview'] as const,
   genreReview: ['genreReview'] as const,
+  genreReviewPage: (offset: number, limit: number) => ['genreReview', offset, limit] as const,
+  genreDecision: (trackId: string) => ['genreDecision', trackId] as const,
   genreCorrections: ['genreCorrections'] as const,
+  genreCorrectionSearch: (q: string) => ['genreCorrections', q] as const,
   pipeline: ['pipeline'] as const,
+  outsideSources: ['outsideSources'] as const,
 };
 
 // --- stations -----------------------------------------------------------
@@ -373,6 +378,42 @@ export const useGenreReport = (enabled: boolean) =>
     enabled,
   });
 
+// --- outside genre sources (admin) ------------------------------------
+
+export const useOutsideSources = () =>
+  useQuery({
+    queryKey: keys.outsideSources,
+    queryFn: () => call(api.GET('/api/admin/outside-sources')),
+    // Poll while a fetch is queued or running, so the counts move.
+    refetchInterval: (q) => (q.state.data?.sources.some((s) => s.running || s.queued) ? 5000 : false),
+  });
+
+type SourceId = OutsideSource['source'];
+
+/** Save a source's switch and/or key. `enabled: null` goes back to env; `key: null` removes the page key. */
+export function useUpdateOutsideSource() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: { source: SourceId; enabled?: boolean | null; key?: string | null }) =>
+      call(api.POST('/api/admin/outside-sources/settings', { body })),
+    onSettled: () => void qc.invalidateQueries({ queryKey: keys.outsideSources }),
+  });
+}
+
+/** One cheap real request to the source, with the typed key (not saved) or the key in use. */
+export const useTestOutsideSource = () =>
+  useMutation({
+    mutationFn: (body: { source: SourceId; key?: string | null }) => call(api.POST('/api/admin/outside-sources/test', { body })),
+  });
+
+export function useRefetchOutsideGenres() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => call(api.POST('/api/admin/outside-genres/refetch')),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: keys.outsideSources }),
+  });
+}
+
 export const useUsers = () =>
   useQuery({ queryKey: keys.users, queryFn: () => call(api.GET('/api/admin/users')).then((r) => r.users ?? []) });
 
@@ -415,25 +456,51 @@ export function useUpdateGenreStation() {
   });
 }
 
-export const useGenreReview = (enabled = true) =>
-  useQuery({ queryKey: keys.genreReview, queryFn: () => call(api.GET('/api/admin/genre-review')).then((r) => r.items), enabled });
+export const useGenreOverview = () => useQuery({ queryKey: keys.genreOverview, queryFn: () => call(api.GET('/api/admin/genre-overview')) });
 
-export const useGenreCorrections = () =>
-  useQuery({ queryKey: keys.genreCorrections, queryFn: () => call(api.GET('/api/admin/genre-corrections')).then((r) => r.corrections) });
+/** One page of the review queue: `limit` release groups from `offset`. */
+export const useGenreReview = (offset = 0, enabled = true, limit = 20) =>
+  useQuery({
+    queryKey: keys.genreReviewPage(offset, limit),
+    queryFn: () => call(api.GET('/api/admin/genre-review', { params: { query: { offset, limit } } })),
+    placeholderData: keepPreviousData,
+    enabled,
+  });
 
-/** Saves or removes a correction. Scoring runs in the worker, so genre data changes a little later. */
+/** How the genre engine decided one song, with its "why" breakdown. */
+export const useGenreDecision = (trackId: string, enabled: boolean) =>
+  useQuery({
+    queryKey: keys.genreDecision(trackId),
+    queryFn: () => call(api.GET('/api/admin/tracks/{id}/genre-decision', { params: { path: { id: trackId } } })),
+    enabled,
+    retry: false,
+  });
+
+export const useGenreCorrections = (q = '') =>
+  useQuery({
+    queryKey: keys.genreCorrectionSearch(q),
+    queryFn: () => call(api.GET('/api/admin/genre-corrections', { params: { query: q ? { q } : {} } })).then((r) => r.corrections),
+    placeholderData: keepPreviousData,
+  });
+
+export type GenreCorrectionBody = { track_id?: string; release_id?: string; artist?: string; genre: string; style?: string };
+
+/**
+ * Saves or removes (undoes) a correction. Each one queues a rescore in the
+ * worker, so genres, the queue and stations change a little later.
+ */
 export function useGenreCorrectionActions() {
   const qc = useQueryClient();
-  const done = (corrections: { corrections: GenreCorrection[] }) => {
-    qc.setQueryData(keys.genreCorrections, corrections.corrections);
-    void qc.invalidateQueries({ queryKey: keys.genreReview });
+  const done = () => {
+    for (const key of [keys.genreCorrections, keys.genreReview, keys.genreOverview]) void qc.invalidateQueries({ queryKey: key });
     setTimeout(() => {
-      for (const key of [keys.genreReview, keys.genres, keys.genreStations, keys.stations]) void qc.invalidateQueries({ queryKey: key });
+      for (const key of [keys.genreReview, keys.genreOverview, ['genreDecision'], keys.genres, keys.genreStations, keys.stations])
+        void qc.invalidateQueries({ queryKey: key });
     }, 5000);
   };
   return {
     save: useMutation({
-      mutationFn: (body: { track_id?: string; artist?: string; genre: string }) => call(api.POST('/api/admin/genre-corrections', { body })),
+      mutationFn: (body: GenreCorrectionBody) => call(api.POST('/api/admin/genre-corrections', { body })),
       onSuccess: done,
     }),
     remove: useMutation({
@@ -442,6 +509,12 @@ export function useGenreCorrectionActions() {
     }),
   };
 }
+
+/** Fetch one release's outside genres again (the worker rescores when they bring new ones). */
+export const useRefetchReleaseGenres = () =>
+  useMutation({
+    mutationFn: (releaseId: string) => call(api.POST('/api/admin/releases/{id}/outside-genres/refetch', { params: { path: { id: releaseId } } })),
+  });
 
 export const usePipeline = () =>
   useQuery({ queryKey: keys.pipeline, queryFn: () => call(api.GET('/api/admin/pipeline')), refetchInterval: 30_000 });

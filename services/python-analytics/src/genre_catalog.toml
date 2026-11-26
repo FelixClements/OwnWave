@@ -1,0 +1,521 @@
+# Genre catalog for the genre engine v2 (ADR 0008, glossary in CONTEXT.md).
+#
+# The genre list the owner approved on 2026-11-25 (issue #138), from the
+# offline run on a copy of the live library.
+# Edit this file, not the code: genre_catalog.py reads it, and the analytics
+# service writes it to station_genres at startup. The genre v2 switch
+# (migration 038_genre_v2_switch) was generated from it at the release and is
+# frozen; renaming or removing an id that stored data uses needs a migration.
+#
+# Two levels:
+#   genre  A station-sized kind of music (House). Listed in display order.
+#   style  A narrower kind inside exactly one genre (Deep House). Styles are
+#          Discogs styles.
+#
+# [[genre]] keys:
+#   id        Stable id (lowercase, a-z0-9_, starts with a letter, max 40).
+#   name      Display name.
+#   station   false: never offered as a station (default true).
+#   replaces  Old (v1) station genre ids whose user data moves to this genre
+#             at the switch. Every v1 id must appear exactly once.
+#   discogs   Discogs styles that stand for the genre as a whole, such as
+#             "Techno" for Techno. They give the genre without a style.
+#   styles    The genre's styles. A plain string is a Discogs style name and
+#             also the style's display name. An inline table
+#             { name = "...", discogs = ["..."] } names the style and lists
+#             the Discogs styles it stands for.
+#
+# A Discogs style written "Parent---Style" (the Discogs400 label form) only
+# matches under that Discogs genre. Use it when one Discogs style name means
+# different things under two Discogs genres (Electronic Hardcore is hard
+# dance, Rock Hardcore is punk). Without the Discogs genre such a name is
+# ambiguous and only fences.
+#
+# Style ids are made from the style name (Deep House -> deep_house) and may
+# not equal a genre id.
+
+version = "2026-11-25"
+
+[[genre]]
+id = "techno"
+name = "Techno"
+replaces = ["techno"]
+discogs = ["Techno"]
+styles = ["Acid", "Bleep", "Deep Techno", "Dub Techno", "Hard Techno", "Minimal", "Minimal Techno", "Schranz", "Tribal"]
+
+[[genre]]
+id = "house"
+name = "House & Disco"
+# Dance & Disco merged in (#138, owner approved 2026-11-25): on its own it had
+# 37 songs and the classifier never got its labels right.
+replaces = ["house", "dance"]
+discogs = ["House"]
+styles = [
+    "Acid House", "Beatdown", "Deep House", "Disco", "Disco Polo", "Electro House", "Euro House",
+    "Euro-Disco", "Eurobeat", "Eurodance", "Freestyle", "Garage House", "Ghetto House", "Hands Up",
+    "Hard House", "Hi NRG", "Hip-House", "Italo House", "Italo-Disco", "Italodance", "New Beat",
+    "Nu-Disco", "Progressive House", "Tech House", "Tribal House", "Tropical House",
+]
+
+[[genre]]
+id = "trance"
+name = "Trance"
+replaces = ["trance"]
+discogs = ["Trance"]
+styles = ["Goa Trance", "Hard Trance", "Progressive Trance", "Psy-Trance", "Tech Trance"]
+
+[[genre]]
+id = "drum_and_bass"
+name = "Drum & Bass and Bass Music"
+# Bass & Breaks merged in (#138, owner approved 2026-11-25). Drum n Bass is a
+# style here, not the genre as a whole: the style pick takes the strongest
+# Discogs400 style inside the genre, and without it most D&B songs got
+# Dubstep or Halftime.
+replaces = ["drum_and_bass", "bass"]
+styles = [
+    "Bass Music", "Bassline", "Big Beat", "Breakbeat", "Breaks", "Broken Beat", "Drum n Bass", "Dubstep",
+    "Ghetto", "Grime", "Halftime", "Juke", "Jungle", "Progressive Breaks", "Speed Garage", "UK Garage",
+]
+
+[[genre]]
+id = "hard_dance"
+name = "Hard Dance"
+replaces = ["hard_dance"]
+styles = [
+    { name = "Hardcore", discogs = ["Electronic---Hardcore"] },
+    "Donk", "Gabber", "Happy Hardcore", "Hardstyle", "Jumpstyle", "Makina", "Speedcore",
+]
+
+[[genre]]
+id = "synth"
+name = "Synth & Electro"
+replaces = ["synth"]
+# Chillwave moved here from Ambient & Chill (#138): it is how the audio model
+# hears this library's synthwave, and file tags list it with Synthwave.
+styles = [
+    "Chillwave", "Chiptune", "Darkwave", "EBM", "Electro", "Electroclash", "New Wave", "Synth-pop", "Synthwave",
+    "Vaporwave",
+]
+
+[[genre]]
+id = "ambient"
+name = "Ambient & Chill"
+replaces = ["ambient"]
+discogs = ["Ambient"]
+styles = [
+    "Berlin-School", "Dark Ambient", "Downtempo", "Drone", "Dungeon Synth", "Illbient",
+    "Modern Classical", "New Age", "Trip Hop",
+]
+
+[[genre]]
+id = "experimental"
+name = "Experimental"
+replaces = ["experimental"]
+discogs = ["Experimental"]
+styles = [
+    "Abstract", "Avantgarde", "Breakcore", "Glitch", "IDM", "Industrial", "Leftfield",
+    "Musique Concrète", "Noise", "Power Electronics", "Rhythmic Noise", "Sound Collage",
+]
+
+[[genre]]
+id = "hip_hop"
+name = "Hip Hop"
+replaces = ["hip_hop"]
+discogs = ["Hip Hop"]
+styles = [
+    "Boom Bap", "Bounce", "Britcore", "Cloud Rap", "Conscious", "Crunk", "Cut-up/DJ", "DJ Battle Tool",
+    "G-Funk", "Gangsta", "Hardcore Hip-Hop", "Horrorcore", "Instrumental", "Jazzy Hip-Hop", "Miami Bass",
+    "Pop Rap", "Ragga HipHop", "Screw", "Thug Rap", "Trap", "Turntablism",
+]
+
+[[genre]]
+id = "soul"
+name = "Soul, Funk & R&B"
+replaces = ["soul"]
+discogs = ["Soul"]
+styles = [
+    "Boogie", "Contemporary R&B", "Free Funk", "Funk", "Gospel", "Neo Soul", "New Jack Swing", "P.Funk",
+    "Psychedelic", "Rhythm & Blues", "RnB/Swing", "Swingbeat", "UK Street Soul",
+]
+
+[[genre]]
+id = "pop"
+name = "Pop"
+replaces = ["pop"]
+styles = [
+    "Ballad", "Bollywood", "Bubblegum", "Chanson", "Dance-pop", "Europop", "Light Music", "Music Hall",
+    "Novelty", "Parody", "Power Pop", "Schlager", "Vocal", "Yé-Yé",
+]
+
+[[genre]]
+id = "asian_pop"
+name = "K-pop & J-pop"
+# Split from Pop (#138, owner approved 2026-11-25). No v1 genre maps here.
+replaces = []
+styles = ["City Pop", "J-pop", "K-pop", "Kayōkyoku"]
+
+[[genre]]
+id = "rock"
+name = "Rock & Alternative"
+# #138 proposal: Indie & Alternative merged in. The classifier could not tell
+# indie from rock or pop (10% held-out accuracy, 0% when it decided).
+replaces = ["rock", "indie"]
+styles = [
+    "AOR", "Acid Rock", "Acoustic", "Alternative Rock", "Arena Rock", "Art Rock", "Beat", "Blues Rock",
+    "Brit Pop", "Classic Rock", "Coldwave", "Deathrock", "Doo Wop", "Dream Pop", "Emo", "Ethereal",
+    "Garage Rock", "Glam", "Goth Rock", "Grunge", "Hard Rock", "Indie Pop", "Indie Rock", "Krautrock",
+    "Lo-Fi", "Math Rock", "Mod", "No Wave", "Pop Rock", "Post Rock", "Post-Punk", "Prog Rock",
+    "Psychedelic Rock", "Pub Rock", "Rock & Roll", "Rockabilly", "Shoegaze", "Soft Rock", "Southern Rock",
+    "Space Rock", "Stoner Rock", "Surf", "Symphonic Rock", "Twist",
+]
+
+[[genre]]
+id = "metal"
+name = "Metal"
+replaces = ["metal"]
+styles = [
+    "Atmospheric Black Metal", "Black Metal", "Death Metal", "Deathcore", "Depressive Black Metal",
+    "Doom Metal", "Folk Metal", "Funeral Doom Metal", "Funk Metal", "Goregrind", "Gothic Metal",
+    "Grindcore", "Heavy Metal", "Melodic Death Metal", "Metalcore", "Nu Metal", "Pornogrind", "Post-Metal",
+    "Power Metal", "Progressive Metal", "Sludge Metal", "Speed Metal", "Technical Death Metal", "Thrash",
+    "Viking Metal",
+]
+
+[[genre]]
+id = "punk"
+name = "Punk & Hardcore"
+replaces = ["punk"]
+discogs = ["Punk"]
+styles = [
+    { name = "Hardcore Punk", discogs = ["Rock---Hardcore"] },
+    "Crust", "Melodic Hardcore", "Noisecore", "Oi", "Pop Punk", "Post-Hardcore", "Power Violence", "Psychobilly",
+]
+
+[[genre]]
+id = "jazz"
+name = "Jazz"
+replaces = ["jazz"]
+styles = [
+    "Acid Jazz", "Avant-garde Jazz", "Big Band", "Bop", "Contemporary Jazz", "Cool Jazz", "Dixieland",
+    "Easy Listening", "Free Improvisation", "Free Jazz", "Fusion", "Future Jazz", "Gypsy Jazz", "Hard Bop",
+    "Jazz-Funk", "Jazz-Rock", "Jazzdance", "Lounge", "Modal", "Post Bop", "Ragtime", "Smooth Jazz",
+    "Soul-Jazz", "Space-Age", "Swing",
+]
+
+[[genre]]
+id = "blues"
+name = "Blues"
+replaces = ["blues"]
+styles = [
+    "Boogie Woogie", "Chicago Blues", "Country Blues", "Delta Blues", "Electric Blues", "Harmonica Blues",
+    "Jump Blues", "Louisiana Blues", "Modern Electric Blues", "Piano Blues", "Texas Blues",
+]
+
+[[genre]]
+id = "classical"
+name = "Classical"
+replaces = ["classical"]
+discogs = ["Classical"]
+styles = [
+    "Baroque", "Choral", "Contemporary", "Impressionist", "Medieval", "Modern", "Neo-Classical",
+    "Neo-Romantic", "Opera", "Post-Modern", "Renaissance", "Romantic",
+]
+
+[[genre]]
+id = "folk"
+name = "Country & Folk"
+replaces = ["folk"]
+discogs = ["Folk"]
+styles = [
+    "Bluegrass", "Cajun", "Celtic", "Country", "Country Rock", "Folk Rock", "Hillbilly", "Honky Tonk",
+    "Neofolk", "Nordic",
+]
+
+[[genre]]
+id = "latin"
+name = "Latin"
+replaces = ["latin"]
+discogs = ["Latin"]
+styles = [
+    "Afro-Cuban", "Afro-Cuban Jazz", "Baião", "Batucada", "Beguine", "Bolero", "Boogaloo",
+    { name = "Bossa Nova", discogs = ["Bossa Nova", "Bossanova"] },
+    "Cha-Cha", "Charanga", "Compas", "Cubano", "Cumbia", "Descarga", "Forró", "Guaguancó", "Guajira",
+    "Guaracha", "Latin Jazz", "MPB", "Mambo", "Mariachi", "Merengue", "Norteño", "Nueva Cancion",
+    "Pachanga", "Porro", "Ranchera", "Reggaeton", "Rumba", "Salsa", "Samba", "Son", "Son Montuno",
+    "Tango", "Tejano", "Vallenato",
+]
+
+[[genre]]
+id = "reggae"
+name = "Reggae"
+replaces = ["reggae"]
+discogs = ["Reggae"]
+styles = ["Dancehall", "Dub", "Lovers Rock", "Ragga", "Reggae-Pop", "Rocksteady", "Roots Reggae", "Ska"]
+
+[[genre]]
+id = "world"
+name = "World"
+replaces = ["world"]
+styles = [
+    "African", "Afrobeat", "Calypso", "Canzone Napoletana", "Catalan Music", "Éntekhno", "Fado", "Flamenco",
+    "Highlife", "Hindustani", "Indian Classical", "Laïkó", "Pacific", "Polka", "Raï", "Romani", "Séga",
+    "Soca", "Soukous", "Volksmusik", "Zouk",
+]
+
+[[genre]]
+id = "soundtrack"
+name = "Soundtrack"
+replaces = ["soundtrack"]
+discogs = ["Soundtrack"]
+styles = ["Musical", "Score", "Theme"]
+
+[[genre]]
+id = "other"
+name = "Other"
+station = false
+replaces = ["other"]
+styles = [
+    "Audiobook", "Brass Band", "Comedy", "Dialogue", "Education", "Educational", "Field Recording",
+    "Interview", "Marches", "Military", "Monolog", "Nursery Rhymes", "Poetry", "Political", "Promotional",
+    "Radioplay", "Religious", "Spoken Word", "Story",
+]
+
+# --- Discogs genres -------------------------------------------------------------
+# A Discogs genre (the part before "---") names only a wide area: it fences a
+# song to these genres. Every Discogs style under it must land inside.
+[discogs_genres]
+"Blues" = ["blues", "soul"]
+"Brass & Military" = ["other"]
+"Children's" = ["other"]
+"Classical" = ["classical"]
+"Electronic" = [
+    "techno", "house", "trance", "drum_and_bass", "hard_dance", "synth", "ambient", "experimental",
+    "pop", "hip_hop", "jazz", "latin", "folk", "reggae",
+]
+"Folk, World, & Country" = ["folk", "world", "soul"]
+"Funk / Soul" = ["soul", "house", "world"]
+"Hip Hop" = ["hip_hop", "drum_and_bass", "ambient", "soul", "synth"]
+"Jazz" = ["jazz", "world", "latin"]
+"Latin" = ["latin"]
+"Non-Music" = ["other"]
+"Pop" = ["pop", "asian_pop", "rock"]
+"Reggae" = ["reggae", "world"]
+"Rock" = ["rock", "metal", "punk", "synth", "experimental", "folk", "reggae", "pop", "jazz"]
+"Stage & Screen" = ["soundtrack"]
+
+# --- Free text: file genre tags, MusicBrainz genres, Last.fm tags ------------------
+# Text is compared in a folded form: lowercase, accents removed, "&" read as
+# "and", other punctuation as a space ("Hip-Hop" -> "hip hop").
+# Checked in this order; the first that matches wins:
+#   1. ignore   Not a genre, or too vague to mean anything.
+#   2. broad    A broad tag: fences the song to these genres, picks none.
+#   3. aliases  Text -> style name or genre id.
+#   4. style names, their Discogs names, genre ids and names, genre Discogs names.
+#   5. rules    Regular expressions over the folded text, in order.
+[text]
+ignore = [
+    "other", "others", "misc", "miscellaneous", "unknown", "various", "none", "genre", "default",
+    "instrumental", "vocal", "acoustic", "contemporary", "modern", "beat", "abstract", "tribal",
+    "psychedelic", "conscious", "romantic", "modal", "fusion", "political", "religious", "education",
+    "educational", "story", "theme", "ghetto", "bounce", "screw", "gangsta", "novelty", "son", "mod",
+    "interview", "dialogue", "promotional", "monolog", "pacific", "seen live", "favorites",
+    "favourites", "female vocalists", "male vocalists", "christmas", "holiday",
+]
+
+[text.broad]
+"electronic" = ["techno", "house", "trance", "drum_and_bass", "hard_dance", "synth", "ambient", "experimental"]
+"electronique" = ["techno", "house", "trance", "drum_and_bass", "hard_dance", "synth", "ambient", "experimental"]
+"electronica" = ["techno", "house", "trance", "drum_and_bass", "hard_dance", "synth", "ambient", "experimental"]
+"electronic dance music" = ["techno", "house", "trance", "drum_and_bass", "hard_dance", "synth"]
+"dance and edm" = ["techno", "house", "trance", "drum_and_bass", "hard_dance", "synth"]
+"edm" = ["techno", "house", "trance", "drum_and_bass", "hard_dance", "synth"]
+# "Electro" alone in file tags is used for synthwave, techno, EDM and electro
+# alike (#138), so it only fences. Discogs' Electro style still names Synth.
+"electro" = ["synth", "techno", "house", "trance", "drum_and_bass", "hard_dance"]
+"electro dance" = ["techno", "house", "trance", "drum_and_bass", "hard_dance", "synth"]
+"dance electronic" = ["techno", "house", "trance", "drum_and_bass", "hard_dance", "synth", "ambient", "experimental", "pop", "asian_pop"]
+"electronic dance" = ["techno", "house", "trance", "drum_and_bass", "hard_dance", "synth", "ambient", "experimental", "pop", "asian_pop"]
+"dance" = ["techno", "house", "trance", "drum_and_bass", "hard_dance", "synth", "pop", "asian_pop"]
+"club" = ["techno", "house", "trance", "drum_and_bass", "hard_dance"]
+"pop rock" = ["pop", "asian_pop", "rock", "metal", "punk"]
+"rock pop" = ["pop", "asian_pop", "rock", "metal", "punk"]
+"alternative" = ["rock", "punk", "metal"]
+"alt" = ["rock", "punk", "metal"]
+"alternative and punk" = ["rock", "punk", "metal"]
+"hardcore" = ["hard_dance", "punk"]
+"progressive" = ["house", "trance", "rock", "metal"]
+"urban" = ["hip_hop", "soul"]
+"lo fi" = ["ambient", "hip_hop", "rock"]
+"lofi" = ["ambient", "hip_hop", "rock"]
+"singer songwriter" = ["folk", "pop", "asian_pop", "rock"]
+"easy listening" = ["pop", "asian_pop", "jazz", "soundtrack", "ambient"]
+"jazz blues" = ["jazz", "blues"]
+"blues jazz" = ["jazz", "blues"]
+"world music" = ["world", "latin", "reggae", "folk"]
+"musiques du monde" = ["world", "latin", "reggae", "folk"]
+
+[text.aliases]
+"drum and bass" = "Drum n Bass"
+"drum bass" = "Drum n Bass"
+"drum n bass" = "Drum n Bass"
+"drumnbass" = "Drum n Bass"
+"dnb" = "Drum n Bass"
+"d and b" = "Drum n Bass"
+"liquid funk" = "Drum n Bass"
+"neurofunk" = "Drum n Bass"
+"psytrance" = "Psy-Trance"
+"psychedelic trance" = "Psy-Trance"
+"goa" = "Goa Trance"
+"synthpop" = "Synth-pop"
+# Chill synthwave, not ambient (the "chill" rule would say ambient).
+"chillsynth" = "Synthwave"
+"hiphop" = "hip_hop"
+"rap" = "hip_hop"
+"hip hop rap" = "hip_hop"
+"rap hip hop" = "hip_hop"
+"r and b" = "soul"
+"rnb" = "soul"
+"r and b soul" = "soul"
+"soul and r and b" = "soul"
+"triphop" = "Trip Hop"
+"alt rock" = "Alternative Rock"
+"britpop" = "Brit Pop"
+"postrock" = "Post Rock"
+"post punk" = "Post-Punk"
+"2 step" = "UK Garage"
+"2step" = "UK Garage"
+"big room" = "house"
+"future bass" = "drum_and_bass"
+"riddim" = "Dubstep"
+"hard dance" = "hard_dance"
+"frenchcore" = "hard_dance"
+"kpop" = "K-pop"
+"jpop" = "J-pop"
+"americana" = "folk"
+"folk country" = "folk"
+"country folk" = "folk"
+"podcast" = "other"
+"video game" = "soundtrack"
+"ost" = "soundtrack"
+"film score" = "Score"
+"stage and screen" = "soundtrack"
+"latijnse muziek" = "latin"
+"amapiano" = "house"
+"hardcore punk" = "Hardcore Punk"
+
+# Patterns are Python regular expressions over the folded text.
+[[text.rule]]
+# Before everything else: "Industrial Metal", "Drone Metal", "Rap Metal" and
+# "Trap Metal" are metal, not experimental, ambient or hip hop.
+pattern = 'metal|thrash|grindcore|djent|deathcore|goregrind'
+genre = "metal"
+
+[[text.rule]]
+pattern = 'drum ?(n|and|n n) ?bass|\bdnb\b|\bd and b\b|jungle|liquid funk|neurofunk'
+genre = "drum_and_bass"
+
+[[text.rule]]
+pattern = 'hardstyle|gabber|happy hardcore|hardcore techno|frenchcore|hard dance|jumpstyle|speedcore|uptempo'
+genre = "hard_dance"
+
+[[text.rule]]
+pattern = 'techno|schranz|^minimal$'
+genre = "techno"
+
+[[text.rule]]
+pattern = 'house|big room'
+genre = "house"
+
+[[text.rule]]
+pattern = 'trance|\bpsy\b|\bgoa\b'
+genre = "trance"
+
+[[text.rule]]
+# "Garage Rock" and "Garage Punk" are not UK garage.
+pattern = 'dubstep|breakbeat|\bbreaks\b|uk garage|\bgarage\b(?! rock| punk)|grime|bass music|riddim|future bass|bassline'
+genre = "drum_and_bass"
+
+[[text.rule]]
+pattern = 'disco|eurodance|eurobeat|hi ?nrg|italo'
+genre = "house"
+
+[[text.rule]]
+pattern = 'synth ?pop|synthwave|darkwave|\belectro\b|electroclash|new wave|\bebm\b|vaporwave|retrowave|chiptune'
+genre = "synth"
+
+[[text.rule]]
+pattern = 'ambient|chill|downtempo|new age|trip ?hop|drone'
+genre = "ambient"
+
+[[text.rule]]
+pattern = 'experimental|\bidm\b|glitch|noise|industrial|avant'
+genre = "experimental"
+
+[[text.rule]]
+pattern = 'hip ?hop|\brap\b|\btrap\b|\bdrill\b|boom bap|\bg funk\b'
+genre = "hip_hop"
+
+[[text.rule]]
+pattern = '\br and b\b|\brnb\b|rhythm and blues|soul|funk|motown|gospel|new jack'
+genre = "soul"
+
+[[text.rule]]
+pattern = 'punk|hardcore|\boi\b|\bemo\b|screamo'
+genre = "punk"
+
+[[text.rule]]
+# Indie & Alternative is part of Rock & Alternative (#138).
+pattern = 'indie|alternative|\balt\b|grunge|shoegaze|post ?rock|brit ?pop|dream pop|math rock'
+genre = "rock"
+
+[[text.rule]]
+pattern = 'rock|rockabilly|surf'
+genre = "rock"
+
+[[text.rule]]
+pattern = 'jazz|swing|bebop|bossa'
+genre = "jazz"
+
+[[text.rule]]
+pattern = 'blues'
+genre = "blues"
+
+[[text.rule]]
+pattern = 'classical|baroque|opera|symphon|orchestr|chamber|romantic era'
+genre = "classical"
+
+[[text.rule]]
+pattern = 'country|folk|bluegrass|americana|celtic'
+genre = "folk"
+
+[[text.rule]]
+pattern = 'latin|reggaeton|salsa|cumbia|bachata|tango|samba|merengue|flamenco'
+genre = "latin"
+
+[[text.rule]]
+pattern = 'reggae|dancehall|\bska\b|\bdub\b|rocksteady'
+genre = "reggae"
+
+[[text.rule]]
+pattern = 'afro|world|african|bollywood|arabic|turkish|balkan'
+genre = "world"
+
+[[text.rule]]
+pattern = 'soundtrack|\bscore\b|musical|\bost\b|video game|film'
+genre = "soundtrack"
+
+[[text.rule]]
+pattern = 'pop|schlager|chanson|ballad'
+genre = "pop"
+
+[[text.rule]]
+pattern = 'spoken|comedy|audiobook|podcast|children|kids'
+genre = "other"
+
+# --- Per-source extras ------------------------------------------------------------
+# Last.fm tags are folksonomy: these extra tags are ignored there only.
+[lastfm]
+ignore = [
+    "british", "american", "german", "french", "love", "beautiful", "awesome",
+    "mellow", "party", "oldies", "classic", "cover", "covers", "live", "remix", "soundtrack of my life",
+]

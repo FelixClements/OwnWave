@@ -565,7 +565,7 @@ paths:
       parameters:
         - name: node
           in: query
-          description: "root (default), stations, recent, genres, playlists, genre:<id>, playlist:<id>"
+          description: "root (default), stations, recent, genres, playlists, genre:<id> (the genre's stations, then its style stations), playlist:<id>"
           schema: { type: string, default: root }
       responses:
         "200": { description: Node, content: { application/json: { schema: { $ref: "#/components/schemas/BrowseNode" } } } }
@@ -810,38 +810,83 @@ paths:
         "200": { $ref: "#/components/responses/GenreStationSettings" }
         "400": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
+  /api/admin/genre-overview:
+    get:
+      operationId: getGenreOverview
+      tags: [admin]
+      summary: Songs per genre and style, unsure and flagged songs, and the classifier's test score
+      description: |
+        Counts best copies (one per song). The test score is null until the
+        first rescore.
+      responses:
+        "200":
+          description: Overview
+          content: { application/json: { schema: { $ref: "#/components/schemas/GenreOverview" } } }
   /api/admin/genre-review:
     get:
       operationId: getGenreReview
       tags: [admin]
-      summary: Songs whose main genre is most worth checking
-      description: Most often hidden on a genre station first, then songs whose copies disagree, then the lowest scores. Corrected songs are left out.
+      summary: The genre review queue, grouped by release and paged by groups
+      description: |
+        Ranked (ADR 0008): songs listeners hid on a genre station, then unsure
+        songs, then classifier-versus-tag disagreements, then the least sure
+        songs on stations. A release's songs stay together, placed by its
+        best-ranked song; a song without a release is a group of its own.
+        Songs decided by a correction are never on it.
       parameters:
-        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
+        - { name: offset, in: query, description: Groups to skip, schema: { type: integer, minimum: 0, default: 0 } }
+        - { name: limit, in: query, description: Groups per page, schema: { type: integer, minimum: 1, maximum: 100, default: 20 } }
       responses:
         "200":
-          description: Review list
-          content:
-            application/json:
-              schema:
-                type: object
-                required: [items]
-                properties: { items: { type: array, items: { $ref: "#/components/schemas/GenreReviewItem" } } }
+          description: One page of the queue
+          content: { application/json: { schema: { $ref: "#/components/schemas/GenreReviewPage" } } }
         "400": { $ref: "#/components/responses/Error" }
+  /api/admin/tracks/{id}/genre-decision:
+    get:
+      operationId: getGenreDecision
+      tags: [admin]
+      summary: How the genre engine decided one song, with its "why" breakdown
+      parameters: [{ $ref: "#/components/parameters/id" }]
+      responses:
+        "200":
+          description: The decision
+          content: { application/json: { schema: { $ref: "#/components/schemas/GenreDecision" } } }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /api/admin/releases/{id}/outside-genres/refetch:
+    post:
+      operationId: refetchReleaseOutsideGenres
+      tags: [admin]
+      summary: Fetch a release's MusicBrainz, Discogs and Last.fm genres again, in the background
+      description: |
+        Marks the release's cached lookups (release, release group, its songs'
+        recordings and Last.fm tracks, its Discogs release) due and queues a
+        fetch for each switched-on source; a rescore follows when they bring
+        new genres.
+      x-python-path: /releases/{id}/outside-genres/refetch
+      parameters: [{ $ref: "#/components/parameters/id" }]
+      responses:
+        "200":
+          description: Queued
+          content: { application/json: { schema: { type: object, required: [status], properties: { status: { type: string } } } } }
+        "404": { description: Unknown release }
   /api/admin/genre-corrections:
     get:
       operationId: listGenreCorrections
       tags: [admin]
       summary: Genre corrections, newest first
+      parameters:
+        - { name: q, in: query, description: "Keep corrections whose song, release, artist, genre or style contains this", schema: { type: string } }
       responses:
         "200": { $ref: "#/components/responses/GenreCorrections" }
     post:
       operationId: saveGenreCorrection
       tags: [admin]
-      summary: Correct the genre of a song or of an artist
+      summary: Correct the genre (and style) of a song, a release or an artist
       description: |
-        A song's correction wins over its artist's, which wins over the
-        blended score. Saving twice replaces it. Queues genre scoring; if
+        A correction beats every other source; the most specific one (song,
+        then release, then artist) wins, and it becomes a trusted label for
+        the classifier. Saving twice replaces it. Queues genre scoring; if
         queueing fails the correction is saved, and saving again retries.
       requestBody:
         required: true
@@ -851,9 +896,11 @@ paths:
               type: object
               required: [genre]
               properties:
-                track_id: { type: string, description: "The song; give this or artist" }
-                artist: { type: string, description: "Every track of this artist; give this or track_id" }
-                genre: { type: string, description: A station genre }
+                track_id: { type: string, description: "The song; give exactly one of track_id, release_id and artist" }
+                release_id: { type: string, description: Every song of this release }
+                artist: { type: string, description: Every song of this artist }
+                genre: { type: string, description: A genre of the catalog }
+                style: { type: string, description: "Optional: a style of that genre" }
       responses:
         "200": { $ref: "#/components/responses/GenreCorrections" }
         "400": { $ref: "#/components/responses/Error" }
@@ -861,7 +908,7 @@ paths:
     delete:
       operationId: deleteGenreCorrection
       tags: [admin]
-      summary: Take a genre correction back
+      summary: Take a genre correction back (undo)
       description: Queues genre scoring; if queueing fails the correction is gone, and deleting again retries.
       parameters: [{ $ref: "#/components/parameters/id" }]
       responses:
@@ -910,6 +957,83 @@ paths:
         "200":
           description: Queued
           content: { application/json: { schema: { type: object, required: [status], properties: { status: { type: string } } } } }
+  /api/admin/outside-genres/refetch:
+    post:
+      operationId: refetchOutsideGenres
+      tags: [admin]
+      summary: Fetch every MusicBrainz, Discogs and Last.fm genre again, in the background
+      x-python-path: /outside-genres/refetch
+      responses:
+        "200":
+          description: Queued
+          content: { application/json: { schema: { type: object, required: [status], properties: { status: { type: string } } } } }
+  /api/admin/outside-sources:
+    get:
+      operationId: getOutsideSources
+      tags: [admin]
+      summary: Outside genre sources (MusicBrainz, Discogs, Last.fm) with key status and match stats
+      description: |
+        Never returns a saved token or key: only whether one is set, where it
+        comes from (page or env) and its last 4 characters.
+      x-python-path: /outside-sources
+      responses:
+        "200":
+          description: Settings, state, last run and match stats of each source
+          content: { application/json: { schema: { $ref: "#/components/schemas/OutsideSources" } } }
+  /api/admin/outside-sources/settings:
+    post:
+      operationId: updateOutsideSource
+      tags: [admin]
+      summary: Save a source's switch or key; page values override the stack env
+      description: |
+        Fields left out stay as they are. `enabled: null` goes back to the env
+        switch; `key: null` removes the key saved on the page, so the env key
+        (if any) is used again. The key is stored encrypted and never returned.
+        A source that is now usable starts fetching right away.
+      x-python-path: /outside-sources/settings
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [source]
+              properties:
+                source: { type: string, enum: [musicbrainz, discogs, lastfm] }
+                enabled: { type: [boolean, "null"] }
+                key: { type: [string, "null"], writeOnly: true, description: Discogs personal token or Last.fm API key }
+      responses:
+        "200":
+          description: Saved
+          content: { application/json: { schema: { type: object, required: [status], properties: { status: { type: string } } } } }
+        "400": { description: Invalid key }
+        "409": { description: No encryption key configured (SECRETS_KEY or ANALYTICS_API_SECRET) }
+  /api/admin/outside-sources/test:
+    post:
+      operationId: testOutsideSource
+      tags: [admin]
+      summary: One cheap real request to a source, with the given key or the key in use
+      description: The given key is only tried, not saved. The message never contains the key.
+      x-python-path: /outside-sources/test
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [source]
+              properties:
+                source: { type: string, enum: [musicbrainz, discogs, lastfm] }
+                key: { type: [string, "null"], writeOnly: true }
+      responses:
+        "200":
+          description: Whether the source accepted the request
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, message]
+                properties: { ok: { type: boolean }, message: { type: string } }
   /api/admin/genres/report:
     get:
       operationId: getGenreReport
@@ -1129,13 +1253,15 @@ components:
       description: Station
       content: { application/json: { schema: { $ref: "#/components/schemas/Station" } } }
     GenreCorrections:
-      description: Every genre correction
+      description: The genre corrections (matching the search, if any)
       content:
         application/json:
           schema:
             type: object
             required: [corrections]
-            properties: { corrections: { type: array, items: { $ref: "#/components/schemas/GenreCorrection" } } }
+            properties:
+              corrections: { type: array, items: { $ref: "#/components/schemas/GenreCorrection" } }
+              saved_id: { type: string, description: "After a save: the saved correction's id, to undo it" }
     GenreStationSettings:
       description: Genre stations
       content: { application/json: { schema: { $ref: "#/components/schemas/GenreStationSettings" } } }
@@ -1239,10 +1365,11 @@ components:
         kind:
           type: string
           enum: [custom, genre]
-          description: "genre = made and kept up to date by OwnWave, one per station genre; custom = made by hand"
+          description: "genre = made and kept up to date by OwnWave, one per station genre or style; custom = made by hand"
+        parent_genre: { type: string, description: "Set on a style station: the genre its style belongs to" }
         all_playlists: { type: boolean, description: "Plays every playlist, including ones added later" }
         playlist_ids: { type: array, items: { type: string }, description: "For all_playlists stations, every playlist now" }
-        genres: { type: array, items: { type: string }, description: "Station genre ids; empty = every genre" }
+        genres: { type: array, items: { type: string }, description: "Station genre or style ids; empty = every genre" }
         enhance: { type: boolean, description: "Also plays library songs that sound like its playlists; off = only the playlists' tracks" }
         track_count: { type: integer, description: Tracks it plays for this user (bans excluded) }
         updated_at: { type: string, format: date-time }
@@ -1276,25 +1403,32 @@ components:
         name: { type: string, description: Suggested station name }
     GenreStation:
       type: object
-      required: [genre, genre_name, name, name_is_custom, tracks, state]
+      required: [genre, genre_name, kind, name, name_is_custom, tracks, state]
       properties:
-        genre: { type: string }
+        genre: { type: string, description: "A genre or a style id" }
         genre_name: { type: string }
-        station_id: { type: string, description: "Empty until the genre first reaches the threshold" }
+        kind: { type: string, enum: [genre, style] }
+        parent: { type: string, description: "A style's genre" }
+        station_id: { type: string, description: "Empty until the genre or style first reaches the threshold" }
         name: { type: string }
         name_is_custom: { type: boolean }
-        tracks: { type: integer, description: Songs of the library with this main genre }
+        tracks: { type: integer, description: "Songs of the library with this main genre, or with this style" }
         state:
           type: string
           enum: [active, below_threshold, excluded, "off"]
     GenreStationSettings:
       type: object
-      required: [enabled, show_at, hide_below, genres]
+      required: [enabled, show_at, hide_below, style_show_at, style_hide_below, genres]
       properties:
         enabled: { type: boolean }
-        show_at: { type: integer, description: A hidden station is shown from this many tracks }
-        hide_below: { type: integer, description: A shown station is hidden below this many tracks }
-        genres: { type: array, items: { $ref: "#/components/schemas/GenreStation" } }
+        show_at: { type: integer, description: A hidden genre station is shown from this many tracks }
+        hide_below: { type: integer, description: A shown genre station is hidden below this many tracks }
+        style_show_at: { type: integer, description: A hidden style station is shown from this many tracks }
+        style_hide_below: { type: integer, description: A shown style station is hidden below this many tracks }
+        genres:
+          type: array
+          description: "Every genre, each followed by its styles that have songs or a station"
+          items: { $ref: "#/components/schemas/GenreStation" }
     StationChange:
       type: object
       required: [genre, name, change]
@@ -1390,27 +1524,143 @@ components:
         track_id: { type: string }
         title: { type: string }
         artist: { type: string }
-    GenreReviewItem:
+    GenreReviewSong:
       type: object
-      required: [track_id, title, genre, score, hidden_by, copies_disagree]
+      required: [track_id, title, genre, source, hidden_by, priority]
       properties:
         track_id: { type: string }
         title: { type: string }
         artist: { type: string }
-        genre: { type: string }
-        score: { type: number }
-        hidden_by: { type: integer, description: How many users hid it on a genre station }
-        copies_disagree: { type: boolean, description: Another copy of the song has a different main genre }
-    GenreCorrection:
+        genre: { type: [string, "null"], description: The decided genre; null for an unsure song }
+        style: { type: string }
+        source: { type: string, description: "strong_sources, release, classifier or unsure" }
+        confidence: { type: number, description: Release share or classifier vote share }
+        unsure_reason: { type: string }
+        review_reason: { type: string }
+        suggestion: { type: string, description: "A genre the engine leans to but did not pick: the classifier's, else the release lean's" }
+        hidden_by: { type: integer, description: How many listeners hid it on a genre station }
+        priority: { type: integer, description: "1 hidden by listeners, 2 unsure, 3 classifier versus tag, 4 least sure on a station" }
+    GenreReviewGroup:
       type: object
-      required: [id, genre, created_at]
+      required: [compilation, priority, songs]
+      properties:
+        release_id: { type: string }
+        release_title: { type: string }
+        release_artist: { type: string }
+        compilation: { type: boolean }
+        priority: { type: integer, description: The best rank of its songs }
+        songs: { type: array, items: { $ref: "#/components/schemas/GenreReviewSong" } }
+    GenreReviewPage:
+      type: object
+      required: [groups, total, songs, offset, limit]
+      properties:
+        groups: { type: array, items: { $ref: "#/components/schemas/GenreReviewGroup" } }
+        total: { type: integer, description: Groups on the whole queue }
+        songs: { type: integer, description: Songs on the whole queue }
+        offset: { type: integer }
+        limit: { type: integer }
+    GenreDecision:
+      type: object
+      required: [track_id, title, genre, source, why, decided_at]
+      properties:
+        track_id: { type: string }
+        title: { type: string }
+        artist: { type: string }
+        genre_tag: { type: string }
+        release_id: { type: string }
+        release_title: { type: string }
+        genre: { type: [string, "null"] }
+        style: { type: string }
+        source: { type: string }
+        confidence: { type: number }
+        unsure_reason: { type: string }
+        review_reason: { type: string }
+        fence: { type: array, items: { type: string }, description: Genres the song may get; left out when nothing narrowed it }
+        why: { $ref: "#/components/schemas/GenreWhy" }
+        decided_at: { type: string, format: date-time }
+    GenreWhy:
+      type: object
+      description: The engine's "why" breakdown (genre_engine.py); every part is optional.
+      properties:
+        sources:
+          type: object
+          description: Each source's view, by name (genre_tag, discogs, mb_recording, mb_release, artist, lastfm)
+          additionalProperties:
+            type: object
+            properties:
+              genre: { type: string }
+              fence: { type: array, items: { type: string } }
+              styles: { type: array, items: { type: string } }
+        fence: { type: array, items: { type: string } }
+        correction: { type: object, properties: { scope: { type: string }, value: { type: string } } }
+        agreeing: { type: array, items: { type: string } }
+        release: { type: object, properties: { genre: { type: string }, share: { type: number }, decided: { type: integer } } }
+        classifier:
+          type: object
+          description: "Also runner_ups: [genre, share] pairs, left out here as mixed-type arrays"
+          properties:
+            genre: { type: [string, "null"] }
+            share: { type: number }
+        style: { type: object, properties: { style: { type: string }, from: { type: string }, activation: { type: number } } }
+    GenreCatalogEntry:
+      type: object
+      required: [id, name, station, songs]
       properties:
         id: { type: string }
+        name: { type: string }
+        station: { type: boolean }
+        songs: { type: integer }
+        styles: { type: array, items: { $ref: "#/components/schemas/GenreCatalogEntry" } }
+    GenreOverview:
+      type: object
+      required: [songs, decided, genres]
+      description: test_score is left out until the first rescore.
+      properties:
+        songs: { type: integer, description: Songs (best copies) in the library }
+        decided: { type: integer, description: Songs with a genre }
+        unsure: { type: integer }
+        flagged: { type: integer, description: Kept their tag but the classifier disagrees }
+        with_style: { type: integer }
+        to_review: { type: integer, description: Songs on the review queue }
+        by_source: { type: object, additionalProperties: { type: integer }, description: Songs by what decided them }
+        genres: { type: array, items: { $ref: "#/components/schemas/GenreCatalogEntry" } }
+        test_score: { $ref: "#/components/schemas/GenreTestScore" }
+        test_score_at: { type: string, format: date-time }
+    GenreTestScore:
+      type: object
+      description: Leave-one-out accuracy of the classifier on the trusted labels
+      properties:
+        labels: { type: integer }
+        k: { type: integer }
+        decides_at: { type: number }
+        accuracy: { type: [number, "null"] }
+        decides: { type: [number, "null"], description: Share of labels it decides (vote at decides_at or more) }
+        accuracy_when_deciding: { type: [number, "null"] }
+        catalog_version: { type: string }
+        per_genre:
+          type: object
+          additionalProperties:
+            type: object
+            properties:
+              labels: { type: integer }
+              accuracy: { type: [number, "null"] }
+              decides: { type: [number, "null"] }
+              accuracy_when_deciding: { type: [number, "null"] }
+    GenreCorrection:
+      type: object
+      required: [id, scope, genre, created_at]
+      properties:
+        id: { type: string }
+        scope: { type: string, enum: [song, release, artist] }
         track_id: { type: string, description: Set when it corrects a song }
         track_title: { type: string }
         track_artist: { type: string }
+        release_id: { type: string, description: Set when it corrects a release }
+        release_title: { type: string }
+        release_artist: { type: string }
         artist: { type: string, description: Set when it corrects an artist }
         genre: { type: string }
+        style: { type: string, description: Set when it names a style of the genre }
         created_at: { type: string, format: date-time }
     PlaylistItem:
       type: object
@@ -1428,6 +1678,94 @@ components:
         match_method: { type: string, enum: [exact, fuzzy, manual] }
         manual: { type: boolean, description: "An admin set the match: picked track_id, or marked it as having no local file when track_id is absent" }
         hidden: { type: boolean, description: Left out of the playlist's stations and picks }
+    OutsideSources:
+      type: object
+      required: [library, max_age_days, sources]
+      properties:
+        library:
+          type: object
+          required: [songs, releases]
+          properties: { songs: { type: integer }, releases: { type: integer } }
+        max_age_days: { type: integer, description: Lookups are repeated once this old (OUTSIDE_GENRES_MAX_AGE_DAYS) }
+        sources: { type: array, items: { $ref: "#/components/schemas/OutsideSource" } }
+    OutsideSource:
+      type: object
+      required: [source, name, state, enabled, enabled_from, env_switch, key, running, queued, requests_per_run, last_run, last_refresh, songs, releases, genre_yield]
+      properties:
+        source: { type: string, enum: [musicbrainz, discogs, lastfm] }
+        name: { type: string }
+        state: { type: string, enum: ["on", "off", missing_key, refused_key] }
+        enabled: { type: boolean }
+        enabled_from: { type: string, enum: [page, env] }
+        env_switch: { type: string, description: The env var the page switch overrides }
+        key:
+          description: Null for sources that need no key (MusicBrainz)
+          oneOf:
+            - $ref: "#/components/schemas/OutsideSourceKey"
+            - type: "null"
+        running: { type: boolean }
+        queued: { type: boolean }
+        requests_per_run: { type: integer }
+        last_run:
+          oneOf:
+            - $ref: "#/components/schemas/OutsideSourceLastRun"
+            - type: "null"
+        last_refresh: { type: [string, "null"], format: date-time }
+        songs: { $ref: "#/components/schemas/OutsideSourceMatch" }
+        releases: { $ref: "#/components/schemas/OutsideSourceMatch" }
+        genre_yield: { $ref: "#/components/schemas/OutsideGenreYield" }
+    OutsideSourceKey:
+      type: object
+      description: Never the key itself
+      required: [set, source, last4, unreadable, env_var]
+      properties:
+        set: { type: boolean }
+        source: { type: [string, "null"], enum: [page, env, null] }
+        last4: { type: [string, "null"] }
+        unreadable: { type: boolean, description: A key is saved on the page but the encryption key changed; save it again }
+        env_var: { type: string }
+    OutsideSourceLastRun:
+      type: object
+      required: [status, requests, retries, stored, failures, more, at]
+      properties:
+        status: { type: string, description: "ok, refused_key or failed" }
+        requests: { type: integer, description: Requests sent, retries included }
+        retries: { type: integer, description: Requests sent again after a busy answer (HTTP 429 or 503, Last.fm error 29) }
+        stored: { type: integer }
+        failures: { type: integer }
+        more: { type: boolean, description: The run's budget ran out with lookups left }
+        at: { type: [string, "null"], format: date-time }
+    OutsideSourceMatch:
+      type: object
+      description: |
+        covered: could be looked up at all; looked_up = found + not_found;
+        due: not looked up yet, or old enough to be looked up again.
+      required: [covered, looked_up, found, not_found, due]
+      properties:
+        covered: { type: integer }
+        looked_up: { type: integer }
+        found: { type: integer }
+        not_found: { type: integer }
+        due: { type: integer }
+    OutsideGenreYield:
+      type: object
+      required: [found_rows, with_genres, values, translated_values, untranslated_values, top, untranslated]
+      properties:
+        found_rows: { type: integer }
+        with_genres: { type: integer }
+        values: { type: integer, description: Distinct raw values }
+        translated_values: { type: [integer, "null"] }
+        untranslated_values: { type: [integer, "null"] }
+        top: { type: array, items: { $ref: "#/components/schemas/OutsideGenreValue" } }
+        untranslated: { type: array, items: { $ref: "#/components/schemas/OutsideGenreValue" } }
+    OutsideGenreValue:
+      type: object
+      required: [name, kind, rows, translated_to]
+      properties:
+        name: { type: string }
+        kind: { type: string, description: "genre, style or tag" }
+        rows: { type: integer }
+        translated_to: { type: [string, "null"] }
     GenreDistribution:
       type: object
       required: [scored_tracks, genres, warnings]

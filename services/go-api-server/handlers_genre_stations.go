@@ -105,54 +105,110 @@ func (h *Handler) AdminRefreshPipeline(w http.ResponseWriter, r *http.Request) {
 }
 
 const (
-	genreReviewDefault = 50
-	genreReviewMax     = 200
+	genreReviewDefault = 20
+	genreReviewMax     = 100
 )
 
-// AdminGenreReview lists the songs most worth checking: ?limit= up to 200.
-func (h *Handler) AdminGenreReview(w http.ResponseWriter, r *http.Request) {
-	limit := genreReviewDefault
-	if v := r.URL.Query().Get("limit"); v != "" {
-		n, err := strconv.Atoi(v)
-		if err != nil || n < 1 || n > genreReviewMax {
-			http.Error(w, fmt.Sprintf("limit must be 1 to %d", genreReviewMax), http.StatusBadRequest)
-			return
-		}
-		limit = n
+// queryInt reads an integer query parameter between lo and hi, or def when
+// it is missing. It answers 400 itself when the value is out of range.
+func queryInt(w http.ResponseWriter, r *http.Request, name string, def, lo, hi int) (int, bool) {
+	v := r.URL.Query().Get(name)
+	if v == "" {
+		return def, true
 	}
-	items, err := h.stations.GenreReview(r.Context(), limit)
+	n, err := strconv.Atoi(v)
+	if err != nil || n < lo || n > hi {
+		http.Error(w, fmt.Sprintf("%s must be %d to %d", name, lo, hi), http.StatusBadRequest)
+		return 0, false
+	}
+	return n, true
+}
+
+// AdminGenreOverview counts songs per genre and style, the unsure and
+// flagged songs, and returns the classifier's test score.
+func (h *Handler) AdminGenreOverview(w http.ResponseWriter, r *http.Request) {
+	o, err := h.stations.GenreOverview(r.Context())
+	if err != nil {
+		writeInternalError(w, r, "genre overview", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, o)
+}
+
+// AdminGenreReview returns one page of the review queue, grouped by release:
+// ?offset= (groups to skip) and ?limit= (groups, up to 100).
+func (h *Handler) AdminGenreReview(w http.ResponseWriter, r *http.Request) {
+	limit, ok := queryInt(w, r, "limit", genreReviewDefault, 1, genreReviewMax)
+	if !ok {
+		return
+	}
+	offset, ok := queryInt(w, r, "offset", 0, 0, 1_000_000)
+	if !ok {
+		return
+	}
+	page, err := h.stations.GenreReview(r.Context(), offset, limit)
 	if err != nil {
 		writeInternalError(w, r, "genre review", err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"items": items})
+	writeJSON(w, http.StatusOK, page)
 }
 
-// AdminGenreCorrections lists every genre correction.
+// AdminGenreDecision returns how the genre engine decided one song, with
+// its "why" breakdown. 404 when it has not decided the song.
+func (h *Handler) AdminGenreDecision(w http.ResponseWriter, r *http.Request) {
+	id, ok := parseUUIDParam(w, r, "id")
+	if !ok {
+		return
+	}
+	d, err := h.stations.GenreDecision(r.Context(), id)
+	if errors.Is(err, stations.ErrNotFound) {
+		http.Error(w, "no genre decision for this song yet", http.StatusNotFound)
+		return
+	}
+	if err != nil {
+		writeInternalError(w, r, "genre decision", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, d)
+}
+
+// AdminGenreCorrections lists the genre corrections; ?q= searches them.
 func (h *Handler) AdminGenreCorrections(w http.ResponseWriter, r *http.Request) {
-	list, err := h.stations.GenreCorrections(r.Context())
+	h.listCorrections(w, r, "")
+}
+
+func (h *Handler) listCorrections(w http.ResponseWriter, r *http.Request, saved string) {
+	list, err := h.stations.GenreCorrections(r.Context(), r.URL.Query().Get("q"))
 	if err != nil {
 		writeInternalError(w, r, "genre corrections", err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"corrections": list})
+	body := map[string]any{"corrections": list}
+	if saved != "" {
+		body["saved_id"] = saved
+	}
+	writeJSON(w, http.StatusOK, body)
 }
 
-// AdminSaveGenreCorrection corrects a song or an artist:
-// POST {"track_id" or "artist", "genre"}. Saving twice replaces it.
+// AdminSaveGenreCorrection corrects a song, a release or an artist:
+// POST {"track_id" | "release_id" | "artist", "genre", "style"?}. Saving
+// twice replaces it. The answer names the saved correction, so a client can
+// undo it.
 func (h *Handler) AdminSaveGenreCorrection(w http.ResponseWriter, r *http.Request) {
 	var req stations.GenreCorrectionRequest
 	if !decodeJSON(w, r, &req) {
 		return
 	}
-	if err := h.stations.SaveGenreCorrection(r.Context(), req); err != nil {
+	id, err := h.stations.SaveGenreCorrection(r.Context(), req)
+	if err != nil {
 		writeStationError(w, r, "save genre correction", err)
 		return
 	}
-	h.rescoreAndListCorrections(w, r)
+	h.rescoreAndListCorrections(w, r, id)
 }
 
-// AdminDeleteGenreCorrection takes a correction back.
+// AdminDeleteGenreCorrection takes a correction back (undo).
 func (h *Handler) AdminDeleteGenreCorrection(w http.ResponseWriter, r *http.Request) {
 	id, ok := parseUUIDParam(w, r, "id")
 	if !ok {
@@ -162,15 +218,16 @@ func (h *Handler) AdminDeleteGenreCorrection(w http.ResponseWriter, r *http.Requ
 		writeInternalError(w, r, "delete genre correction", err)
 		return
 	}
-	h.rescoreAndListCorrections(w, r)
+	h.rescoreAndListCorrections(w, r, "")
 }
 
-// rescoreAndListCorrections queues genre scoring, which applies corrections.
-// The change is saved either way, so a client can retry when queueing fails.
-func (h *Handler) rescoreAndListCorrections(w http.ResponseWriter, r *http.Request) {
+// rescoreAndListCorrections queues genre scoring, which applies corrections
+// and learns from them as trusted labels. The change is saved either way, so
+// a client can retry when queueing fails.
+func (h *Handler) rescoreAndListCorrections(w http.ResponseWriter, r *http.Request, saved string) {
 	if err := h.analytics.RebuildGenres(r.Context()); err != nil {
 		writeInternalError(w, r, "queue genre scoring", err)
 		return
 	}
-	h.AdminGenreCorrections(w, r)
+	h.listCorrections(w, r, saved)
 }

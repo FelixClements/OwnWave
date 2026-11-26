@@ -91,15 +91,15 @@ func TestGenreStationsFollowTheLibrary(t *testing.T) {
 	// stays one station and plays the new playlist's techno tracks too.
 	more := f.playlist("more", 15, "house")
 	f.addTracks(more, "more-techno", 5, "techno")
-	require.Equal(t, []stations.Change{{Genre: "house", Name: "House", Change: stations.ChangeCreated}}, f.refresh())
-	require.Equal(t, []string{"House/genre/25", "Techno/genre/35"}, f.visible(alice))
+	require.Equal(t, []stations.Change{{Genre: "house", Name: "House & Disco", Change: stations.ChangeCreated}}, f.refresh())
+	require.Equal(t, []string{"House & Disco/genre/25", "Techno/genre/35"}, f.visible(alice))
 	require.Equal(t, technoID, f.one(`SELECT id::text FROM stations WHERE auto_genre = 'techno'`))
 
 	// Below the show threshold but not below the hide one: still shown.
 	f.exec(`DELETE FROM track_station_genres WHERE genre = 'house' AND track_id IN (
 		SELECT id FROM tracks WHERE path LIKE '/m/more/%' ORDER BY path LIMIT 3)`)
 	require.Empty(t, f.refresh())
-	require.Equal(t, []string{"House/genre/22", "Techno/genre/35"}, f.visible(alice))
+	require.Equal(t, []string{"House & Disco/genre/22", "Techno/genre/35"}, f.visible(alice))
 
 	// Below the hide threshold: hidden, not deleted, history kept.
 	houseID := f.one(`SELECT id::text FROM stations WHERE auto_genre = 'house'`)
@@ -107,7 +107,7 @@ func TestGenreStationsFollowTheLibrary(t *testing.T) {
 	f.exec(`INSERT INTO listening_history (user_id, track_id, station_id) VALUES ($1::uuid, $2::uuid, $3::uuid)`, alice.ID, track, houseID)
 	f.exec(`DELETE FROM track_station_genres WHERE genre = 'house' AND track_id IN (
 		SELECT id FROM tracks WHERE path LIKE '/m/more/%' ORDER BY path LIMIT 3 OFFSET 3)`)
-	require.Equal(t, []stations.Change{{Genre: "house", Name: "House", Change: stations.ChangeHidden}}, f.refresh())
+	require.Equal(t, []stations.Change{{Genre: "house", Name: "House & Disco", Change: stations.ChangeHidden}}, f.refresh())
 	require.Equal(t, []string{"Techno/genre/35"}, f.visible(alice))
 	require.Equal(t, http.StatusNotFound, f.call(f.h.GetStation, alice, http.MethodGet, "/s", houseID, "").Code)
 	require.Equal(t, houseID, f.one(`SELECT station_id::text FROM listening_history`))
@@ -116,13 +116,13 @@ func TestGenreStationsFollowTheLibrary(t *testing.T) {
 	f.addTracks(more, "back", 3, "house")
 	require.Empty(t, f.refresh())
 	f.addTracks(more, "back-more", 3, "house")
-	require.Equal(t, []stations.Change{{Genre: "house", Name: "House", Change: stations.ChangeShown}}, f.refresh())
+	require.Equal(t, []stations.Change{{Genre: "house", Name: "House & Disco", Change: stations.ChangeShown}}, f.refresh())
 	require.Equal(t, houseID, f.one(`SELECT id::text FROM stations WHERE auto_genre = 'house'`), "same station back")
 
 	// A genre station plays the library: a deleted playlist's songs stay.
 	require.Equal(t, http.StatusNoContent, f.call(f.h.DeletePlaylist, admin, http.MethodDelete, "/p", techno, "").Code)
 	f.refresh()
-	require.Equal(t, []string{"House/genre/25", "Techno/genre/35"}, f.visible(alice))
+	require.Equal(t, []string{"House & Disco/genre/25", "Techno/genre/35"}, f.visible(alice))
 }
 
 func TestGenreStationsPlayTheWholeLibraryByMainGenre(t *testing.T) {
@@ -197,22 +197,43 @@ func TestGenreReviewAndCorrections(t *testing.T) {
 	hiddenTrack := f.one(`SELECT id::text FROM tracks ORDER BY path LIMIT 1`)
 	low := f.one(`SELECT id::text FROM tracks ORDER BY path LIMIT 1 OFFSET 1`)
 	f.exec(`UPDATE track_station_genres SET score = 0.2 WHERE track_id = $1::uuid`, low)
+	require.Equal(t, http.StatusNotFound, f.call(f.h.AdminGenreDecision, admin, http.MethodGet, "/d", low, "").Code, "not decided yet")
+	// The genre engine decided every song by its classifier.
+	f.exec(`INSERT INTO track_genre_decisions (track_id, genre, source, confidence, catalog_version)
+		SELECT track_id, genre, 'classifier', score, 'test' FROM track_station_genres WHERE is_primary`)
 	rec := f.call(f.h.HideTrack, alice, http.MethodPost, "/h", stationID, `{"track_id":"`+hiddenTrack+`"}`)
 	require.Equal(t, http.StatusNoContent, rec.Code, rec.Body.String())
 
-	review := func() []stations.GenreReviewItem {
-		rec := f.call(f.h.AdminGenreReview, admin, http.MethodGet, "/r", "", "")
+	review := func(target string) stations.GenreReviewPage {
+		rec := f.call(f.h.AdminGenreReview, admin, http.MethodGet, target, "", "")
 		require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
-		return decode[struct {
-			Items []stations.GenreReviewItem `json:"items"`
-		}](t, rec).Items
+		return decode[stations.GenreReviewPage](t, rec)
 	}
-	items := review()
-	require.Len(t, items, 30)
-	require.Equal(t, hiddenTrack, items[0].TrackID, "most hidden first")
-	require.Equal(t, 1, items[0].HiddenBy)
-	require.Equal(t, low, items[1].TrackID, "then the lowest score")
+	// The queue has one group per song without a release, paged by groups.
+	page := review("/r")
+	require.Equal(t, 30, page.Total)
+	require.Equal(t, 30, page.Songs)
+	require.Len(t, page.Groups, 20, "20 groups a page by default")
+	first := page.Groups[0]
+	require.Len(t, first.Songs, 1)
+	require.Equal(t, hiddenTrack, first.Songs[0].TrackID, "most hidden first")
+	require.Equal(t, 1, first.Songs[0].HiddenBy)
+	require.Equal(t, 1, first.Priority)
+	require.Equal(t, "classifier", first.Songs[0].Source)
+	require.Equal(t, low, page.Groups[1].Songs[0].TrackID, "then the lowest score")
+	rest := review("/r?offset=20&limit=20")
+	require.Len(t, rest.Groups, 10)
+	require.Equal(t, 30, review("/r?offset=40").Total, "past the end still counts")
 	require.Equal(t, http.StatusBadRequest, f.call(f.h.AdminGenreReview, admin, http.MethodGet, "/r?limit=999", "", "").Code)
+	require.Equal(t, http.StatusBadRequest, f.call(f.h.AdminGenreReview, admin, http.MethodGet, "/r?offset=-1", "", "").Code)
+	rec = f.call(f.h.AdminGenreOverview, admin, http.MethodGet, "/o", "", "")
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	overview := decode[stations.GenreOverview](t, rec)
+	require.Equal(t, 30, overview.Songs)
+	require.Equal(t, 30, overview.Decided)
+	require.Equal(t, 0, *overview.Unsure)
+	require.Equal(t, 30, *overview.ToReview)
+	require.Nil(t, overview.TestScore)
 
 	// Bad requests save nothing.
 	save := func(body string) int {
@@ -223,6 +244,7 @@ func TestGenreReviewAndCorrections(t *testing.T) {
 	require.Equal(t, http.StatusBadRequest, save(`{"track_id":"`+low+`","genre":"nope"}`))
 	require.Equal(t, http.StatusBadRequest, save(`{"track_id":"nope","genre":"techno"}`))
 	require.Equal(t, http.StatusBadRequest, save(`{"track_id":"`+stationID+`","genre":"techno"}`), "unknown track")
+	require.Equal(t, http.StatusBadRequest, save(`{"track_id":"`+low+`","genre":"house","style":"minimal"}`), "minimal is a techno style")
 	require.Equal(t, "0", f.one(`SELECT COUNT(*)::text FROM genre_corrections`))
 
 	// Saving stores the correction and queues scoring; saving again replaces it.
@@ -244,8 +266,8 @@ func TestGenreReviewAndCorrections(t *testing.T) {
 	require.Len(t, listed(f.call(f.h.AdminSaveGenreCorrection, admin, http.MethodPost, "/c", "", `{"artist":"OXIA ","genre":"techno"}`)), 2, "artists ignore case")
 
 	// A song scored from a correction leaves the review list.
-	f.exec(`UPDATE track_station_genres SET corrected = TRUE WHERE track_id = $1::uuid`, low)
-	require.Len(t, review(), 29)
+	f.exec(`UPDATE track_genre_decisions SET source = 'correction' WHERE track_id = $1::uuid`, low)
+	require.Equal(t, 29, review("/r").Songs)
 
 	// When scoring cannot be queued the admin hears it; the change is saved.
 	stub.Errors["RebuildGenres"] = errors.New("worker down")
@@ -365,15 +387,14 @@ func TestGenreStationAdminControls(t *testing.T) {
 	// Excluding hides the station and keeps it hidden.
 	require.Equal(t, http.StatusOK, update("techno", `{"excluded":true}`))
 	require.Equal(t, "excluded/Bunker", state("techno"))
-	require.Equal(t, []string{"House/genre/30", "Both/custom/60"}, f.visible(alice))
+	require.Equal(t, []string{"House & Disco/genre/30", "Both/custom/60"}, f.visible(alice))
 	f.refresh()
-	require.Equal(t, []string{"House/genre/30", "Both/custom/60"}, f.visible(alice))
+	require.Equal(t, []string{"House & Disco/genre/30", "Both/custom/60"}, f.visible(alice))
 	require.Equal(t, http.StatusOK, update("techno", `{"excluded":false}`))
 	require.Equal(t, "active/Bunker", state("techno"))
 
 	// A genre that never had a station can be excluded ahead of time.
 	require.Equal(t, http.StatusNotFound, update("other", `{"excluded":true}`), "not a station genre")
-	f.exec(`INSERT INTO station_genres (id, name, position, is_station) VALUES ('trance', 'Trance', 3, true)`)
 	require.Equal(t, "below_threshold/Trance", state("trance"))
 	require.Equal(t, http.StatusOK, update("trance", `{"excluded":true}`))
 	f.playlist("trance-list", 30, "trance")
@@ -391,7 +412,7 @@ func TestGenreStationAdminControls(t *testing.T) {
 	f.refresh()
 	require.Equal(t, []string{"Both/custom/60"}, f.visible(alice))
 	off("true")
-	require.Equal(t, []string{"Bunker/genre/30", "House/genre/30", "Both/custom/60"}, f.visible(alice))
+	require.Equal(t, []string{"Bunker/genre/30", "House & Disco/genre/30", "Both/custom/60"}, f.visible(alice))
 	require.Equal(t, technoID, f.one(`SELECT id::text FROM stations WHERE auto_genre = 'techno'`))
 	require.Equal(t, http.StatusBadRequest, f.call(f.h.AdminSetGenreStations, admin, http.MethodPut, "/g", "", `{}`).Code)
 }

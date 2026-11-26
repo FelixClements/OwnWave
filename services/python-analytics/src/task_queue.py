@@ -39,6 +39,16 @@ def enqueue(conn, task: str, **args) -> int:
     return row[0]
 
 
+def enqueue_later(conn, delay_seconds: float, task: str, **args) -> int:
+    """Queue a task that no worker claims for delay_seconds; the caller commits."""
+    row = conn.execute(
+        "INSERT INTO task_queue (task, args, run_after) VALUES (%s, %s, NOW() + make_interval(secs => %s))"
+        " RETURNING id",
+        (task, Jsonb(args), delay_seconds),
+    ).fetchone()
+    return row[0]
+
+
 def enqueue_many(conn, task: str, args_list: Iterable[dict]) -> None:
     with conn.cursor() as cur:
         cur.executemany(

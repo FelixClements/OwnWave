@@ -19,6 +19,14 @@ x-python: &python
     GENRE_MODEL_DIR: ${GENRE_MODEL_DIR:-/app/models}
     GENRE_WINDOW_SECONDS: ${GENRE_WINDOW_SECONDS:-20}
     MUSICBRAINZ_ENABLED: ${MUSICBRAINZ_ENABLED:-true}
+    # Outside genre sources (see .env.example); each is off while its key is empty.
+    # The admin Outside sources page can override them.
+    DISCOGS_TOKEN: ${DISCOGS_TOKEN:-}
+    DISCOGS_ENABLED: ${DISCOGS_ENABLED:-true}
+    LASTFM_API_KEY: ${LASTFM_API_KEY:-}
+    LASTFM_ENABLED: ${LASTFM_ENABLED:-true}
+    OUTSIDE_GENRES_MAX_AGE_DAYS: ${OUTSIDE_GENRES_MAX_AGE_DAYS:-180}
+    SECRETS_KEY: ${SECRETS_KEY:-}
     # TensorFlow threads per worker process (genre model). Keep
     # WORKER_CONCURRENCY x TF_NUM_INTRAOP_THREADS near the CPU count.
     TF_NUM_INTRAOP_THREADS: ${TF_NUM_INTRAOP_THREADS:-3}

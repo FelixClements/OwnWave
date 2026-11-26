@@ -327,16 +327,92 @@ MB_BATCH = 150
 MB_MAX_FAILURES = 5
 # Advisory lock id: only one MusicBrainz fetcher may run (shared rate limit).
 _MB_LOCK = 4_242_001
+# One fetcher per outside genre source; MusicBrainz shares the artist tag lock.
+_SOURCE_LOCKS = {"musicbrainz": _MB_LOCK, "discogs": 4_242_002, "lastfm": 4_242_003}
+# A fetch that finds its source's lock taken tries again after this long.
+LOCK_RETRY_SECONDS = 60
 
 
 def queue_genre_refresh(conn) -> None:
-    """Queue the genre steps that follow new analysis: artist tags, then scoring."""
-    from config import MUSICBRAINZ_ENABLED
+    """Queue the genre steps that follow new analysis.
 
-    if MUSICBRAINZ_ENABLED:
+    Artist tags, then scoring. The outside genre fetch runs beside them;
+    scoring does not wait for it, and it queues a rescore when it brings new
+    data.
+    """
+    import outside_sources
+
+    # The MusicBrainz switch (admin page, else MUSICBRAINZ_ENABLED) covers artist tags too.
+    if outside_sources.settings(conn, "musicbrainz").enabled:
         task_queue.enqueue(conn, "fetch_artist_genres")
     else:
         task_queue.enqueue(conn, "score_genres")
+    queue_outside_genres(conn)
+
+
+def queue_outside_genres(conn, sources: Optional[list] = None) -> list:
+    """Queue a fetch for each switched-on source that has none queued or running."""
+    from outside_sources import enabled_sources
+
+    queued = []
+    for source in enabled_sources(conn):
+        if sources is not None and source not in sources:
+            continue
+        busy = conn.execute(
+            """
+            SELECT 1 FROM task_queue
+            WHERE task = 'fetch_outside_genres' AND args->>'source' = %s
+              AND status IN ('pending', 'running')
+            LIMIT 1
+            """,
+            (source,),
+        ).fetchone()
+        if not busy:
+            task_queue.enqueue(conn, "fetch_outside_genres", source=source)
+            queued.append(source)
+    return queued
+
+
+def fetch_outside_genres(source: str, new_data: int = 0) -> dict:
+    """Fetch genres from one outside source by ID, one request budget per run.
+
+    A run queues the next run while lookups are due, and a rescore once the
+    source is done if any run brought new genres (new_data carries the count
+    along the chain). New Discogs links found on MusicBrainz releases start
+    the Discogs fetch.
+    """
+    import outside_genres as og
+    import outside_sources
+    from config import OUTSIDE_GENRES_MAX_AGE_DAYS
+
+    lock = _SOURCE_LOCKS[source]
+    with db.get_conn() as conn:
+        cfg = outside_sources.settings(conn, source)
+        if not cfg.usable:
+            conn.rollback()
+            return {"source": source, "skipped": "switched off"}
+        if not conn.execute("SELECT pg_try_advisory_lock(%s)", (lock,)).fetchone()[0]:
+            # Another fetch holds the source's rate limit (for MusicBrainz,
+            # possibly the artist tag fetch): try again shortly.
+            task_queue.enqueue_later(conn, LOCK_RETRY_SECONDS, "fetch_outside_genres", source=source, new_data=new_data)
+            conn.commit()
+            return {"source": source, "skipped": "another fetch is running"}
+        try:
+            summary = og.fetch_due(conn, source, og.make_client(source, cfg.key), OUTSIDE_GENRES_MAX_AGE_DAYS)
+            outside_sources.record_run(conn, source, summary.as_dict())
+            total = new_data + summary.new_data
+            if summary.more:
+                task_queue.enqueue(conn, "fetch_outside_genres", source=source, new_data=total)
+            elif total:
+                task_queue.enqueue(conn, "score_genres")
+            if summary.discogs_links:
+                queue_outside_genres(conn, [og.DISCOGS])
+            conn.commit()
+        finally:
+            conn.execute("SELECT pg_advisory_unlock(%s)", (lock,))
+            conn.commit()
+    log.info("outside genres from %s: %s", source, summary.as_dict())
+    return {"source": source, **summary.as_dict()}
 
 
 def fetch_artist_genres() -> dict:
@@ -351,6 +427,10 @@ def fetch_artist_genres() -> dict:
     client = MusicBrainzClient(MUSICBRAINZ_URL, MUSICBRAINZ_USER_AGENT)
     with db.get_conn() as conn:
         if not conn.execute("SELECT pg_try_advisory_lock(%s)", (_MB_LOCK,)).fetchone()[0]:
+            # The outside genre fetch holds MusicBrainz's rate limit: try
+            # again shortly, so the chain still ends in score_genres.
+            task_queue.enqueue_later(conn, LOCK_RETRY_SECONDS, "fetch_artist_genres")
+            conn.commit()
             return {"skipped": "another fetch is running"}
         try:
             done = {r[0] for r in conn.execute("SELECT name_key FROM musicbrainz_artists").fetchall()}
@@ -404,17 +484,19 @@ def fetch_artist_genres() -> dict:
 
 
 def score_genres() -> dict:
-    """Blend all genre sources into track_station_genres for the whole library.
+    """Decide every track's genre into track_station_genres for the whole library.
+
+    Uses the genre engine v2 (genre_engine, ADR 0008).
 
     Records when scoring ran (admin pipeline view) and tells the API, which
     then refreshes the genre stations.
     """
+    import genre_engine
     from config import GENRE_MODEL_DIR
     from genre_audio import load_labels
-    from genre_scoring import score_library
 
     with db.get_conn() as conn:
-        summary = score_library(conn, load_labels(GENRE_MODEL_DIR))
+        summary = genre_engine.score_library(conn, load_labels(GENRE_MODEL_DIR))
         conn.execute(
             """
             INSERT INTO app_state (key, value, updated_at) VALUES (%s, %s, NOW())
@@ -435,6 +517,7 @@ TASKS = {
         finalize_scan,
         rebuild_analysis,
         fetch_artist_genres,
+        fetch_outside_genres,
         score_genres,
     )
 }

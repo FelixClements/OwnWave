@@ -47,7 +47,10 @@ labelled songs, matched 66%, and 86% when at least 60% of the vote agreed.
    No name search. Results are cached per release and recording.
 6. **One switch.** The new engine replaces the old one in one release, with no
    side-by-side period. The genre list is proposed from a run on a copy of the
-   database and approved before that release.
+   database and approved before that release. The switch is migration
+   `038_genre_v2_switch` (#141): it adds genre kinds and styles to
+   `station_genres` and moves stored v1 genre ids to the new genres; the code
+   no longer checks whether it has run.
 
 ## Considered options
 
