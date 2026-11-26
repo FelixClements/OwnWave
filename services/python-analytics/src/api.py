@@ -367,7 +367,7 @@ def update_outside_source(req: OutsideSourceUpdate):
                 outside_sources.save_switch(conn, req.source, req.enabled)
             if "key" in req.model_fields_set:
                 outside_sources.save_key(conn, req.source, req.key)
-        except ValueError as exc:  # never echo the key back
+        except outside_sources.BadInput as exc:  # our own text: never the key or another error's
             raise HTTPException(status_code=400, detail=str(exc)) from None
         except RuntimeError:
             raise HTTPException(
@@ -386,7 +386,7 @@ def test_outside_source(req: OutsideSourceTestRequest):
     with _db_conn() as conn:
         try:
             return outside_sources.check_connection(conn, req.source, req.key)
-        except ValueError as exc:
+        except outside_sources.BadInput as exc:  # our own text: never the key or another error's
             raise HTTPException(status_code=400, detail=str(exc)) from None
 
 
