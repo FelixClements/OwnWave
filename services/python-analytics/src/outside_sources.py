@@ -14,7 +14,9 @@ values the genre catalog can translate.
 """
 
 import logging
+import socket
 import urllib.error
+import urllib.parse
 from dataclasses import dataclass
 from functools import lru_cache
 from typing import Dict, List, Optional
@@ -54,7 +56,12 @@ TOP_VALUES = 15
 TOP_UNTRANSLATED = 30
 
 
-class UnknownSource(ValueError):
+class BadInput(ValueError):
+    """A request this module refuses. Its text is written here, never taken
+    from another error or from the key, so the API may show it."""
+
+
+class UnknownSource(BadInput):
     pass
 
 
@@ -156,7 +163,7 @@ def save_key(conn, source: str, key: Optional[str]) -> None:
     """Save (encrypted) or, with None, remove a source's page key. The caller commits."""
     check_source(source)
     if source not in KEY_ENV:
-        raise ValueError(f"{NAMES[source]} needs no key")
+        raise BadInput(f"{NAMES[source]} needs no key")
     _ensure_row(conn, source)
     if key is None:
         conn.execute(
@@ -174,9 +181,9 @@ def save_key(conn, source: str, key: Optional[str]) -> None:
 def clean_key(key: str) -> str:
     key = (key or "").strip()
     if not key:
-        raise ValueError("the key is empty")
+        raise BadInput("the key is empty")
     if len(key) > MAX_KEY_LEN or any(c.isspace() or not c.isprintable() for c in key):
-        raise ValueError("that does not look like a token or API key")
+        raise BadInput("that does not look like a token or API key")
     return key
 
 
@@ -193,16 +200,60 @@ def record_run(conn, source: str, run: dict) -> None:
 
 
 def _scrub(message: str, key: Optional[str]) -> str:
-    return message.replace(key, "…") if key else message
+    if not key:
+        return message
+    for form in {key, urllib.parse.quote(key, safe=""), urllib.parse.quote_plus(key)}:
+        message = message.replace(form, "…")
+    return message
+
+
+# What each source calls its secret, for "refused the ..." messages.
+_SECRET_WORD = {MUSICBRAINZ: "request", DISCOGS: "token", LASTFM: "key"}
+
+
+def _is_timeout(exc: Exception) -> bool:
+    if isinstance(exc, (TimeoutError, socket.timeout)):
+        return True
+    return isinstance(exc, urllib.error.URLError) and isinstance(exc.reason, (TimeoutError, socket.timeout))
+
+
+def _failure_message(source: str, exc: Exception) -> str:
+    """A fixed message per kind of failure. No exception text goes into it:
+    that stays in the log, where the key is scrubbed out."""
+    from http_json import BUSY_CODES
+    from lastfm import RATE_LIMITED, LastfmError
+
+    name = NAMES[source]
+    if isinstance(exc, LastfmError):
+        code = int(exc.code)
+        if exc.bad_key:
+            return f"Last.fm refused the key (error {code})."
+        if code == RATE_LIMITED:
+            return "Last.fm is rate limiting requests; try again in a minute."
+        return f"Last.fm answered with error {code}."
+    if isinstance(exc, urllib.error.HTTPError):
+        code = int(exc.code)
+        if code in (401, 403):
+            return f"{name} refused the {_SECRET_WORD[source]} (HTTP {code})."
+        if code in BUSY_CODES:
+            return f"{name} is busy or rate limiting requests (HTTP {code}); try again in a minute."
+        return f"{name} answered HTTP {code}."
+    if _is_timeout(exc):
+        return f"{name} did not answer in time."
+    if isinstance(exc, (urllib.error.URLError, OSError)):
+        return f"Could not reach {name}."
+    if isinstance(exc, ValueError):  # bad JSON or encoding
+        return f"{name} sent an answer that could not be read."
+    return f"Unexpected error while testing {name}."
 
 
 def check_connection(conn, source: str, key: Optional[str] = None, opener=None) -> dict:
     """One cheap real request with the given key, or else the key in use.
 
-    Returns {"ok", "message"}; the message never holds the key.
+    Returns {"ok", "message"}. The message is one of a fixed set: it never
+    holds the key or an exception's text. Why a test failed goes to the log,
+    with the key scrubbed out.
     """
-    from lastfm import LastfmError
-
     check_source(source)
     name = NAMES[source]
     if key is not None and source in KEY_ENV:
@@ -224,16 +275,9 @@ def check_connection(conn, source: str, key: Optional[str] = None, opener=None) 
             return {"ok": True, "message": "Discogs accepted the token."}
         client.check_key()
         return {"ok": True, "message": "Last.fm accepted the key."}
-    except LastfmError as exc:
-        what = "refused the key" if exc.bad_key else "answered with an error"
-        return {"ok": False, "message": _scrub(f"Last.fm {what}: {exc}", key)}
-    except urllib.error.HTTPError as exc:
-        if source == DISCOGS and exc.code in (401, 403):
-            return {"ok": False, "message": f"Discogs refused the token (HTTP {exc.code})."}
-        return {"ok": False, "message": _scrub(f"{name} answered HTTP {exc.code}.", key)}
-    except Exception as exc:  # network errors, bad JSON
-        log.info("outside sources: %s test failed: %s", name, type(exc).__name__)
-        return {"ok": False, "message": _scrub(f"Could not reach {name}: {exc}", key)}
+    except Exception as exc:  # HTTP and network errors, bad JSON
+        log.warning("outside sources: %s test failed: %s: %s", name, type(exc).__name__, _scrub(str(exc), key))
+        return {"ok": False, "message": _failure_message(source, exc)}
 
 
 # --- Status and stats ------------------------------------------------------------

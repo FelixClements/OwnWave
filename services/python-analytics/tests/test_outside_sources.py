@@ -365,6 +365,69 @@ def test_check_error_messages_never_hold_the_key(conn):
     assert result["ok"] is False and OTHER_KEY not in result["message"]
 
 
+def busy_error(code, body):
+    # A Retry-After longer than MAX_BUSY_WAIT fails at once, without waiting.
+    return urllib.error.HTTPError("u", code, "busy", {"Retry-After": "3600"}, io.BytesIO(json.dumps(body).encode()))
+
+
+# Exception text that must never reach the page: it names the key and looks
+# like an internal detail.
+LEAK = f"internal detail /srv/app.py line 42 api_key={OTHER_KEY}"
+
+
+@pytest.mark.parametrize(
+    "source, answer, message",
+    [
+        ("lastfm", http_error(403, {"error": 10, "message": LEAK}), "Last.fm refused the key (error 10)."),
+        ("lastfm", busy_error(429, {"error": 29, "message": LEAK}), "Last.fm is rate limiting requests; try again in a minute."),
+        ("lastfm", http_error(500, {"error": 8, "message": LEAK}), "Last.fm answered with error 8."),
+        ("lastfm", http_error(401, {"nothing": LEAK}), "Last.fm refused the key (HTTP 401)."),
+        ("discogs", http_error(403, {"message": LEAK}), "Discogs refused the token (HTTP 403)."),
+        ("discogs", http_error(500, {"message": LEAK}), "Discogs answered HTTP 500."),
+        ("lastfm", urllib.error.URLError(TimeoutError(LEAK)), "Last.fm did not answer in time."),
+        ("discogs", TimeoutError(LEAK), "Discogs did not answer in time."),
+        ("lastfm", urllib.error.URLError(LEAK), "Could not reach Last.fm."),
+        ("discogs", ConnectionResetError(LEAK), "Could not reach Discogs."),
+        ("lastfm", json.JSONDecodeError(LEAK, "doc", 0), "Last.fm sent an answer that could not be read."),
+        ("discogs", KeyError(LEAK), "Unexpected error while testing Discogs."),
+    ],
+)
+def test_check_failures_give_a_fixed_message(conn, caplog, source, answer, message):
+    path = "/2.0/" if source == "lastfm" else "/oauth/identity"
+    http = FakeHttp({path: answer})
+    with caplog.at_level("DEBUG"):
+        result = osrc.check_connection(conn, source, OTHER_KEY, opener=http)
+    assert result == {"ok": False, "message": message}
+    assert "internal detail" not in result["message"] and OTHER_KEY not in result["message"]
+    # Why it failed is logged, without the key.
+    assert OTHER_KEY not in caplog.text
+    assert urllib.parse.quote(OTHER_KEY) not in caplog.text
+    assert "test failed" in caplog.text
+
+
+def test_check_busy_answer(conn):
+    http = FakeHttp({"/oauth/identity": busy_error(429, {"message": LEAK})})
+    result = osrc.check_connection(conn, "discogs", OTHER_KEY, opener=http)
+    assert result == {"ok": False, "message": "Discogs is busy or rate limiting requests (HTTP 429); try again in a minute."}
+
+
+def test_api_test_does_not_expose_exception_text(api_db, monkeypatch):
+    real = osrc.make_client
+
+    def failing_client(source, key, opener=None):
+        return real(source, key, opener=FakeHttp({"/oauth/identity": RuntimeError(LEAK)}))
+
+    monkeypatch.setattr(osrc, "make_client", failing_client)
+    result = api.test_outside_source(api.OutsideSourceTestRequest(source="discogs", key=OTHER_KEY))
+    assert result == {"ok": False, "message": "Unexpected error while testing Discogs."}
+
+
+def test_api_test_bad_key_is_a_400_with_our_own_text(api_db):
+    with pytest.raises(HTTPException) as err:
+        api.test_outside_source(api.OutsideSourceTestRequest(source="lastfm", key=f"{OTHER_KEY} extra"))
+    assert err.value.status_code == 400 and err.value.detail == "that does not look like a token or API key"
+
+
 # --- API -------------------------------------------------------------------------------
 
 
