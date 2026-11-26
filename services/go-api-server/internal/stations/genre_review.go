@@ -19,11 +19,10 @@ type GenreReviewSong struct {
 	// Genre is the decided genre; nil for an unsure song.
 	Genre *string `json:"genre"`
 	Style *string `json:"style,omitempty"`
-	// Source is what decided: strong_sources, release, classifier or
-	// unsure; "blend" before the genre v2 switch.
+	// Source is what decided: strong_sources, release, classifier or unsure.
 	Source string `json:"source"`
-	// Confidence is the release share, the classifier's vote share or (before
-	// the switch) the blended score; nil when unsure.
+	// Confidence is the release share or the classifier's vote share; nil
+	// when unsure.
 	Confidence   *float32 `json:"confidence,omitempty"`
 	UnsureReason *string  `json:"unsure_reason,omitempty"`
 	ReviewReason *string  `json:"review_reason,omitempty"`
@@ -51,11 +50,7 @@ type GenreReviewGroup struct {
 
 // GenreReviewPage is one page of the review queue, paged by groups.
 type GenreReviewPage struct {
-	// Switched: the genre v2 engine decides genres. Before the switch the
-	// queue lists the v1 blend's least sure songs, and corrections take no
-	// release scope and no style.
-	Switched bool               `json:"switched"`
-	Groups   []GenreReviewGroup `json:"groups"`
+	Groups []GenreReviewGroup `json:"groups"`
 	// Total counts groups and Songs songs on the whole queue.
 	Total  int `json:"total"`
 	Songs  int `json:"songs"`
@@ -63,9 +58,9 @@ type GenreReviewPage struct {
 	Limit  int `json:"limit"`
 }
 
-// reviewQueueV2 is the queue of genre engine v2 (the genre_review_queue view,
+// reviewQueue is the queue of genre engine v2 (the genre_review_queue view,
 // ADR 0008 decision 4), with the song's suggestion from its "why".
-const reviewQueueV2 = `
+const reviewQueue = `
 	SELECT q.track_id, q.release_id, q.genre, q.style, q.source, q.confidence,
 	       q.unsure_reason, q.review_reason, q.hidden_by, q.priority, q.position,
 	       COALESCE(d.why #>> '{classifier,genre}', d.why #>> '{release,genre}') AS suggestion
@@ -73,48 +68,14 @@ const reviewQueueV2 = `
 	JOIN track_genre_decisions d ON d.track_id = q.track_id
 `
 
-// reviewQueueV1 stands in before the switch: the v1 blend's songs that are
-// not corrected, most often hidden on a genre station first, then the
-// lowest scores. It has the view's columns.
-const reviewQueueV1 = `
-	WITH hides AS (
-		SELECT hs.song_id AS song, COUNT(DISTINCT h.user_id)::int AS users
-		FROM station_hidden_tracks h
-		JOIN songs hs ON hs.track_id = h.track_id
-		JOIN stations st ON st.id = h.station_id AND st.auto_genre IS NOT NULL
-		GROUP BY 1
-	), items AS (
-		SELECT t.id AS track_id, t.release_id, g.genre, NULL::text AS style, 'blend'::text AS source,
-		       g.score AS confidence, NULL::text AS unsure_reason, NULL::text AS review_reason,
-		       COALESCE(h.users, 0) AS hidden_by,
-		       CASE WHEN h.users > 0 THEN 1 ELSE 4 END AS priority
-		FROM tracks t
-		JOIN songs s ON s.track_id = t.id AND s.best_copy
-		JOIN track_station_genres g ON g.track_id = t.id AND g.is_primary AND NOT g.corrected
-		LEFT JOIN hides h ON h.song = t.id
-		WHERE NOT EXISTS (SELECT 1 FROM genre_corrections c WHERE c.track_id = t.id)
-	)
-	SELECT i.*, ROW_NUMBER() OVER (ORDER BY priority, hidden_by DESC, confidence, track_id) AS position,
-	       NULL::text AS suggestion
-	FROM items i
-`
-
 // GenreReview returns one page of the review queue: limit groups from
 // offset. A release's songs stay together, placed by its best-ranked song.
 // Songs decided by a correction are never on it.
 func (s *Service) GenreReview(ctx context.Context, offset, limit int) (GenreReviewPage, error) {
-	switched, err := s.genreV2Switched(ctx)
-	if err != nil {
-		return GenreReviewPage{}, err
-	}
-	queue := reviewQueueV1
-	if switched {
-		queue = reviewQueueV2
-	}
-	page := GenreReviewPage{Switched: switched, Groups: []GenreReviewGroup{}, Offset: offset, Limit: limit}
+	page := GenreReviewPage{Groups: []GenreReviewGroup{}, Offset: offset, Limit: limit}
 	rows, err := s.pool.Query(ctx, `
 		WITH q AS (
-			SELECT q.*, COALESCE(q.release_id, q.track_id) AS grp FROM (`+queue+`) q
+			SELECT q.*, COALESCE(q.release_id, q.track_id) AS grp FROM (`+reviewQueue+`) q
 		), groups AS (
 			SELECT grp, MIN(position) AS pos, MIN(priority) AS priority FROM q GROUP BY grp
 		), page AS (
@@ -165,7 +126,7 @@ func (s *Service) GenreReview(ctx context.Context, offset, limit int) (GenreRevi
 	if len(page.Groups) == 0 && offset > 0 {
 		// Past the end: still report the totals.
 		err = s.pool.QueryRow(ctx, `
-			SELECT COUNT(DISTINCT COALESCE(release_id, track_id))::int, COUNT(*)::int FROM (`+queue+`) q
+			SELECT COUNT(DISTINCT COALESCE(release_id, track_id))::int, COUNT(*)::int FROM (`+reviewQueue+`) q
 		`).Scan(&page.Total, &page.Songs)
 	}
 	return page, err
@@ -195,7 +156,7 @@ type GenreDecision struct {
 }
 
 // GenreDecision returns a song's decision. ErrNotFound when the engine has
-// not decided it (always before the genre v2 switch).
+// not decided it.
 func (s *Service) GenreDecision(ctx context.Context, trackID string) (GenreDecision, error) {
 	var d GenreDecision
 	err := s.pool.QueryRow(ctx, `
@@ -226,24 +187,23 @@ type GenreCatalogEntry struct {
 	// Station: a genre (or style) that may get a station.
 	Station bool `json:"station"`
 	Songs   int  `json:"songs"`
-	// Styles of a genre; always empty before the genre v2 switch.
+	// Styles of a genre.
 	Styles []GenreCatalogEntry `json:"styles,omitempty"`
 }
 
 // GenreOverview counts the library's songs by genre and style, the unsure
 // and flagged songs, and carries the classifier's test score.
 type GenreOverview struct {
-	Switched bool `json:"switched"`
 	// Songs counts best copies; Decided those with a genre.
 	Songs   int `json:"songs"`
 	Decided int `json:"decided"`
-	// Unsure, Flagged, WithStyle and ToReview are nil before the switch.
+	// Unsure, Flagged (for review), WithStyle and ToReview count best copies.
 	Unsure    *int `json:"unsure,omitempty"`
 	Flagged   *int `json:"flagged,omitempty"`
 	WithStyle *int `json:"with_style,omitempty"`
 	ToReview  *int `json:"to_review,omitempty"`
 	// BySource counts decided-by (correction, strong_sources, release,
-	// classifier, unsure); nil before the switch.
+	// classifier, unsure).
 	BySource map[string]int      `json:"by_source,omitempty"`
 	Genres   []GenreCatalogEntry `json:"genres"`
 	// TestScore is the classifier's leave-one-out score on the trusted labels
@@ -254,32 +214,21 @@ type GenreOverview struct {
 
 // GenreOverview returns the admin Genres page's Overview.
 func (s *Service) GenreOverview(ctx context.Context) (GenreOverview, error) {
-	switched, err := s.genreV2Switched(ctx)
-	if err != nil {
-		return GenreOverview{}, err
-	}
-	o := GenreOverview{Switched: switched, Genres: []GenreCatalogEntry{}}
+	o := GenreOverview{Genres: []GenreCatalogEntry{}}
 	if err := s.pool.QueryRow(ctx, `SELECT COUNT(*)::int FROM songs WHERE best_copy`).Scan(&o.Songs); err != nil {
 		return o, err
 	}
 
 	// Songs per catalog id (genre or style).
 	counts := map[string]int{}
-	countSQL := `
-		SELECT g.genre, COUNT(*)::int FROM track_station_genres g
-		JOIN songs s ON s.track_id = g.track_id AND s.best_copy
-		WHERE g.is_primary GROUP BY 1`
-	if switched {
-		countSQL = `
-			SELECT id, COUNT(*)::int FROM (
-				SELECT d.genre AS id FROM track_genre_decisions d
-				JOIN songs s ON s.track_id = d.track_id AND s.best_copy WHERE d.genre IS NOT NULL
-				UNION ALL
-				SELECT d.style FROM track_genre_decisions d
-				JOIN songs s ON s.track_id = d.track_id AND s.best_copy WHERE d.style IS NOT NULL
-			) x GROUP BY 1`
-	}
-	rows, err := s.pool.Query(ctx, countSQL)
+	rows, err := s.pool.Query(ctx, `
+		SELECT id, COUNT(*)::int FROM (
+			SELECT d.genre AS id FROM track_genre_decisions d
+			JOIN songs s ON s.track_id = d.track_id AND s.best_copy WHERE d.genre IS NOT NULL
+			UNION ALL
+			SELECT d.style FROM track_genre_decisions d
+			JOIN songs s ON s.track_id = d.track_id AND s.best_copy WHERE d.style IS NOT NULL
+		) x GROUP BY 1`)
 	if err != nil {
 		return o, err
 	}
@@ -297,14 +246,10 @@ func (s *Service) GenreOverview(ctx context.Context) (GenreOverview, error) {
 		return o, err
 	}
 
-	catalogSQL := `SELECT id, name, is_station, NULL::text FROM station_genres ORDER BY position, id`
-	if switched {
-		catalogSQL = `
-			SELECT c.id, c.name, c.is_station, c.parent_id FROM station_genres c
-			LEFT JOIN station_genres p ON p.id = c.parent_id
-			ORDER BY COALESCE(p.position, c.position), c.parent_id NULLS FIRST, c.position, c.id`
-	}
-	rows, err = s.pool.Query(ctx, catalogSQL)
+	rows, err = s.pool.Query(ctx, `
+		SELECT c.id, c.name, c.is_station, c.parent_id FROM station_genres c
+		LEFT JOIN station_genres p ON p.id = c.parent_id
+		ORDER BY COALESCE(p.position, c.position), c.parent_id NULLS FIRST, c.position, c.id`)
 	if err != nil {
 		return o, err
 	}
@@ -332,42 +277,40 @@ func (s *Service) GenreOverview(ctx context.Context) (GenreOverview, error) {
 		o.Decided += g.Songs
 	}
 
-	if switched {
-		var unsure, flagged, withStyle, toReview int
-		o.BySource = map[string]int{}
-		rows, err := s.pool.Query(ctx, `
-			SELECT d.source, COUNT(*)::int,
-			       COUNT(*) FILTER (WHERE d.review_reason IS NOT NULL)::int,
-			       COUNT(*) FILTER (WHERE d.style IS NOT NULL)::int
-			FROM track_genre_decisions d
-			JOIN songs s ON s.track_id = d.track_id AND s.best_copy
-			GROUP BY 1`)
-		if err != nil {
-			return o, err
-		}
-		for rows.Next() {
-			var source string
-			var n, f, st int
-			if err := rows.Scan(&source, &n, &f, &st); err != nil {
-				rows.Close()
-				return o, err
-			}
-			o.BySource[source] = n
-			flagged += f
-			withStyle += st
-			if source == "unsure" {
-				unsure = n
-			}
-		}
-		rows.Close()
-		if err := rows.Err(); err != nil {
-			return o, err
-		}
-		if err := s.pool.QueryRow(ctx, `SELECT COUNT(*)::int FROM genre_review_queue`).Scan(&toReview); err != nil {
-			return o, err
-		}
-		o.Unsure, o.Flagged, o.WithStyle, o.ToReview = &unsure, &flagged, &withStyle, &toReview
+	var unsure, flagged, withStyle, toReview int
+	o.BySource = map[string]int{}
+	rows, err = s.pool.Query(ctx, `
+		SELECT d.source, COUNT(*)::int,
+		       COUNT(*) FILTER (WHERE d.review_reason IS NOT NULL)::int,
+		       COUNT(*) FILTER (WHERE d.style IS NOT NULL)::int
+		FROM track_genre_decisions d
+		JOIN songs s ON s.track_id = d.track_id AND s.best_copy
+		GROUP BY 1`)
+	if err != nil {
+		return o, err
 	}
+	for rows.Next() {
+		var source string
+		var n, f, st int
+		if err := rows.Scan(&source, &n, &f, &st); err != nil {
+			rows.Close()
+			return o, err
+		}
+		o.BySource[source] = n
+		flagged += f
+		withStyle += st
+		if source == "unsure" {
+			unsure = n
+		}
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return o, err
+	}
+	if err := s.pool.QueryRow(ctx, `SELECT COUNT(*)::int FROM genre_review_queue`).Scan(&toReview); err != nil {
+		return o, err
+	}
+	o.Unsure, o.Flagged, o.WithStyle, o.ToReview = &unsure, &flagged, &withStyle, &toReview
 
 	var at time.Time
 	err = s.pool.QueryRow(ctx, `SELECT value, updated_at FROM app_state WHERE key = 'genre_test_score'`).Scan(&o.TestScore, &at)

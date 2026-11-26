@@ -17,20 +17,16 @@ broad value (a broad tag such as "Pop/Rock") names no genre and only fences
 the song to a set of genres. Which sources are strong or weak is the
 decision engine's business, not this module's.
 
-Run this file to regenerate the switch migration (the catalog plus the
-old -> new genre id mapping) from the TOML file:
-
-    python services/python-analytics/src/genre_catalog.py            # database/genre-v2/
-    python services/python-analytics/src/genre_catalog.py --check    # fail if stale
-    python services/python-analytics/src/genre_catalog.py --number 034
-        # at the release: write database/migrations/034_genre_v2_switch.*.sql
+switch_migration() generated the genre v2 switch, migration
+038_genre_v2_switch (the catalog plus the old -> new genre id mapping), at
+the release. That migration is frozen; the analytics service writes later
+catalog edits to station_genres at startup (sync_catalog). Renaming or
+removing an id that stations or corrections store needs its own migration.
 """
 
 from __future__ import annotations
 
-import argparse
 import re
-import sys
 import tomllib
 import unicodedata
 from dataclasses import dataclass
@@ -39,10 +35,6 @@ from pathlib import Path
 from typing import Dict, FrozenSet, Iterable, List, Optional, Sequence, Tuple
 
 CATALOG_FILE = Path(__file__).with_name("genre_catalog.toml")
-REPO_ROOT = Path(__file__).resolve().parents[3]
-PENDING_DIR = REPO_ROOT / "database" / "genre-v2"
-MIGRATIONS_DIR = REPO_ROOT / "database" / "migrations"
-MIGRATION_NAME = "genre_v2_switch"
 
 # Same rule as genreIDPattern in services/go-api-server/internal/stations/station.go.
 ID_PATTERN = re.compile(r"^[a-z][a-z0-9_]{0,39}$")
@@ -427,8 +419,9 @@ DROP TABLE genre_id_map;
 def switch_migration(cat: Catalog) -> Tuple[str, str]:
     """(up, down) SQL of the genre v2 switch for this catalog."""
     header = f"""-- GENERATED from services/python-analytics/src/genre_catalog.toml
--- (catalog version {cat.version}) by genre_catalog.py. Do not edit by hand:
--- edit the TOML file and run `python services/python-analytics/src/genre_catalog.py`.
+-- (catalog version {cat.version}) by genre_catalog.py at the genre v2 release.
+-- Frozen: do not edit or regenerate it. Later catalog edits reach
+-- station_genres through genre_catalog.sync_catalog at startup.
 --
 -- Genre engine v2 switch (docs/adr/0008-genre-engine-v2.md): the catalog
 -- holds genres and styles, and stored v1 genre ids move to the new genres.
@@ -473,36 +466,3 @@ ALTER TABLE station_genres
 """
     )
     return up, down
-
-
-def migration_paths(directory: Path, number: Optional[str] = None) -> Tuple[Path, Path]:
-    stem = f"{number}_{MIGRATION_NAME}" if number else MIGRATION_NAME
-    return directory / f"{stem}.up.sql", directory / f"{stem}.down.sql"
-
-
-def main(argv: Optional[Sequence[str]] = None) -> int:
-    parser = argparse.ArgumentParser(description="Regenerate the genre v2 switch migration from genre_catalog.toml.")
-    parser.add_argument("--check", action="store_true", help="fail if the files in database/genre-v2 are stale")
-    parser.add_argument("--number", help="write database/migrations/<number>_genre_v2_switch.*.sql instead (at the release)")
-    args = parser.parse_args(argv)
-
-    up, down = switch_migration(load())
-    if args.number:
-        paths = migration_paths(MIGRATIONS_DIR, args.number)
-    else:
-        paths = migration_paths(PENDING_DIR)
-    if args.check:
-        stale = [str(p) for p, sql in zip(paths, (up, down)) if not p.exists() or p.read_text() != sql]
-        if stale:
-            print("stale, regenerate with genre_catalog.py: " + ", ".join(stale), file=sys.stderr)
-            return 1
-        return 0
-    for path, sql in zip(paths, (up, down)):
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(sql)
-        print(f"wrote {path}")
-    return 0
-
-
-if __name__ == "__main__":
-    sys.exit(main())

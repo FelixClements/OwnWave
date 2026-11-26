@@ -60,9 +60,8 @@ def test_resolve_correction(cat):
     assert ge.resolve_correction("hard_techno", cat) == ("techno", "hard_techno")
     assert ge.resolve_correction("gone", cat) is None
     assert ge.resolve_correction(None, cat) is None
-    # A database before the switch still stores v1 ids.
-    old, new = next(iter(cat.id_map().items()))
-    assert ge.resolve_correction(old, cat) == (new, None)
+    # v1 ids are moved by the switch migration, not read.
+    assert ge.resolve_correction("dance", cat) is None
 
 
 # --- strong sources --------------------------------------------------------------

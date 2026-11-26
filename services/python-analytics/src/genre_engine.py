@@ -31,8 +31,8 @@ One genre and at most one style per song; there are no secondary genres.
 Unsure songs get no genre and join no genre station.
 
 The engine is pure (decide()); the database layer around it loads the
-sources, writes track_genre_decisions (migration 036) and, once the genre
-v2 switch migration is in, track_station_genres. Run it in bulk against a
+sources, writes track_genre_decisions (migration 036) and
+track_station_genres. Run it in bulk against a
 copy of the database with `python src/main.py genre-engine` (read only by
 default; see run_report()).
 """
@@ -225,17 +225,13 @@ def fence_of(views: Dict[str, SourceView]) -> Optional[FrozenSet[str]]:
 
 
 def resolve_correction(value: Optional[str], cat: gc.Catalog) -> Optional[Tuple[str, Optional[str]]]:
-    """(genre, style) of a stored correction: a genre id, a style id, or a v1
-    genre id not moved yet (a database before the switch). None if unknown."""
+    """(genre, style) of a stored correction: a genre id or a style id. None if unknown."""
     if not value:
         return None
     if value in cat.genres:
         return value, None
     if value in cat.styles:
         return cat.styles[value].genre, value
-    moved = cat.id_map().get(value)
-    if moved is not None:
-        return moved, None
     return None
 
 
@@ -620,35 +616,6 @@ _TRACKS_SQL = """
 """
 
 
-def _has_column(conn, table: str, column: str) -> bool:
-    return conn.execute(
-        """
-        SELECT EXISTS (SELECT 1 FROM information_schema.columns
-                       WHERE table_schema = current_schema() AND table_name = %s AND column_name = %s)
-        """,
-        (table, column),
-    ).fetchone()[0]
-
-
-def switched(conn) -> bool:
-    """True once the genre v2 switch migration is in (station_genres has kinds).
-
-    Until then the live app keeps the v1 engine (ADR 0008 decision 6: one
-    switch); this engine only runs from the CLI, on a copy of the database.
-    """
-    return _has_column(conn, "station_genres", "kind")
-
-
-def sync_catalog(conn) -> None:
-    """Write the catalog the running engine uses to station_genres. The caller commits."""
-    if switched(conn):
-        gc.sync_catalog(conn)
-    else:
-        import genre_scoring
-
-        genre_scoring.sync_catalog(conn)
-
-
 def _embedding(value) -> Optional[np.ndarray]:
     """A vector column read in binary: an array (pgvector adapters) or raw bytes."""
     if value is None:
@@ -703,10 +670,9 @@ def load_corrections(conn, cat: gc.Catalog) -> Corrections:
     hides a wider one."""
     from musicbrainz import name_key
 
-    release_col = "c.release_id" if _has_column(conn, "genre_corrections", "release_id") else "NULL::uuid"
     rows = conn.execute(
-        f"""
-        SELECT s.song_id, c.artist, {release_col}, c.genre
+        """
+        SELECT s.song_id, c.artist, c.release_id, c.genre
         FROM genre_corrections c LEFT JOIN songs s ON s.track_id = c.track_id
         ORDER BY c.created_at, c.id
         """
@@ -828,8 +794,8 @@ def write_station_genres(conn, result: EngineResult) -> None:
 
 
 def score_library(conn, model_labels: Optional[Sequence[str]] = None) -> dict:
-    """The genre v2 rescore (after the switch): catalog, decisions, station
-    genres and test score. The caller commits."""
+    """The genre rescore: catalog, decisions, station genres and test score.
+    The caller commits."""
     cat = gc.catalog()
     gc.sync_catalog(conn, cat)
     result = run(conn, model_labels, cat)

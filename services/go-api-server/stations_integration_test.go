@@ -44,8 +44,8 @@ func newStationsFixture(t *testing.T) *stationsFixture {
 		require.NoError(t, pool.QueryRow(ctx, sql, args...).Scan(&v))
 		return v
 	}
-	f.exec(`INSERT INTO station_genres (id, name, position, is_station) VALUES
-		('techno', 'Techno', 1, true), ('house', 'House', 2, true), ('other', 'Other', 99, false)`)
+	// The catalog is the genre v2 catalog from migration 038 (techno, house,
+	// other and their styles, among others).
 	return f
 }
 
@@ -102,7 +102,7 @@ func TestStationsCRUDAndPermissions(t *testing.T) {
 		"no name":          `{"playlist_ids":["` + rock + `"]}`,
 		"no playlists":     `{"name":"x"}`,
 		"unknown playlist": `{"name":"x","playlist_ids":["6f1b8c6e-6a43-4e4b-9b1e-2b3f8d1a0c55"]}`,
-		"unknown genre":    `{"name":"x","playlist_ids":["` + rock + `"],"genres":["polka"]}`,
+		"unknown genre":    `{"name":"x","playlist_ids":["` + rock + `"],"genres":["nope"]}`,
 		"non-station":      `{"name":"x","playlist_ids":["` + rock + `"],"genres":["other"]}`,
 	}
 	for name, body := range bad {
@@ -193,7 +193,7 @@ func TestStationSuggestionsAndGenreCounts(t *testing.T) {
 	require.Equal(t, 66, counts.Tracks)
 	require.Equal(t, []stations.GenreCount{
 		{Genre: stations.Genre{ID: "techno", Name: "Techno"}, Tracks: 56},
-		{Genre: stations.Genre{ID: "house", Name: "House"}, Tracks: 10},
+		{Genre: stations.Genre{ID: "house", Name: "House & Disco"}, Tracks: 10},
 	}, counts.Genres)
 	counts = decode[stations.PoolGenres](t, f.call(f.h.ListStationGenres, admin, http.MethodGet,
 		"/stations/genres?all_playlists=true", "", ""))
@@ -307,7 +307,7 @@ func TestBrowseTreeAndVoiceSearch(t *testing.T) {
 	_, recent := browse("recent")
 	require.Equal(t, []string{"station:" + mixed.ID, "station:" + techno.ID}, ids(recent))
 
-	for _, bad := range []string{"nope", "genre:polka", "playlist:not-a-uuid", "playlist:6f1b8c6e-6a43-4e4b-9b1e-2b3f8d1a0c55"} {
+	for _, bad := range []string{"nope", "genre:nope", "playlist:not-a-uuid", "playlist:6f1b8c6e-6a43-4e4b-9b1e-2b3f8d1a0c55"} {
 		code, _ := browse(bad)
 		require.Equal(t, http.StatusNotFound, code, bad)
 	}
@@ -327,9 +327,10 @@ func TestBrowseTreeAndVoiceSearch(t *testing.T) {
 	// Name match beats genre match; "Everything" plays the Techno Bunker playlist.
 	require.Equal(t, []string{"station:Bunker Techno", "playlist:Everything"}, search("techno radio"))
 	require.Equal(t, []string{"genre:Party", "playlist:Everything"}, search("play house music"))
-	require.Equal(t, []string{"genre:Party", "playlist:Everything"}, search("house party"))
+	// "house party" is no genre name ("House & Disco"): only the playlist name matches.
+	require.Equal(t, []string{"playlist:Everything", "playlist:Party"}, search("house party"))
 	require.Equal(t, []string{"artist:Party", "artist:Everything"}, search("amelie lens"), "the station with the larger share first")
-	require.Empty(t, search("polka"))
+	require.Empty(t, search("nope"))
 }
 
 func TestCleanQuery(t *testing.T) {

@@ -910,9 +910,8 @@ export interface paths {
         };
         /**
          * Songs per genre and style, unsure and flagged songs, and the classifier's test score
-         * @description Counts best copies (one per song). Before the genre v2 switch
-         *     (`switched: false`) the counts come from the v1 blend, there are no
-         *     styles, and unsure, flagged and the test score are null.
+         * @description Counts best copies (one per song). The test score is null until the
+         *     first rescore.
          */
         get: operations["getGenreOverview"];
         put?: never;
@@ -936,8 +935,7 @@ export interface paths {
          *     songs, then classifier-versus-tag disagreements, then the least sure
          *     songs on stations. A release's songs stay together, placed by its
          *     best-ranked song; a song without a release is a group of its own.
-         *     Songs decided by a correction are never on it. Before the genre v2
-         *     switch it lists the v1 blend's songs, hidden first, then lowest score.
+         *     Songs decided by a correction are never on it.
          */
         get: operations["getGenreReview"];
         put?: never;
@@ -1004,7 +1002,6 @@ export interface paths {
          *     then release, then artist) wins, and it becomes a trusted label for
          *     the classifier. Saving twice replaces it. Queues genre scoring; if
          *     queueing fails the correction is saved, and saving again retries.
-         *     Release corrections and styles need the genre v2 switch (400 before).
          */
         post: operations["saveGenreCorrection"];
         delete?: never;
@@ -1663,9 +1660,9 @@ export interface components {
             /** @description The decided genre; null for an unsure song */
             genre: string | null;
             style?: string;
-            /** @description strong_sources, release, classifier or unsure; blend before the genre v2 switch */
+            /** @description strong_sources, release, classifier or unsure */
             source: string;
-            /** @description Release share */
+            /** @description Release share or classifier vote share */
             confidence?: number;
             unsure_reason?: string;
             review_reason?: string;
@@ -1686,8 +1683,6 @@ export interface components {
             songs: components["schemas"]["GenreReviewSong"][];
         };
         GenreReviewPage: {
-            /** @description The genre v2 engine decides genres (release corrections and styles available) */
-            switched: boolean;
             groups: components["schemas"]["GenreReviewGroup"][];
             /** @description Groups on the whole queue */
             total: number;
@@ -1754,9 +1749,8 @@ export interface components {
             songs: number;
             styles?: components["schemas"]["GenreCatalogEntry"][];
         };
-        /** @description unsure, flagged, with_style, to_review and by_source are left out before the genre v2 switch; test_score until the first rescore. */
+        /** @description test_score is left out until the first rescore. */
         GenreOverview: {
-            switched: boolean;
             /** @description Songs (best copies) in the library */
             songs: number;
             /** @description Songs with a genre */

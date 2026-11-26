@@ -816,9 +816,8 @@ paths:
       tags: [admin]
       summary: Songs per genre and style, unsure and flagged songs, and the classifier's test score
       description: |
-        Counts best copies (one per song). Before the genre v2 switch
-        (`switched: false`) the counts come from the v1 blend, there are no
-        styles, and unsure, flagged and the test score are null.
+        Counts best copies (one per song). The test score is null until the
+        first rescore.
       responses:
         "200":
           description: Overview
@@ -833,8 +832,7 @@ paths:
         songs, then classifier-versus-tag disagreements, then the least sure
         songs on stations. A release's songs stay together, placed by its
         best-ranked song; a song without a release is a group of its own.
-        Songs decided by a correction are never on it. Before the genre v2
-        switch it lists the v1 blend's songs, hidden first, then lowest score.
+        Songs decided by a correction are never on it.
       parameters:
         - { name: offset, in: query, description: Groups to skip, schema: { type: integer, minimum: 0, default: 0 } }
         - { name: limit, in: query, description: Groups per page, schema: { type: integer, minimum: 1, maximum: 100, default: 20 } }
@@ -890,7 +888,6 @@ paths:
         then release, then artist) wins, and it becomes a trusted label for
         the classifier. Saving twice replaces it. Queues genre scoring; if
         queueing fails the correction is saved, and saving again retries.
-        Release corrections and styles need the genre v2 switch (400 before).
       requestBody:
         required: true
         content:
@@ -1536,8 +1533,8 @@ components:
         artist: { type: string }
         genre: { type: [string, "null"], description: The decided genre; null for an unsure song }
         style: { type: string }
-        source: { type: string, description: "strong_sources, release, classifier or unsure; blend before the genre v2 switch" }
-        confidence: { type: number, description: Release share, classifier vote share or (before the switch) the blended score }
+        source: { type: string, description: "strong_sources, release, classifier or unsure" }
+        confidence: { type: number, description: Release share or classifier vote share }
         unsure_reason: { type: string }
         review_reason: { type: string }
         suggestion: { type: string, description: "A genre the engine leans to but did not pick: the classifier's, else the release lean's" }
@@ -1555,9 +1552,8 @@ components:
         songs: { type: array, items: { $ref: "#/components/schemas/GenreReviewSong" } }
     GenreReviewPage:
       type: object
-      required: [switched, groups, total, songs, offset, limit]
+      required: [groups, total, songs, offset, limit]
       properties:
-        switched: { type: boolean, description: The genre v2 engine decides genres (release corrections and styles available) }
         groups: { type: array, items: { $ref: "#/components/schemas/GenreReviewGroup" } }
         total: { type: integer, description: Groups on the whole queue }
         songs: { type: integer, description: Songs on the whole queue }
@@ -1617,10 +1613,9 @@ components:
         styles: { type: array, items: { $ref: "#/components/schemas/GenreCatalogEntry" } }
     GenreOverview:
       type: object
-      required: [switched, songs, decided, genres]
-      description: unsure, flagged, with_style, to_review and by_source are left out before the genre v2 switch; test_score until the first rescore.
+      required: [songs, decided, genres]
+      description: test_score is left out until the first rescore.
       properties:
-        switched: { type: boolean }
         songs: { type: integer, description: Songs (best copies) in the library }
         decided: { type: integer, description: Songs with a genre }
         unsure: { type: integer }

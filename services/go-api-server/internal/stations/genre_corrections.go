@@ -47,29 +47,13 @@ type GenreCorrectionRequest struct {
 	Style     string `json:"style"`
 }
 
-// genreV2Switched reports whether the genre v2 switch migration is in:
-// station_genres then has kinds (genres and styles). It is the check the
-// analytics worker uses too (genre_engine.switched); until then the v1
-// blend scores genres and only song and artist corrections exist for it.
-func (s *Service) genreV2Switched(ctx context.Context) (bool, error) {
-	var ok bool
-	err := s.pool.QueryRow(ctx, `
-		SELECT EXISTS (SELECT 1 FROM information_schema.columns
-		               WHERE table_schema = current_schema()
-		                 AND table_name = 'station_genres' AND column_name = 'kind')
-	`).Scan(&ok)
-	return ok, err
-}
-
 // correctionValue checks a correction's genre and style and returns the id
 // to store: the style's when one is named, else the genre's.
-func (s *Service) correctionValue(ctx context.Context, switched bool, genre, style string) (string, error) {
+func (s *Service) correctionValue(ctx context.Context, genre, style string) (string, error) {
 	var known bool
-	query := `SELECT EXISTS (SELECT 1 FROM station_genres WHERE is_station AND id = $1)`
-	if switched {
-		query = `SELECT EXISTS (SELECT 1 FROM station_genres WHERE kind = 'genre' AND id = $1)`
-	}
-	if err := s.pool.QueryRow(ctx, query, genre).Scan(&known); err != nil {
+	if err := s.pool.QueryRow(ctx, `
+		SELECT EXISTS (SELECT 1 FROM station_genres WHERE kind = 'genre' AND id = $1)
+	`, genre).Scan(&known); err != nil {
 		return "", err
 	}
 	if !known {
@@ -77,9 +61,6 @@ func (s *Service) correctionValue(ctx context.Context, switched bool, genre, sty
 	}
 	if style == "" {
 		return genre, nil
-	}
-	if !switched {
-		return "", fmt.Errorf("%w: styles come with genre engine v2", ErrInvalid)
 	}
 	if err := s.pool.QueryRow(ctx, `
 		SELECT EXISTS (SELECT 1 FROM station_genres WHERE kind = 'style' AND id = $1 AND parent_id = $2)
@@ -105,11 +86,7 @@ func (s *Service) SaveGenreCorrection(ctx context.Context, req GenreCorrectionRe
 	if targets != 1 {
 		return "", fmt.Errorf("%w: correct exactly one of a song, a release or an artist", ErrInvalid)
 	}
-	switched, err := s.genreV2Switched(ctx)
-	if err != nil {
-		return "", err
-	}
-	value, err := s.correctionValue(ctx, switched, req.Genre, req.Style)
+	value, err := s.correctionValue(ctx, req.Genre, req.Style)
 	if err != nil {
 		return "", err
 	}
@@ -123,10 +100,6 @@ func (s *Service) SaveGenreCorrection(ctx context.Context, req GenreCorrectionRe
 			RETURNING id::text
 		`, artist, value).Scan(&id)
 	case req.ReleaseID != "":
-		// The v1 blend has no release scope; it would silently skip one.
-		if !switched {
-			return "", fmt.Errorf("%w: release corrections come with genre engine v2", ErrInvalid)
-		}
 		if _, err := uuid.Parse(req.ReleaseID); err != nil {
 			return "", fmt.Errorf("%w: release_id must be a valid id", ErrInvalid)
 		}
@@ -173,17 +146,8 @@ func (s *Service) DeleteGenreCorrection(ctx context.Context, id string) error {
 // GenreCorrections lists the corrections, newest first. A non-empty search
 // keeps those whose song, release, artist or genre (id or name) contains it.
 func (s *Service) GenreCorrections(ctx context.Context, search string) ([]GenreCorrection, error) {
-	switched, err := s.genreV2Switched(ctx)
-	if err != nil {
-		return nil, err
-	}
-	// After the switch a correction may hold a style id; report its genre
-	// and the style apart.
-	genre, style := `c.genre`, `NULL::text`
-	if switched {
-		genre = `COALESCE(sg.parent_id, c.genre)`
-		style = `CASE WHEN sg.kind = 'style' THEN c.genre END`
-	}
+	// A correction may hold a style id; report its genre and the style apart.
+	genre, style := `COALESCE(sg.parent_id, c.genre)`, `CASE WHEN sg.kind = 'style' THEN c.genre END`
 	rows, err := s.pool.Query(ctx, `
 		SELECT c.id::text,
 		       CASE WHEN c.track_id IS NOT NULL THEN 'song' WHEN c.release_id IS NOT NULL THEN 'release' ELSE 'artist' END,

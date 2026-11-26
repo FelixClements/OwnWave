@@ -32,7 +32,7 @@ def test_genre_scoring_records_its_run_and_notifies_the_api(db_url, monkeypatch,
         conn.execute("INSERT INTO tracks (path, title, genre_tag) VALUES ('/m/a.flac', 'a', 'Techno')")
         conn.commit()
     with _listen(db_url) as listener:
-        assert tasks.score_genres() == {"tracks": 1, "scored": 1}
+        assert tasks.score_genres() == {"tracks": 1, "scored": 1, "unsure": 0}
         assert _payloads(listener) == ["genres_scored"]
     with psycopg.connect(db_url) as conn:
         value = conn.execute("SELECT value FROM app_state WHERE key = 'genres_scored'").fetchone()[0]
